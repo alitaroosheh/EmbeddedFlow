@@ -6,7 +6,8 @@ import {
     generatePageSource,
     generateRootHeader,
     generateRootSource,
-    generateLvConf
+    generateLvConf,
+    generateDisplayHeader
 } from "./pageGen";
 
 export interface CodeGenResult {
@@ -29,6 +30,8 @@ export function generateCode(
 ): CodeGenResult {
     const dir = outputDir ?? path.join(path.dirname(embfPath), "ui_output");
     const files = new Map<string, string>();
+
+    files.set(path.join(dir, "ui_display.h"), generateDisplayHeader(project));
 
     // Per-page files
     for (const page of project.pages) {

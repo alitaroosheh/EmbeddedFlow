@@ -1,4 +1,5 @@
 import type { EmbfProject, Page } from "../types/embf";
+import { getEffectiveDisplaySize } from "../embfParser";
 import { screenVar, screenInitFn, headerGuard, widgetVar } from "./naming";
 import { emitComponent } from "./widgetGen";
 import { collectPageEvents } from "./eventGen";
@@ -118,6 +119,34 @@ export function generatePageSource(project: EmbfProject, page: Page): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Display resolution (matches EmbeddedFlow preview)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Defines horizontal/vertical resolution after applying `display.orientation` to JSON width/height. */
+export function generateDisplayHeader(project: EmbfProject): string {
+    const { width: hor, height: ver } = getEffectiveDisplaySize(project);
+    const { width: jsonW, height: jsonH, orientation } = project.display;
+
+    return [
+        AUTOGEN_BANNER,
+        `#ifndef UI_DISPLAY_H`,
+        `#define UI_DISPLAY_H`,
+        ``,
+        `/**`,
+        ` * Author JSON: width=${jsonW}, height=${jsonH}, orientation=${orientation}`,
+        ` * Use EMBF_DISPLAY_* when creating the LVGL display (same logical size as the VS Code preview).`,
+        ` */`,
+        `#define EMBF_DISPLAY_JSON_WIDTH  (${jsonW}U)`,
+        `#define EMBF_DISPLAY_JSON_HEIGHT (${jsonH}U)`,
+        `#define EMBF_DISPLAY_HOR_RES     (${hor}U)`,
+        `#define EMBF_DISPLAY_VER_RES     (${ver}U)`,
+        ``,
+        `#endif /* UI_DISPLAY_H */`,
+        ``
+    ].join("\n");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Root files
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -135,6 +164,7 @@ export function generateRootHeader(project: EmbfProject): string {
         `extern "C" {`,
         `#endif`,
         ``,
+        `#include "ui_display.h"`,
         `#include "lvgl/lvgl.h"`,
         ``,
         ...includes,

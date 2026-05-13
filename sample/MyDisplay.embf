@@ -1,0 +1,42 @@
+{
+  "version": "1.0",
+  "project": {
+    "name": "MyDisplay",
+    "lvglVersion": "9.5.0",
+    "description": ""
+  },
+  "display": {
+    "width": 800,
+    "height": 480,
+    "bitDepth": 16,
+    "colorFormat": "RGB565",
+    "orientation": "landscape",
+    "direction": "ltr",
+    "dpi": 100
+  },
+  "theme": {
+    "dark": false
+  },
+  "pages": [
+    {
+      "id": "page_main",
+      "name": "Main",
+      "backgroundColor": "#ffffff",
+      "components": [
+        {
+          "id": "lbl_hello",
+          "type": "label",
+          "x": 10,
+          "y": 10,
+          "width": 600,
+          "height": 30,
+          "text": "Hello, sirabi koja miri EmbeddedFlow!",
+          "styles": {
+            "fontSize": 16,
+            "textColor": "#000000"
+          }
+        }
+      ]
+    }
+  ]
+}

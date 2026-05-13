@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
 import { EmbfProject, LvglVersion } from "./types/embf";
-import { EmbfParseError, getEffectiveDisplaySize, resolveWasmVersion } from "./embfParser";
+import { EmbfParseError, getEffectiveDisplaySize } from "./embfParser";
 
 // Messages sent from extension host → webview
 export type HostToWebviewMessage =
@@ -81,10 +81,11 @@ export class EmbfPreviewPanel {
 
     sendProject(project: EmbfProject): void {
         const { width, height } = getEffectiveDisplaySize(project);
-        const wasmVersion = resolveWasmVersion(project.project.lvglVersion);
 
-        const wasmJsUri = this._webviewUri("wasm", `lvgl_runtime_${wasmVersion}.js`).toString();
-        const wasmBinUri = this._webviewUri("wasm", `lvgl_runtime_${wasmVersion}.wasm`).toString();
+        // Always use the custom embf_runtime (supports LVGL 9.5.0).
+        // When multi-version WASM builds are available, switch here.
+        const wasmJsUri  = this._webviewUri("wasm", "embf_runtime.js").toString();
+        const wasmBinUri = this._webviewUri("wasm", "embf_runtime.wasm").toString();
 
         const msg: HostToWebviewMessage = {
             type: "load",
@@ -131,13 +132,14 @@ export class EmbfPreviewPanel {
         const webviewJsUri = this._webviewUri("webview.js");
         const nonce = getNonce();
 
-        // CSP: allow scripts with nonce, allow wasm-eval for Emscripten
+        // CSP: nonce for inline scripts, cspSource for extension-hosted scripts/wasm
         const csp = [
             `default-src 'none'`,
-            `script-src 'nonce-${nonce}' 'wasm-unsafe-eval'`,
+            `script-src 'nonce-${nonce}' 'wasm-unsafe-eval' ${this._panel.webview.cspSource}`,
             `style-src 'unsafe-inline'`,
             `img-src data: ${this._panel.webview.cspSource}`,
-            `connect-src ${this._panel.webview.cspSource}`
+            `connect-src ${this._panel.webview.cspSource}`,
+            `worker-src blob:`
         ].join("; ");
 
         return /* html */ `<!DOCTYPE html>

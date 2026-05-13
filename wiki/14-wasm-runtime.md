@@ -20,9 +20,10 @@ Path B (custom `embf_runtime`) is the target — a clean WASM built with our own
 - [x] `wasm-src/embf_runtime.c` — C source
 - [x] `wasm-src/lv_conf.h` — LVGL configuration
 - [x] `wasm-src/Makefile` — builds with emsdk at `D:\Works\emsdk`
-- [ ] `make lvgl_clone` step: clone LVGL v9.5.0 source into `wasm-src/lvgl/`
-- [ ] `make` produces `media/wasm/embf_runtime.js` + `embf_runtime.wasm`
-- [ ] Makefile supports multiple LVGL versions via `LVGL_VERSION=9.5.0` env var
+- [x] LVGL v9.5.0 source cloned into `wasm-src/lvgl/`
+- [x] `build.ps1` produces `media/wasm/embf_runtime.js` (11 KB) + `embf_runtime.wasm` (370 KB)
+- [x] `lv_conf.h` tuned for Emscripten (ARGB8888, clib malloc, all widgets enabled)
+- [ ] `build.ps1` supports `LVGL_VERSION` parameter for multiple version builds
 - [ ] CI / GitHub Actions workflow for automated WASM builds
 - [ ] Pre-built WASM committed to repo so users don't need emsdk locally
 

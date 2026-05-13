@@ -1,0 +1,238 @@
+{
+  "version": "1.0",
+  "project": {
+    "name": "EmbeddedFlow Demo",
+    "lvglVersion": "9.5.0",
+    "description": "A demo project to test the preview"
+  },
+  "display": {
+    "width": 320,
+    "height": 240,
+    "bitDepth": 32,
+    "colorFormat": "ARGB8888",
+    "orientation": "landscape",
+    "direction": "ltr",
+    "dpi": 100
+  },
+  "theme": {
+    "dark": false,
+    "primaryColor": "#0078d4",
+    "secondaryColor": "#005a9e"
+  },
+  "pages": [
+    {
+      "id": "page_main",
+      "name": "Main",
+      "backgroundColor": "#f0f0f0",
+      "components": [
+        {
+          "id": "lbl_title",
+          "type": "label",
+          "x": 10,
+          "y": 8,
+          "width": 200,
+          "height": 28,
+          "text": "EmbeddedFlow Demo",
+          "styles": {
+            "fontSize": 20,
+            "textColor": "#0078d4"
+          }
+        },
+        {
+          "id": "btn_ok",
+          "type": "button",
+          "x": 10,
+          "y": 44,
+          "width": 100,
+          "height": 36,
+          "label": "Click Me"
+        },
+        {
+          "id": "sw_dark",
+          "type": "switch",
+          "x": 130,
+          "y": 50,
+          "width": 60,
+          "height": 28,
+          "checked": false
+        },
+        {
+          "id": "lbl_sw",
+          "type": "label",
+          "x": 196,
+          "y": 56,
+          "width": 80,
+          "height": 20,
+          "text": "Dark mode",
+          "styles": { "fontSize": 12 }
+        },
+        {
+          "id": "bar_progress",
+          "type": "bar",
+          "x": 10,
+          "y": 96,
+          "width": 200,
+          "height": 16,
+          "min": 0,
+          "max": 100,
+          "value": 65
+        },
+        {
+          "id": "lbl_progress",
+          "type": "label",
+          "x": 216,
+          "y": 92,
+          "width": 60,
+          "height": 20,
+          "text": "65%",
+          "styles": { "fontSize": 12 }
+        },
+        {
+          "id": "slider_val",
+          "type": "slider",
+          "x": 10,
+          "y": 124,
+          "width": 200,
+          "height": 20,
+          "min": 0,
+          "max": 100,
+          "value": 40
+        },
+        {
+          "id": "arc_gauge",
+          "type": "arc",
+          "x": 230,
+          "y": 110,
+          "width": 80,
+          "height": 80,
+          "min": 0,
+          "max": 100,
+          "value": 72,
+          "startAngle": 135,
+          "endAngle": 45,
+          "mode": "normal"
+        },
+        {
+          "id": "chk_enable",
+          "type": "checkbox",
+          "x": 10,
+          "y": 158,
+          "width": 140,
+          "height": 24,
+          "text": "Enable feature",
+          "checked": true
+        },
+        {
+          "id": "spinner_loading",
+          "type": "spinner",
+          "x": 170,
+          "y": 152,
+          "width": 50,
+          "height": 50,
+          "speed": 1000,
+          "arcLength": 60
+        },
+        {
+          "id": "lbl_footer",
+          "type": "label",
+          "x": 10,
+          "y": 210,
+          "width": 300,
+          "height": 20,
+          "text": "EmbeddedFlow — LVGL 9.5.0 preview",
+          "styles": {
+            "fontSize": 11,
+            "textColor": "#888888"
+          }
+        }
+      ]
+    },
+    {
+      "id": "page_settings",
+      "name": "Settings",
+      "backgroundColor": "#ffffff",
+      "components": [
+        {
+          "id": "lbl_settings_title",
+          "type": "label",
+          "x": 10,
+          "y": 10,
+          "width": 200,
+          "height": 28,
+          "text": "Settings",
+          "styles": { "fontSize": 20, "textColor": "#333333" }
+        },
+        {
+          "id": "lbl_brightness",
+          "type": "label",
+          "x": 10,
+          "y": 50,
+          "width": 100,
+          "height": 20,
+          "text": "Brightness",
+          "styles": { "fontSize": 13 }
+        },
+        {
+          "id": "slider_brightness",
+          "type": "slider",
+          "x": 10,
+          "y": 74,
+          "width": 200,
+          "height": 20,
+          "min": 0,
+          "max": 255,
+          "value": 200
+        },
+        {
+          "id": "lbl_volume",
+          "type": "label",
+          "x": 10,
+          "y": 108,
+          "width": 100,
+          "height": 20,
+          "text": "Volume",
+          "styles": { "fontSize": 13 }
+        },
+        {
+          "id": "slider_volume",
+          "type": "slider",
+          "x": 10,
+          "y": 132,
+          "width": 200,
+          "height": 20,
+          "min": 0,
+          "max": 100,
+          "value": 75
+        },
+        {
+          "id": "sw_wifi",
+          "type": "switch",
+          "x": 10,
+          "y": 170,
+          "width": 60,
+          "height": 28,
+          "checked": true
+        },
+        {
+          "id": "lbl_wifi",
+          "type": "label",
+          "x": 78,
+          "y": 176,
+          "width": 60,
+          "height": 20,
+          "text": "Wi-Fi",
+          "styles": { "fontSize": 13 }
+        },
+        {
+          "id": "btn_back",
+          "type": "button",
+          "x": 10,
+          "y": 200,
+          "width": 90,
+          "height": 32,
+          "label": "< Back"
+        }
+      ]
+    }
+  ]
+}

@@ -104,171 +104,70 @@ async function handleLoad(payload) {
 
 // ── WASM loading ───────────────────────────────────────────────────────────────
 /**
- * Dynamically loads the Emscripten JS glue + wasm binary.
- * The lvgl_runtime_v*.js files expose a factory function as `Module` or as
- * the default export. We detect and call whichever form is present.
+ * Dynamically loads the Emscripten JS glue + WASM binary.
+ *
+ * The script tag approach is used because VSCode webview CSP requires scripts
+ * to be served from the extension's resource origin (cspSource). Dynamic script
+ * injection works because `script-src` includes `${cspSource}` in the CSP header.
  */
 async function loadWasm(jsUri, wasmBinUri, width, height, darkTheme) {
-    return new Promise((resolve, reject) => {
-        // The Emscripten bundle expects `locateFile` to find the .wasm binary.
-        // We inject a global config before the script runs.
-        window.__embf_wasm_bin_uri = wasmBinUri;
-        window.__embf_resolve = resolve;
-        window.__embf_reject = reject;
-        window.__embf_width = width;
-        window.__embf_height = height;
-        window.__embf_dark = darkTheme ? 1 : 0;
+    // Remove any previously loaded WASM factory so we don't reuse stale state
+    delete window.createEmbfRuntime;
 
-        // Remove previously injected script if any
-        const old = document.getElementById("__embf_wasm_script");
-        if (old) old.remove();
+    await injectScript(jsUri);
 
-        const script = document.createElement("script");
-        script.id = "__embf_wasm_script";
-        script.src = jsUri;
-        script.onload = () => {
-            // After the Emscripten glue loads, call the factory
-            _initWasmModule().catch(reject);
-        };
-        script.onerror = () => reject(new Error(`Failed to load script: ${jsUri}`));
-        document.head.appendChild(script);
-    });
-}
-
-async function _initWasmModule() {
-    const width = window.__embf_width;
-    const height = window.__embf_height;
-    const dark = window.__embf_dark;
-
-    // EEZ LVGL runtime bundles export their factory via window.EEZStudio or as
-    // a global `createEezWasmRuntime` / `Module` style factory.
-    // We need to find the factory function. Emscripten modules typically set
-    // `Module` or export a named factory. EEZ uses a self-executing pattern.
-    // The bundle assigns itself to `self.EEZStudio` / `self.WasmFlowRuntime`.
-    // We'll try common names.
-    let factory = window.createEmbfRuntime
-        ?? window.EEZStudio?.wasmFactory
-        ?? window.Module;
-
+    const factory = window.createEmbfRuntime;
     if (typeof factory !== "function") {
-        // Some Emscripten output directly calls the factory and assigns to Module
-        factory = window.Module;
+        throw new Error(
+            `WASM factory 'createEmbfRuntime' not found after loading:\n${jsUri}\n` +
+            `Ensure embf_runtime.js was built correctly (see wasm-src/build.ps1).`
+        );
     }
-
-    if (typeof factory !== "function") {
-        throw new Error("WASM module factory not found. The bundle may use a different export name.");
-    }
-
-    const wasmBinUri = window.__embf_wasm_bin_uri;
 
     const module = await factory({
         locateFile(file) {
+            // Redirect the .wasm file lookup to the webview URI we already have
             if (file.endsWith(".wasm")) {
                 return wasmBinUri;
             }
             return file;
-        },
-        onRuntimeInitialized() {
-            // called by Emscripten when WASM is ready
         }
     });
 
     WasmModule = module;
 
-    // Initialize LVGL via the EEZ _init or our own embf_init
-    if (typeof WasmModule._embf_init === "function") {
-        // Custom EmbeddedFlow WASM
-        WasmModule._embf_init(width, height, dark);
-    } else if (typeof WasmModule._init === "function") {
-        // EEZ LVGL WASM — call with minimal assets
-        const minimalAssets = buildMinimalAssets();
-        const ptr = WasmModule._malloc(minimalAssets.length);
-        WasmModule.HEAPU8.set(minimalAssets, ptr);
-        WasmModule._init(
-            0,          // wasmModuleId
-            0,          // debugger filter (none)
-            ptr,
-            minimalAssets.length,
-            width,
-            height,
-            dark,
-            -(new Date().getTimezoneOffset() / 60) * 100,
-            0           // screensLifetimeSupport
-        );
-        WasmModule._free(ptr);
-    } else {
-        throw new Error("WASM does not export _embf_init or _init — unknown runtime format.");
+    // Call embf_init to start LVGL
+    if (typeof WasmModule._embf_init !== "function") {
+        throw new Error("_embf_init not exported — check EXPORTED_FUNCTIONS in build.ps1");
     }
 
+    WasmModule._embf_init(width, height, darkTheme ? 1 : 0);
     wasmReady = true;
-    window.__embf_resolve?.();
 }
 
 /**
- * Builds a minimal valid EEZ assets binary that satisfies the WASM _init call
- * but contains no pages, styles, fonts, or bitmaps.
- *
- * Format (uncompressed):
- *   packRegions(5):
- *     region 0 (document):  minimal document struct (0 pages, 0 actions, 0 vars)
- *     regions 1-4 (styles/fonts/bitmaps/colors): empty
- *
- * The compressed blob header:  [uint32 LE uncompressed size] + [lz4 compressed]
- * Since we can't run LZ4 here easily, we write the blob UNCOMPRESSED with a
- * sentinel header that the C side interprets as "already decompressed".
- * The EEZ C runtime reads the first 4 bytes as uncompressed size, then LZ4-
- * decompresses. We exploit that LZ4_decompress_safe with src == dst is valid
- * when uncompressed size == compressed size (i.e. we fake it as a stored block).
- *
- * Simpler: pass size=0 assets and let the WASM handle an empty project gracefully.
+ * Inject a <script src="uri"> and wait for it to load or error.
+ * Re-uses the same element ID so repeated loads replace the previous one.
  */
-function buildMinimalAssets() {
-    // 5 regions, each with offset pointing past the header (5×4 = 20 bytes)
-    // All regions are empty, so all offsets == 20
-    const numRegions = 5;
-    const headerSize = numRegions * 4;
+function injectScript(uri) {
+    return new Promise((resolve, reject) => {
+        const existing = document.getElementById("__embf_wasm_script");
+        if (existing) existing.remove();
 
-    // Minimal document region: a struct with 3 uint32 fields all 0
-    // (numPages, numActions, numGlobalVariables)
-    const docSize = 3 * 4; // 12 bytes
-    const uncompressedSize = headerSize + docSize;
-
-    const buf = new Uint8Array(4 + uncompressedSize);
-    const view = new DataView(buf.buffer);
-
-    // First 4 bytes: uncompressed size (written as LE uint32)
-    view.setUint32(0, uncompressedSize, true);
-
-    // Offsets for 5 regions (all point to right after the header)
-    // Region 0 (document) starts at headerSize (= 20)
-    view.setUint32(4 + 0 * 4, headerSize, true);
-    // Regions 1-4 all empty, point to end of document region
-    const endOfDoc = headerSize + docSize;
-    view.setUint32(4 + 1 * 4, endOfDoc, true);
-    view.setUint32(4 + 2 * 4, endOfDoc, true);
-    view.setUint32(4 + 3 * 4, endOfDoc, true);
-    view.setUint32(4 + 4 * 4, endOfDoc, true);
-
-    // Document region: 3 uint32 zeros (0 pages, 0 actions, 0 global vars)
-    // (already zeroed by Uint8Array constructor)
-
-    return buf;
+        const script = document.createElement("script");
+        script.id = "__embf_wasm_script";
+        script.src = uri;
+        script.onload  = () => resolve();
+        script.onerror = () => reject(new Error(`Failed to load script: ${uri}`));
+        document.head.appendChild(script);
+    });
 }
+
 
 // ── UI Builder ─────────────────────────────────────────────────────────────────
-/**
- * Build LVGL objects from the .embf project JSON by calling raw lv_* functions
- * exported from the WASM module.
- */
 function buildUiFromProject(project, pageIndex) {
     if (!wasmReady || !WasmModule) return;
-
-    // If our custom WASM, use the embf_* API
-    if (typeof WasmModule._embf_clear_screen === "function") {
-        buildWithEmbfApi(project, pageIndex);
-    } else {
-        buildWithLvglApi(project, pageIndex);
-    }
+    buildWithEmbfApi(project, pageIndex);
 }
 
 function buildWithEmbfApi(project, pageIndex) {
@@ -378,117 +277,6 @@ function applyStylesEmbf(wasm, obj, styles) {
     }
 }
 
-/**
- * Fallback: use raw lv_* WASM exports (available in the EEZ LVGL WASM).
- * After _init with minimal assets, lv_scr_act() returns the default screen.
- */
-function buildWithLvglApi(project, pageIndex) {
-    const wasm = WasmModule;
-    const page = project.pages[pageIndex];
-    if (!page) return;
-
-    // Clean up previous objects by deleting children of current screen
-    if (typeof wasm._lv_obj_clean === "function") {
-        const screen = wasm._lv_scr_act?.() ?? 0;
-        if (screen) wasm._lv_obj_clean(screen);
-    }
-
-    const screen = wasm._lv_scr_act?.() ?? 0;
-
-    for (const comp of page.components) {
-        buildComponentLvgl(wasm, comp, screen);
-    }
-}
-
-function buildComponentLvgl(wasm, comp, parent) {
-    if (comp.hidden || !parent) return;
-    let obj = 0;
-
-    const allocStr = (s) => wasm.stringToNewUTF8 ? wasm.stringToNewUTF8(s) : 0;
-
-    switch (comp.type) {
-        case "label":
-            if (typeof wasm._lv_label_create !== "function") break;
-            obj = wasm._lv_label_create(parent);
-            if (obj && comp.text) {
-                const ptr = allocStr(comp.text);
-                if (ptr && typeof wasm._lv_label_set_text === "function") {
-                    wasm._lv_label_set_text(obj, ptr);
-                    wasm._free(ptr);
-                }
-            }
-            break;
-        case "button":
-            if (typeof wasm._lv_button_create === "function") {
-                obj = wasm._lv_button_create(parent);
-            } else if (typeof wasm._lv_btn_create === "function") {
-                obj = wasm._lv_btn_create(parent);
-            }
-            if (obj && comp.label) {
-                let lbl = 0;
-                if (typeof wasm._lv_label_create === "function") {
-                    lbl = wasm._lv_label_create(obj);
-                    const ptr = allocStr(comp.label);
-                    if (ptr && typeof wasm._lv_label_set_text === "function") {
-                        wasm._lv_label_set_text(lbl, ptr);
-                        wasm._free(ptr);
-                    }
-                }
-            }
-            break;
-        case "slider":
-            if (typeof wasm._lv_slider_create !== "function") break;
-            obj = wasm._lv_slider_create(parent);
-            if (obj) {
-                wasm._lv_slider_set_range?.(obj, comp.min, comp.max);
-                wasm._lv_slider_set_value?.(obj, comp.value, 0); // LV_ANIM_OFF = 0
-            }
-            break;
-        case "bar":
-            if (typeof wasm._lv_bar_create !== "function") break;
-            obj = wasm._lv_bar_create(parent);
-            if (obj) {
-                wasm._lv_bar_set_range?.(obj, comp.min, comp.max);
-                wasm._lv_bar_set_value?.(obj, comp.value, 0);
-            }
-            break;
-        case "switch":
-            if (typeof wasm._lv_switch_create !== "function") break;
-            obj = wasm._lv_switch_create(parent);
-            if (obj && comp.checked) {
-                wasm._lv_obj_add_state?.(obj, 0x0001); // LV_STATE_CHECKED
-            }
-            break;
-        case "spinner":
-            if (typeof wasm._lv_spinner_create !== "function") break;
-            obj = wasm._lv_spinner_create(parent, comp.speed ?? 1000, comp.arcLength ?? 60);
-            break;
-        case "arc":
-            if (typeof wasm._lv_arc_create !== "function") break;
-            obj = wasm._lv_arc_create(parent);
-            if (obj) {
-                wasm._lv_arc_set_range?.(obj, comp.min, comp.max);
-                wasm._lv_arc_set_value?.(obj, comp.value);
-            }
-            break;
-        case "container":
-        case "panel":
-            if (typeof wasm._lv_obj_create !== "function") break;
-            obj = wasm._lv_obj_create(parent);
-            for (const child of comp.children ?? []) {
-                buildComponentLvgl(wasm, child, obj);
-            }
-            break;
-        default:
-            log("warn", `Unsupported component for LVGL API: ${comp.type}`);
-            return;
-    }
-
-    if (obj && parent) {
-        wasm._lv_obj_set_pos?.(obj, comp.x, comp.y);
-        wasm._lv_obj_set_size?.(obj, comp.width, comp.height);
-    }
-}
 
 // ── Main render loop ───────────────────────────────────────────────────────────
 function startLoop() {

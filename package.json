@@ -9,7 +9,13 @@
   },
   "categories": ["Visualization", "Other"],
   "keywords": ["lvgl", "embedded", "ui", "preview", "wasm"],
-  "activationEvents": ["onLanguage:embf", "workspaceContains:**/*.embf"],
+  "activationEvents": [
+    "onLanguage:embf",
+    "workspaceContains:**/*.embf",
+    "onCommand:embeddedflow.openPreview",
+    "onCommand:embeddedflow.newProject",
+    "onCommand:embeddedflow.generateCode"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "languages": [

@@ -47,8 +47,6 @@ function componentIdsOnPage(page: Page): Map<string, Component> {
     return m;
 }
 
-const VALID_TRIGGERS = new Set(["clicked", "long_pressed", "value_changed"]);
-
 function firstTargetSpan(text: string, target: string): { start: number; end: number } | undefined {
     const spans = findJsonStringFieldSpans(text, "target", target);
     return spans[0];
@@ -143,17 +141,6 @@ function lintEvents(
 ): EmbfSemanticIssue[] {
     const issues: EmbfSemanticIssue[] = [];
     for (const evtDef of comp.events ?? []) {
-        if (!VALID_TRIGGERS.has(evtDef.trigger)) {
-            issues.push({
-                message: `Component "${comp.id}": unknown event trigger "${evtDef.trigger}"`
-            });
-        }
-        if (!Array.isArray(evtDef.actions)) {
-            issues.push({
-                message: `Component "${comp.id}": events[].actions must be an array`
-            });
-            continue;
-        }
         for (const action of evtDef.actions) {
             if (!action || typeof action !== "object" || !("type" in action)) {
                 issues.push({ message: `Component "${comp.id}": invalid action entry` });

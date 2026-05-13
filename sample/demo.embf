@@ -6,8 +6,8 @@
     "description": "A demo project to test the preview"
   },
   "display": {
-    "width": 800,
-    "height": 600,
+    "width": 600,
+    "height": 320,
     "bitDepth": 32,
     "colorFormat": "ARGB8888",
     "orientation": "landscape",
@@ -157,7 +157,7 @@
           "y": 210,
           "width": 300,
           "height": 20,
-          "text": "EmbeddedFlow — LVGL 9.5.0 preview",
+          "text": "EmbeddedFlow - LVGL 9.5.0 preview",
           "styles": {
             "fontSize": 11,
             "textColor": "#888888"

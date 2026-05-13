@@ -4,6 +4,7 @@ import * as fs from "fs";
 import { EmbfPreviewPanel } from "./previewPanel";
 import { EmbfParseError, parseEmbf, watchEmbf } from "./embfParser";
 import { EmbfProject } from "./types/embf";
+import { generateCode, writeGeneratedFiles } from "./codeGen/index";
 
 // Map from .embf file path → file watcher
 const watchers = new Map<string, fs.FSWatcher>();
@@ -27,6 +28,18 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(
         vscode.commands.registerCommand("embeddedflow.newProject", async () => {
             await createNewProject(context.extensionUri);
+        })
+    );
+
+    // ── Command: Generate C Code ──────────────────────────────────────────────
+    context.subscriptions.push(
+        vscode.commands.registerCommand("embeddedflow.generateCode", async (uri?: vscode.Uri) => {
+            const filePath = resolveFilePath(uri);
+            if (!filePath) {
+                vscode.window.showErrorMessage("EmbeddedFlow: No .embf file is active.");
+                return;
+            }
+            await runCodeGen(filePath);
         })
     );
 
@@ -100,6 +113,54 @@ function openPreview(filePath: string, extensionUri: vscode.Uri): void {
             }
         });
         watchers.set(filePath, watcher);
+    }
+}
+
+async function runCodeGen(filePath: string): Promise<void> {
+    let project: EmbfProject;
+    try {
+        project = parseEmbf(filePath);
+    } catch (e: any) {
+        vscode.window.showErrorMessage(`EmbeddedFlow: ${e.message}`);
+        return;
+    }
+
+    const result = generateCode(project, filePath);
+    const outputDir = result.outputDir;
+
+    // Confirm if output directory already exists and has files
+    if (fs.existsSync(outputDir) && fs.readdirSync(outputDir).some(f => f.endsWith(".c") || f.endsWith(".h"))) {
+        const choice = await vscode.window.showWarningMessage(
+            `Output folder already exists:\n${outputDir}\n\nOverwrite generated files?`,
+            { modal: true },
+            "Overwrite",
+            "Cancel"
+        );
+        if (choice !== "Overwrite") return;
+    }
+
+    let written: string[];
+    try {
+        written = writeGeneratedFiles(result);
+    } catch (e: any) {
+        vscode.window.showErrorMessage(`EmbeddedFlow: Failed to write files: ${e.message}`);
+        return;
+    }
+
+    // Show success notification with a button to open the output folder
+    const rel = path.relative(path.dirname(filePath), outputDir);
+    const action = await vscode.window.showInformationMessage(
+        `Generated ${written.length} files → ${rel}/`,
+        "Open Folder",
+        "Show ui.c"
+    );
+
+    if (action === "Open Folder") {
+        await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(outputDir));
+    } else if (action === "Show ui.c") {
+        const uiC = path.join(outputDir, "ui.c");
+        const doc = await vscode.workspace.openTextDocument(uiC);
+        await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
     }
 }
 

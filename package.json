@@ -28,6 +28,11 @@
       {
         "command": "embeddedflow.newProject",
         "title": "EmbeddedFlow: New Project"
+      },
+      {
+        "command": "embeddedflow.generateCode",
+        "title": "EmbeddedFlow: Generate C Code",
+        "icon": "$(file-code)"
       }
     ],
     "menus": {
@@ -36,6 +41,23 @@
           "command": "embeddedflow.openPreview",
           "when": "resourceExtname == .embf",
           "group": "navigation"
+        },
+        {
+          "command": "embeddedflow.generateCode",
+          "when": "resourceExtname == .embf",
+          "group": "navigation"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "embeddedflow.openPreview",
+          "when": "resourceExtname == .embf",
+          "group": "embeddedflow"
+        },
+        {
+          "command": "embeddedflow.generateCode",
+          "when": "resourceExtname == .embf",
+          "group": "embeddedflow"
         }
       ]
     },

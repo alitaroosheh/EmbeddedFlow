@@ -30,7 +30,7 @@
           "y": 10,
           "width": 600,
           "height": 30,
-          "text": "Hello, sirabi koja miri EmbeddedFlow!",
+          "text": "Hello, EmbeddedFlow!",
           "styles": {
             "fontSize": 16,
             "textColor": "#000000"

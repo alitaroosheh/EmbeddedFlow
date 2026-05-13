@@ -39,7 +39,7 @@ Write-Host "Found $($lvglCFiles.Count) LVGL source files"
 
 # Exported functions
 $exports = @(
-    "_embf_init","_embf_main_loop","_embf_get_buffer","_embf_clear_screen",
+    "_embf_init","_embf_set_theme","_embf_main_loop","_embf_get_buffer","_embf_clear_screen",
     "_embf_create_screen","_embf_load_screen",
     "_embf_create_label","_embf_label_set_text",
     "_embf_create_button","_embf_button_set_label",

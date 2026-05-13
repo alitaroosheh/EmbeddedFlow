@@ -207,6 +207,14 @@ function buildUiFromProject(project, pageIndex) {
 
 function buildWithEmbfApi(project, pageIndex) {
     const wasm = WasmModule;
+
+    // Re-apply theme on every rebuild so dark/color changes take effect immediately
+    const theme         = project.theme ?? {};
+    const dark          = theme.dark ? 1 : 0;
+    const primaryArgb   = theme.primaryColor   ? parseColor(theme.primaryColor)   : 0;
+    const secondaryArgb = theme.secondaryColor ? parseColor(theme.secondaryColor) : 0;
+    wasm._embf_set_theme(dark, primaryArgb, secondaryArgb);
+
     wasm._embf_clear_screen();
     const page = project.pages[pageIndex];
     if (!page) return;

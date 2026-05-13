@@ -487,6 +487,26 @@ void embf_obj_set_style_text_align(lv_obj_t *obj, int align)
     lv_obj_set_style_text_align(obj, a, LV_PART_MAIN);
 }
 
+/**
+ * Re-apply the LVGL default theme without reinitialising the display.
+ * Call this whenever dark-mode or palette colors change at runtime.
+ */
+EMSCRIPTEN_KEEPALIVE
+void embf_set_theme(int dark_theme, uint32_t primary_argb, uint32_t secondary_argb)
+{
+    if (!g_display) return;
+
+    lv_color_t primary   = primary_argb   ? unpack_color(primary_argb)   : lv_palette_main(LV_PALETTE_BLUE);
+    lv_color_t secondary = secondary_argb ? unpack_color(secondary_argb) : lv_palette_main(LV_PALETTE_CYAN);
+
+    lv_theme_t *theme = lv_theme_default_init(
+        g_display, primary, secondary, dark_theme ? true : false, LV_FONT_DEFAULT);
+    lv_display_set_theme(g_display, theme);
+
+    /* Propagate the style change to every existing object */
+    lv_obj_report_style_change(NULL);
+}
+
 /* ── Event queue ────────────────────────────────────────────────────────── */
 
 #define EMBF_EVENT_QUEUE_SIZE 32

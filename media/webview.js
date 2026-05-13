@@ -45,6 +45,9 @@ let currentProject = null;
 /** @type {string | null} last loaded wasm js uri */
 let loadedWasmJsUri = null;
 
+/** `null` = use JSON `project.theme.dark`; otherwise preview-only dark override (e.g. from `set_theme` action). */
+let previewDarkOverride = null;
+
 /**
  * Maps WASM object pointer (number) → component ID string.
  * Rebuilt every time a screen is constructed.
@@ -86,9 +89,20 @@ window.addEventListener("message", event => {
 
 vscode.postMessage({ type: "ready" });
 
+function applyEmbfThemeFromProject(project) {
+    if (!wasmReady || !WasmModule) return;
+    const theme = project.theme ?? {};
+    const dark =
+        previewDarkOverride !== null ? (previewDarkOverride ? 1 : 0) : (theme.dark ? 1 : 0);
+    const primaryArgb   = theme.primaryColor   ? parseColor(theme.primaryColor)   : 0;
+    const secondaryArgb = theme.secondaryColor ? parseColor(theme.secondaryColor) : 0;
+    WasmModule._embf_set_theme(dark, primaryArgb, secondaryArgb);
+}
+
 // ── Load handler ───────────────────────────────────────────────────────────────
 async function handleLoad(payload) {
     currentProject = payload.project;
+    previewDarkOverride = null;
     displayWidth = payload.displayWidth;
     displayHeight = payload.displayHeight;
 
@@ -211,12 +225,7 @@ function buildUiFromProject(project, pageIndex) {
 function buildWithEmbfApi(project, pageIndex) {
     const wasm = WasmModule;
 
-    // Re-apply theme on every rebuild so dark/color changes take effect immediately
-    const theme         = project.theme ?? {};
-    const dark          = theme.dark ? 1 : 0;
-    const primaryArgb   = theme.primaryColor   ? parseColor(theme.primaryColor)   : 0;
-    const secondaryArgb = theme.secondaryColor ? parseColor(theme.secondaryColor) : 0;
-    wasm._embf_set_theme(dark, primaryArgb, secondaryArgb);
+    applyEmbfThemeFromProject(project);
 
     wasm._embf_clear_screen();
     const page = project.pages[pageIndex];
@@ -586,6 +595,15 @@ function dispatchAction(action, eventValue, currentPage) {
             } else {
                 wasm._embf_obj_set_hidden?.(ptr, 0);
             }
+            break;
+        }
+        case "set_theme": {
+            if ("dark" in action) {
+                previewDarkOverride = action.dark;
+            } else {
+                previewDarkOverride = !!eventValue;
+            }
+            applyEmbfThemeFromProject(currentProject);
             break;
         }
     }

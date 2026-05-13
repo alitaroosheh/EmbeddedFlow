@@ -540,8 +540,21 @@ static void generic_event_cb(lv_event_t *e)
 
     int32_t value = 0;
     if (code == LV_EVENT_VALUE_CHANGED) {
-        /* Best-effort: try each value-bearing getter; LVGL returns 0 on mismatch */
-        value = (int32_t)lv_slider_get_value(obj);
+        if (lv_obj_check_type(obj, &lv_slider_class)) {
+            value = (int32_t)lv_slider_get_value(obj);
+        }
+        else if (lv_obj_check_type(obj, &lv_bar_class)) {
+            value = (int32_t)lv_bar_get_value(obj);
+        }
+        else if (lv_obj_check_type(obj, &lv_arc_class)) {
+            value = (int32_t)lv_arc_get_value(obj);
+        }
+        else if (lv_obj_check_type(obj, &lv_switch_class)) {
+            value = lv_obj_has_state(obj, LV_STATE_CHECKED) ? 1 : 0;
+        }
+        else if (lv_obj_check_type(obj, &lv_checkbox_class)) {
+            value = lv_obj_has_state(obj, LV_STATE_CHECKED) ? 1 : 0;
+        }
     }
 
     int next = (g_evt_tail + 1) % EMBF_EVENT_QUEUE_SIZE;

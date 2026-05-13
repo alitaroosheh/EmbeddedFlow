@@ -106,7 +106,9 @@ export type Action =
     | { type: "set_text";    target: string; text: string }          // update label text
     | { type: "set_value";   target: string; value: number }         // slider/bar/arc
     | { type: "set_checked"; target: string; checked: boolean }      // switch/checkbox
-    | { type: "set_hidden";  target: string; hidden: boolean };      // show/hide widget
+    | { type: "set_hidden";  target: string; hidden: boolean }       // show/hide widget
+    /** Re-apply LVGL default theme. Preview: optional `dark` toggles runtime override; omit `dark` on `value_changed` to mirror switch/checkbox checked state. Firmware: re-init theme on display. */
+    | { type: "set_theme"; dark?: boolean };
 
 export interface EventDef {
     trigger: EventTrigger;

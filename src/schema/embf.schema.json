@@ -176,6 +176,18 @@
             "target": { "type": "string", "description": "Component ID" },
             "hidden": { "type": "boolean" }
           }
+        },
+        {
+          "type": "object",
+          "required": ["type"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "set_theme" },
+            "dark": {
+              "type": "boolean",
+              "description": "Force light/dark. Omit on value_changed from a switch/checkbox to use that widget's checked state (preview only)."
+            }
+          }
         }
       ]
     },

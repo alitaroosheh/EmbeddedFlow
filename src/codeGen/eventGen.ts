@@ -91,6 +91,18 @@ function emitAction(project: EmbfProject, page: Page, action: Action, v9: boolea
                 ? `lv_obj_add_flag(${widgetVar(page.id, action.target)}, LV_OBJ_FLAG_HIDDEN);`
                 : `lv_obj_remove_flag(${widgetVar(page.id, action.target)}, LV_OBJ_FLAG_HIDDEN);`;
         }
+        case "set_theme": {
+            const primary = themePrimaryColorExpr(project);
+            const secondary = themeSecondaryColorExpr(project);
+            const darkExpr =
+                "dark" in action
+                    ? action.dark ? "true" : "false"
+                    : "lv_obj_has_state(lv_event_get_target_obj(e), LV_STATE_CHECKED)";
+            if (v9) {
+                return `{ lv_theme_t *t = lv_theme_default_init(lv_display_get_default(), ${primary}, ${secondary}, ${darkExpr}, LV_FONT_DEFAULT); lv_display_set_theme(lv_display_get_default(), t); lv_obj_report_style_change(NULL); }`;
+            }
+            return `{ lv_theme_t *t = lv_theme_default_init(${primary}, ${secondary}, ${darkExpr}, LV_FONT_DEFAULT); lv_disp_set_theme(lv_disp_get_default(), t); lv_obj_report_style_change(NULL); }`;
+        }
         default:
             return `/* unsupported action: ${(action as any).type} */`;
     }
@@ -125,4 +137,22 @@ export function collectPageEvents(project: EmbfProject, page: Page): {
 
     walk(page.components);
     return { decls, impls, registrations };
+}
+
+function themePrimaryColorExpr(project: EmbfProject): string {
+    const c = project.theme?.primaryColor;
+    return c ? `lv_color_hex(0x${hexToRaw(c)})` : "lv_palette_main(LV_PALETTE_BLUE)";
+}
+
+function themeSecondaryColorExpr(project: EmbfProject): string {
+    const c = project.theme?.secondaryColor;
+    return c ? `lv_color_hex(0x${hexToRaw(c)})` : "lv_palette_main(LV_PALETTE_CYAN)";
+}
+
+function hexToRaw(hex: string): string {
+    const h = hex.replace("#", "").toUpperCase();
+    if (h.length === 3) {
+        return h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    }
+    return h.slice(0, 6).padStart(6, "0");
 }

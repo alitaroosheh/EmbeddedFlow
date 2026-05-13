@@ -62,7 +62,13 @@
           "y": 50,
           "width": 60,
           "height": 28,
-          "checked": false
+          "checked": false,
+          "events": [
+            {
+              "trigger": "value_changed",
+              "actions": [{ "type": "set_theme" }]
+            }
+          ]
         },
         {
           "id": "lbl_sw",

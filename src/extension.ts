@@ -2,14 +2,21 @@ import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
 import { EmbfPreviewPanel } from "./previewPanel";
-import { EmbfParseError, parseEmbf, watchEmbf } from "./embfParser";
+import { EmbfParseError, parseEmbf, parseEmbfSource, watchEmbf } from "./embfParser";
+import { lintEmbfProject } from "./embfSemanticLint";
 import { EmbfProject } from "./types/embf";
 import { generateCode, writeGeneratedFiles } from "./codeGen/index";
 
 // Map from .embf file path → file watcher
 const watchers = new Map<string, fs.FSWatcher>();
 
+const embfDiagnostics = vscode.languages.createDiagnosticCollection("embeddedflow");
+const embfLintDebounceMs = 400;
+const embfLintTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
 export function activate(context: vscode.ExtensionContext): void {
+    context.subscriptions.push(embfDiagnostics);
+
     // ── Command: Open Preview ─────────────────────────────────────────────────
     context.subscriptions.push(
         vscode.commands.registerCommand("embeddedflow.openPreview", (uri?: vscode.Uri) => {
@@ -43,11 +50,14 @@ export function activate(context: vscode.ExtensionContext): void {
         })
     );
 
-    // ── Auto-open preview when a .embf file is opened in the editor ──────────
+    // ── Auto-open preview + diagnostics when a .embf document is opened ─────
     context.subscriptions.push(
         vscode.workspace.onDidOpenTextDocument(doc => {
             if (doc.fileName.endsWith(".embf")) {
                 openPreview(doc.fileName, context.extensionUri);
+            }
+            if (isEmbfDocument(doc)) {
+                updateEmbfDiagnostics(doc);
             }
         })
     );
@@ -56,6 +66,95 @@ export function activate(context: vscode.ExtensionContext): void {
     const activeDoc = vscode.window.activeTextEditor?.document;
     if (activeDoc?.fileName.endsWith(".embf")) {
         openPreview(activeDoc.fileName, context.extensionUri);
+    }
+
+    // ── Problems panel: semantic validation beyond JSON schema ──────────────
+    for (const doc of vscode.workspace.textDocuments) {
+        if (isEmbfDocument(doc)) {
+            updateEmbfDiagnostics(doc);
+        }
+    }
+    context.subscriptions.push(
+        vscode.workspace.onDidSaveTextDocument(doc => {
+            if (isEmbfDocument(doc)) {
+                updateEmbfDiagnostics(doc);
+            }
+        })
+    );
+    context.subscriptions.push(
+        vscode.workspace.onDidCloseTextDocument(doc => {
+            if (isEmbfDocument(doc)) {
+                embfDiagnostics.delete(doc.uri);
+                const key = doc.uri.toString();
+                const t = embfLintTimers.get(key);
+                if (t) {
+                    clearTimeout(t);
+                    embfLintTimers.delete(key);
+                }
+            }
+        })
+    );
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeTextDocument(ev => {
+            const doc = ev.document;
+            if (!isEmbfDocument(doc)) {
+                return;
+            }
+            const key = doc.uri.toString();
+            const prev = embfLintTimers.get(key);
+            if (prev) {
+                clearTimeout(prev);
+            }
+            embfLintTimers.set(
+                key,
+                setTimeout(() => {
+                    embfLintTimers.delete(key);
+                    updateEmbfDiagnostics(doc);
+                }, embfLintDebounceMs)
+            );
+        })
+    );
+}
+
+function isEmbfDocument(doc: vscode.TextDocument): boolean {
+    return doc.languageId === "embf" || doc.fileName.toLowerCase().endsWith(".embf");
+}
+
+function embfFallbackRange(doc: vscode.TextDocument): vscode.Range {
+    const lastLine = Math.max(0, doc.lineCount - 1);
+    const endChar = doc.lineAt(lastLine).text.length;
+    return new vscode.Range(0, 0, lastLine, endChar);
+}
+
+function updateEmbfDiagnostics(doc: vscode.TextDocument): void {
+    if (!isEmbfDocument(doc)) {
+        return;
+    }
+    const text = doc.getText();
+    try {
+        const project = parseEmbfSource(text);
+        const semantic = lintEmbfProject(text, project);
+        if (semantic.length === 0) {
+            embfDiagnostics.delete(doc.uri);
+            return;
+        }
+        const diags = semantic.map(issue => {
+            const range = issue.range
+                ? new vscode.Range(
+                      doc.positionAt(issue.range.start),
+                      doc.positionAt(issue.range.end)
+                  )
+                : embfFallbackRange(doc);
+            const d = new vscode.Diagnostic(range, issue.message, vscode.DiagnosticSeverity.Error);
+            d.source = "embeddedflow";
+            return d;
+        });
+        embfDiagnostics.set(doc.uri, diags);
+    } catch (e) {
+        const msg = e instanceof EmbfParseError ? e.message : String(e);
+        const d = new vscode.Diagnostic(embfFallbackRange(doc), msg, vscode.DiagnosticSeverity.Error);
+        d.source = "embeddedflow";
+        embfDiagnostics.set(doc.uri, [d]);
     }
 }
 

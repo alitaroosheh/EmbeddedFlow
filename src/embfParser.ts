@@ -25,17 +25,21 @@ export function parseEmbf(filePath: string): EmbfProject {
         throw new EmbfParseError(`Cannot read file: ${e.message}`);
     }
 
+    return parseEmbfSource(raw);
+}
+
+/** Parse and validate `.embf` JSON from a string (e.g. unsaved editor buffer). */
+export function parseEmbfSource(content: string): EmbfProject {
     let parsed: unknown;
     try {
-        parsed = JSON.parse(raw);
+        parsed = JSON.parse(content);
     } catch (e: any) {
         throw new EmbfParseError(`Invalid JSON: ${e.message}`);
     }
-
-    return validateEmbf(parsed, filePath);
+    return validateEmbf(parsed);
 }
 
-function validateEmbf(data: unknown, filePath: string): EmbfProject {
+function validateEmbf(data: unknown): EmbfProject {
     if (typeof data !== "object" || data === null) {
         throw new EmbfParseError("Root must be a JSON object");
     }

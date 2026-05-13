@@ -1,0 +1,70 @@
+{
+  "name": "embeddedflow",
+  "displayName": "EmbeddedFlow",
+  "description": "LVGL UI preview for .embf project files — live canvas rendering via WebAssembly",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Visualization", "Other"],
+  "keywords": ["lvgl", "embedded", "ui", "preview", "wasm"],
+  "activationEvents": ["onLanguage:embf", "workspaceContains:**/*.embf"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "embf",
+        "aliases": ["EmbeddedFlow Project", "embf"],
+        "extensions": [".embf"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "embeddedflow.openPreview",
+        "title": "EmbeddedFlow: Open UI Preview",
+        "icon": "$(preview)"
+      },
+      {
+        "command": "embeddedflow.newProject",
+        "title": "EmbeddedFlow: New Project"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "embeddedflow.openPreview",
+          "when": "resourceExtname == .embf",
+          "group": "navigation"
+        }
+      ]
+    },
+    "jsonValidation": [
+      {
+        "fileMatch": "*.embf",
+        "url": "./src/schema/embf.schema.json"
+      }
+    ],
+    "configuration": {
+      "title": "EmbeddedFlow",
+      "properties": {
+        "embeddedflow.defaultLvglVersion": {
+          "type": "string",
+          "default": "9.5.0",
+          "enum": ["8.4.0", "9.2.2", "9.3.0", "9.4.0", "9.5.0"],
+          "description": "Default LVGL version for new projects"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0"
+  }
+}

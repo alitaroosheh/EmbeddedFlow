@@ -1,0 +1,292 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://embeddedflow/embf.schema.json",
+  "title": "EmbeddedFlow Project",
+  "description": "EmbeddedFlow .embf project file schema",
+  "type": "object",
+  "required": ["version", "project", "display", "pages"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "string",
+      "enum": ["1.0"],
+      "description": "Schema version"
+    },
+    "project": {
+      "type": "object",
+      "required": ["name", "lvglVersion"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "lvglVersion": {
+          "type": "string",
+          "enum": ["8.4.0", "9.2.2", "9.3.0", "9.4.0", "9.5.0"]
+        },
+        "description": { "type": "string" }
+      }
+    },
+    "display": {
+      "type": "object",
+      "required": ["width", "height", "bitDepth", "colorFormat", "orientation", "direction"],
+      "additionalProperties": false,
+      "properties": {
+        "width": { "type": "integer", "minimum": 1, "maximum": 4096 },
+        "height": { "type": "integer", "minimum": 1, "maximum": 4096 },
+        "bitDepth": { "type": "integer", "enum": [16, 24, 32] },
+        "colorFormat": {
+          "type": "string",
+          "enum": ["RGB565", "RGB888", "ARGB8888", "L8", "AL88"]
+        },
+        "orientation": {
+          "type": "string",
+          "enum": ["portrait", "landscape", "portrait_flipped", "landscape_flipped"]
+        },
+        "direction": { "type": "string", "enum": ["ltr", "rtl"] },
+        "dpi": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "theme": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "dark": { "type": "boolean" },
+        "primaryColor": { "type": "string" },
+        "secondaryColor": { "type": "string" }
+      }
+    },
+    "fonts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "size"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "size": { "type": "integer", "minimum": 4 },
+          "source": { "type": "string" }
+        }
+      }
+    },
+    "images": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "path"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "path": { "type": "string" }
+        }
+      }
+    },
+    "pages": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/page" }
+    }
+  },
+  "definitions": {
+    "page": {
+      "type": "object",
+      "required": ["id", "name", "components"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "backgroundColor": { "type": "string" },
+        "components": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/component" }
+        }
+      }
+    },
+    "styleProps": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bgColor": { "type": "string" },
+        "bgOpacity": { "type": "number", "minimum": 0, "maximum": 255 },
+        "textColor": { "type": "string" },
+        "borderColor": { "type": "string" },
+        "borderWidth": { "type": "integer", "minimum": 0 },
+        "borderRadius": { "type": "integer", "minimum": 0 },
+        "padding": {
+          "oneOf": [
+            { "type": "integer" },
+            { "type": "array", "items": { "type": "integer" }, "minItems": 2, "maxItems": 4 }
+          ]
+        },
+        "fontSize": { "type": "integer", "minimum": 4 },
+        "fontFamily": { "type": "string" },
+        "align": { "type": "string", "enum": ["left", "center", "right"] }
+      }
+    },
+    "baseComponent": {
+      "type": "object",
+      "required": ["id", "type", "x", "y", "width", "height"],
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string" },
+        "x": { "type": "integer" },
+        "y": { "type": "integer" },
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "hidden": { "type": "boolean" },
+        "styles": { "$ref": "#/definitions/styleProps" }
+      }
+    },
+    "component": {
+      "oneOf": [
+        {
+          "allOf": [{ "$ref": "#/definitions/baseComponent" }],
+          "properties": {
+            "type": { "const": "label" },
+            "text": { "type": "string" },
+            "longMode": { "type": "string", "enum": ["wrap", "dot", "scroll", "clip"] }
+          },
+          "required": ["text"]
+        },
+        {
+          "allOf": [{ "$ref": "#/definitions/baseComponent" }],
+          "properties": {
+            "type": { "const": "button" },
+            "label": { "type": "string" }
+          }
+        },
+        {
+          "allOf": [{ "$ref": "#/definitions/baseComponent" }],
+          "properties": {
+            "type": { "const": "image" },
+            "src": { "type": "string" }
+          },
+          "required": ["src"]
+        },
+        {
+          "allOf": [{ "$ref": "#/definitions/baseComponent" }],
+          "properties": {
+            "type": { "const": "slider" },
+            "min": { "type": "number" },
+            "max": { "type": "number" },
+            "value": { "type": "number" }
+          },
+          "required": ["min", "max", "value"]
+        },
+        {
+          "allOf": [{ "$ref": "#/definitions/baseComponent" }],
+          "properties": {
+            "type": { "const": "switch" },
+            "checked": { "type": "boolean" }
+          },
+          "required": ["checked"]
+        },
+        {
+          "allOf": [{ "$ref": "#/definitions/baseComponent" }],
+          "properties": {
+            "type": { "const": "bar" },
+            "min": { "type": "number" },
+            "max": { "type": "number" },
+            "value": { "type": "number" },
+            "mode": { "type": "string", "enum": ["normal", "symmetrical", "range"] }
+          },
+          "required": ["min", "max", "value"]
+        },
+        {
+          "allOf": [{ "$ref": "#/definitions/baseComponent" }],
+          "properties": {
+            "type": { "const": "spinner" },
+            "speed": { "type": "integer" },
+            "arcLength": { "type": "integer" }
+          }
+        },
+        {
+          "allOf": [{ "$ref": "#/definitions/baseComponent" }],
+          "properties": {
+            "type": { "const": "arc" },
+            "min": { "type": "number" },
+            "max": { "type": "number" },
+            "value": { "type": "number" },
+            "startAngle": { "type": "integer" },
+            "endAngle": { "type": "integer" },
+            "mode": { "type": "string", "enum": ["normal", "reverse", "symmetrical"] }
+          },
+          "required": ["min", "max", "value"]
+        },
+        {
+          "allOf": [{ "$ref": "#/definitions/baseComponent" }],
+          "properties": {
+            "type": { "const": "checkbox" },
+            "text": { "type": "string" },
+            "checked": { "type": "boolean" }
+          },
+          "required": ["checked"]
+        },
+        {
+          "allOf": [{ "$ref": "#/definitions/baseComponent" }],
+          "properties": {
+            "type": { "const": "dropdown" },
+            "options": { "type": "array", "items": { "type": "string" } },
+            "selectedIndex": { "type": "integer", "minimum": 0 }
+          },
+          "required": ["options", "selectedIndex"]
+        },
+        {
+          "allOf": [{ "$ref": "#/definitions/baseComponent" }],
+          "properties": {
+            "type": { "const": "roller" },
+            "options": { "type": "array", "items": { "type": "string" } },
+            "selectedIndex": { "type": "integer", "minimum": 0 },
+            "mode": { "type": "string", "enum": ["normal", "infinite"] }
+          },
+          "required": ["options", "selectedIndex"]
+        },
+        {
+          "allOf": [{ "$ref": "#/definitions/baseComponent" }],
+          "properties": {
+            "type": { "const": "textarea" },
+            "text": { "type": "string" },
+            "placeholder": { "type": "string" },
+            "oneLine": { "type": "boolean" }
+          }
+        },
+        {
+          "allOf": [{ "$ref": "#/definitions/baseComponent" }],
+          "properties": {
+            "type": { "const": "line" },
+            "points": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["x", "y"],
+                "properties": {
+                  "x": { "type": "integer" },
+                  "y": { "type": "integer" }
+                }
+              }
+            },
+            "rounded": { "type": "boolean" }
+          },
+          "required": ["points"]
+        },
+        {
+          "allOf": [{ "$ref": "#/definitions/baseComponent" }],
+          "properties": {
+            "type": { "const": "container" },
+            "layout": { "type": "string", "enum": ["none", "flex", "grid"] },
+            "flexFlow": { "type": "string", "enum": ["row", "column", "row_wrap", "column_wrap"] },
+            "children": { "type": "array", "items": { "$ref": "#/definitions/component" } }
+          },
+          "required": ["children"]
+        },
+        {
+          "allOf": [{ "$ref": "#/definitions/baseComponent" }],
+          "properties": {
+            "type": { "const": "panel" },
+            "children": { "type": "array", "items": { "$ref": "#/definitions/component" } }
+          },
+          "required": ["children"]
+        }
+      ]
+    }
+  }
+}

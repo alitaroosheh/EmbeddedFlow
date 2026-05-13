@@ -55,7 +55,7 @@ $exports = @(
     "_embf_create_textarea","_embf_textarea_set_text","_embf_textarea_set_placeholder","_embf_textarea_set_one_line",
     "_embf_create_line","_embf_line_set_points",
     "_embf_obj_set_hidden",
-    "_embf_obj_set_style_bg_color","_embf_obj_set_style_text_color",
+    "_embf_obj_set_style_bg_color","_embf_obj_set_style_bg_color_part","_embf_obj_set_style_text_color",
     "_embf_obj_set_style_font_size",
     "_embf_obj_set_style_border_color","_embf_obj_set_style_text_align",
     "_embf_obj_set_style_border_width","_embf_obj_set_style_radius","_embf_obj_set_style_pad_all",

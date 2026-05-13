@@ -417,6 +417,18 @@ void embf_obj_set_style_bg_color(lv_obj_t *obj, uint32_t argb)
     lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, LV_PART_MAIN);
 }
 
+/**
+ * Set background color on an arbitrary part (e.g. LV_PART_INDICATOR = 0x020000 for bar/slider fill).
+ * @param part_selector  lv_style_selector_t (LV_PART_* often OR'd with LV_STATE_DEFAULT).
+ */
+EMSCRIPTEN_KEEPALIVE
+void embf_obj_set_style_bg_color_part(lv_obj_t *obj, uint32_t part_selector, uint32_t argb)
+{
+    lv_style_selector_t sel = (lv_style_selector_t)part_selector;
+    lv_obj_set_style_bg_color(obj, unpack_color(argb), sel);
+    lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, sel);
+}
+
 EMSCRIPTEN_KEEPALIVE
 void embf_obj_set_style_text_color(lv_obj_t *obj, uint32_t argb)
 {

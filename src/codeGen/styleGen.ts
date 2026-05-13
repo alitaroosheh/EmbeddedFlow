@@ -24,6 +24,13 @@ export function emitStyleCalls(
         lines.push(s("bg_color", hexToLvColor(styles.bgColor)));
         lines.push(s("bg_opa", "LV_OPA_COVER"));
     }
+    if (styles.indicatorColor !== undefined) {
+        const indSel = "LV_PART_INDICATOR | LV_STATE_DEFAULT";
+        lines.push(
+            `${indent}lv_obj_set_style_bg_color(${varName}, ${hexToLvColor(styles.indicatorColor)}, ${indSel});`,
+            `${indent}lv_obj_set_style_bg_opa(${varName}, LV_OPA_COVER, ${indSel});`
+        );
+    }
     if (styles.bgOpacity !== undefined) {
         lines.push(s("bg_opa", String(Math.round(styles.bgOpacity))));
     }

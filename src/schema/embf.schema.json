@@ -106,6 +106,10 @@
       "additionalProperties": false,
       "properties": {
         "bgColor": { "type": "string" },
+        "indicatorColor": {
+          "type": "string",
+          "description": "Bar / slider / switch indicator fill (LV_PART_INDICATOR)"
+        },
         "bgOpacity": { "type": "number", "minimum": 0, "maximum": 255 },
         "textColor": { "type": "string" },
         "borderColor": { "type": "string" },

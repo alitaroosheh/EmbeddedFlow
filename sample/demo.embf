@@ -83,7 +83,11 @@
           "height": 16,
           "min": 0,
           "max": 100,
-          "value": 65
+          "value": 65,
+          "styles": {
+            "bgColor": "#D4D4D4",
+            "indicatorColor": "#FE7D32"
+          }
         },
         {
           "id": "lbl_progress",

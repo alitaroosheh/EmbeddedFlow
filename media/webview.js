@@ -71,6 +71,9 @@ const LV_EVENT_CLICKED       = 7;
 const LV_EVENT_LONG_PRESSED  = 5;
 const LV_EVENT_VALUE_CHANGED = 30;
 
+/** LVGL `lv_part_t` — `LV_PART_INDICATOR` for bar/slider fill (see lv_obj_style.h) */
+const LV_PART_INDICATOR = 0x020000;
+
 // ── Entry point ────────────────────────────────────────────────────────────────
 window.addEventListener("message", event => {
     const msg = event.data;
@@ -415,6 +418,9 @@ function applyStylesEmbf(wasm, obj, styles) {
     if (!obj) return;
     if (styles.bgColor !== undefined) {
         wasm._embf_obj_set_style_bg_color(obj, parseColor(styles.bgColor));
+    }
+    if (styles.indicatorColor !== undefined && typeof wasm._embf_obj_set_style_bg_color_part === "function") {
+        wasm._embf_obj_set_style_bg_color_part(obj, LV_PART_INDICATOR, parseColor(styles.indicatorColor));
     }
     if (styles.textColor !== undefined) {
         wasm._embf_obj_set_style_text_color(obj, parseColor(styles.textColor));

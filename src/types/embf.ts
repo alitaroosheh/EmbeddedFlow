@@ -129,6 +129,8 @@ export interface BaseComponent {
 
 export interface StyleProps {
     bgColor?: string;
+    /** Bar / slider / switch indicator fill (LVGL `LV_PART_INDICATOR`). */
+    indicatorColor?: string;
     bgOpacity?: number;
     textColor?: string;
     borderColor?: string;

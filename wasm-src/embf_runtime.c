@@ -134,9 +134,13 @@ uint8_t *embf_get_buffer(void)
     return g_framebuffer;
 }
 
+static void embf_discard_pending_events(void);
+
 EMSCRIPTEN_KEEPALIVE
 void embf_clear_screen(void)
 {
+    embf_discard_pending_events();
+
     lv_obj_t *scr = lv_screen_active();
     if (scr) lv_obj_clean(scr);
 }
@@ -153,6 +157,7 @@ EMSCRIPTEN_KEEPALIVE
 void embf_load_screen(lv_obj_t *screen)
 {
     lv_screen_load(screen);
+    embf_discard_pending_events();
 }
 
 /* ── Object position / size helpers ────────────────────────────────────── */
@@ -532,6 +537,12 @@ typedef struct {
 static EmbfQueuedEvent g_evt_queue[EMBF_EVENT_QUEUE_SIZE];
 static int g_evt_head = 0;
 static int g_evt_tail = 0;
+
+static void embf_discard_pending_events(void)
+{
+    g_evt_head = 0;
+    g_evt_tail = 0;
+}
 
 static void generic_event_cb(lv_event_t *e)
 {

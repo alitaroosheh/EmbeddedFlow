@@ -48,6 +48,9 @@ let loadedWasmJsUri = null;
 /** `null` = use JSON `project.theme.dark`; otherwise preview-only dark override (e.g. from `set_theme` action). */
 let previewDarkOverride = null;
 
+/** Skip duplicate rebuild when `pageSelect.value` is set from code (navigate). */
+let pageSelectProgrammatic = false;
+
 /**
  * Maps WASM object pointer (number) → component ID string.
  * Rebuilt every time a screen is constructed.
@@ -69,10 +72,10 @@ let pPollObj   = 0; // uint32 WASM pointer address of g_poll_obj
 let pPollCode  = 0; // uint32 WASM pointer address of g_poll_code
 let pPollValue = 0; // int32  WASM pointer address of g_poll_value
 
-/** LVGL event codes (LVGL 9.x) */
-const LV_EVENT_CLICKED       = 7;
-const LV_EVENT_LONG_PRESSED  = 5;
-const LV_EVENT_VALUE_CHANGED = 30;
+/** LVGL 9.x `lv_event_code_t` ordinals — must match `lvgl/src/misc/lv_event.h` (first member = 0). */
+const LV_EVENT_CLICKED       = 10; /* after LONG_PRESSED_REPEAT */
+const LV_EVENT_LONG_PRESSED  = 8;
+const LV_EVENT_VALUE_CHANGED = 35; /* after DRAW_TASK_ADDED */
 
 /** LVGL `lv_part_t` — `LV_PART_INDICATOR` for bar/slider fill (see lv_obj_style.h) */
 const LV_PART_INDICATOR = 0x020000;
@@ -558,8 +561,13 @@ function dispatchAction(action, eventValue, currentPage) {
                 log("warn", `navigate: page "${action.target}" not found`);
                 return;
             }
-            pageSelect.value = String(targetIdx);
-            buildUiFromProject(currentProject, targetIdx);
+            pageSelectProgrammatic = true;
+            try {
+                pageSelect.value = String(targetIdx);
+                buildUiFromProject(currentProject, targetIdx);
+            } finally {
+                pageSelectProgrammatic = false;
+            }
             break;
         }
         case "set_text": {
@@ -612,11 +620,28 @@ function dispatchAction(action, eventValue, currentPage) {
 // ── Input forwarding ───────────────────────────────────────────────────────────
 canvas.addEventListener("pointerdown", e => {
     canvas.setPointerCapture(e.pointerId);
-    sendPointer(e, true);
+    sendPointer(e, true, 4);
 });
-canvas.addEventListener("pointermove", e => sendPointer(e, e.buttons > 0));
-canvas.addEventListener("pointerup",   e => sendPointer(e, false));
-canvas.addEventListener("pointercancel", e => sendPointer(e, false));
+canvas.addEventListener("pointermove", e => {
+    const drag = e.buttons > 0;
+    sendPointer(e, drag, drag ? 1 : 0);
+});
+canvas.addEventListener("pointerup", e => {
+    sendPointer(e, false, 4);
+    try {
+        canvas.releasePointerCapture(e.pointerId);
+    } catch {
+        /* ignore if not captured */
+    }
+});
+canvas.addEventListener("pointercancel", e => {
+    sendPointer(e, false, 4);
+    try {
+        canvas.releasePointerCapture(e.pointerId);
+    } catch {
+        /* ignore */
+    }
+});
 
 canvas.addEventListener("wheel", e => {
     e.preventDefault();
@@ -632,7 +657,7 @@ canvas.addEventListener("keydown", e => {
     fn?.(e.key.charCodeAt(0));
 });
 
-function sendPointer(e, pressed) {
+function sendPointer(e, pressed, pumpLevel) {
     if (!wasmReady || !WasmModule) return;
     const rect = canvas.getBoundingClientRect();
     const scaleX = displayWidth / rect.width;
@@ -641,11 +666,27 @@ function sendPointer(e, pressed) {
     const y = Math.round((e.clientY - rect.top) * scaleY);
     const fn = WasmModule._embf_on_pointer ?? WasmModule._onPointerEvent;
     fn?.(x, y, pressed ? 1 : 0);
+    /* pumpLevel: 0 = none (rely on rAF), 1 = light tick while dragging, 4 = press/release (CLICKED) */
+    if (pumpLevel > 0) {
+        pumpLvglAfterPointer(pumpLevel);
+    }
+}
+
+/**
+ * Run LVGL timer handler a few times then drain our event queue.
+ * @param iterations how many `lv_timer_handler` passes (4 catches fast click between frames)
+ */
+function pumpLvglAfterPointer(iterations) {
+    if (!wasmReady || !WasmModule || typeof WasmModule._embf_main_loop !== "function") return;
+    for (let i = 0; i < iterations; i++) {
+        WasmModule._embf_main_loop();
+    }
+    drainEventQueue();
 }
 
 // ── Page selector ─────────────────────────────────────────────────────────────
 pageSelect.addEventListener("change", () => {
-    if (!currentProject) return;
+    if (!currentProject || pageSelectProgrammatic) return;
     const idx = parseInt(pageSelect.value, 10);
     buildUiFromProject(currentProject, idx);
 });

@@ -251,7 +251,8 @@ async function runCodeGen(filePath: string): Promise<void> {
     const action = await vscode.window.showInformationMessage(
         `Generated ${written.length} files → ${rel}/`,
         "Open Folder",
-        "Show ui.c"
+        "Show ui.c",
+        "Show ui_display.h"
     );
 
     if (action === "Open Folder") {
@@ -259,6 +260,10 @@ async function runCodeGen(filePath: string): Promise<void> {
     } else if (action === "Show ui.c") {
         const uiC = path.join(outputDir, "ui.c");
         const doc = await vscode.workspace.openTextDocument(uiC);
+        await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+    } else if (action === "Show ui_display.h") {
+        const uiDisp = path.join(outputDir, "ui_display.h");
+        const doc = await vscode.workspace.openTextDocument(uiDisp);
         await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
     }
 }

@@ -3,6 +3,7 @@
   "displayName": "EmbeddedFlow",
   "description": "LVGL UI preview for .embf project files — live canvas rendering via WebAssembly",
   "version": "0.1.0",
+  "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"
   },

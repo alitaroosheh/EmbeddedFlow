@@ -50,8 +50,17 @@ $exports = @(
     "_embf_create_arc","_embf_arc_set_range","_embf_arc_set_value",
     "_embf_create_checkbox","_embf_checkbox_set_text","_embf_checkbox_set_state",
     "_embf_create_container",
+    "_embf_create_dropdown","_embf_dropdown_set_options","_embf_dropdown_set_selected",
+    "_embf_create_roller","_embf_roller_set_options","_embf_roller_set_selected",
+    "_embf_create_textarea","_embf_textarea_set_text","_embf_textarea_set_placeholder","_embf_textarea_set_one_line",
+    "_embf_create_line","_embf_line_set_points",
+    "_embf_obj_set_hidden",
     "_embf_obj_set_style_bg_color","_embf_obj_set_style_text_color",
+    "_embf_obj_set_style_font_size",
+    "_embf_obj_set_style_border_color","_embf_obj_set_style_text_align",
     "_embf_obj_set_style_border_width","_embf_obj_set_style_radius","_embf_obj_set_style_pad_all",
+    "_embf_register_event",
+    "_embf_poll_event","_embf_poll_obj_ptr","_embf_poll_code_ptr","_embf_poll_value_ptr",
     "_embf_on_pointer","_embf_on_wheel","_embf_on_key",
     "_malloc","_free"
 )
@@ -70,7 +79,7 @@ $rspLines = @(
     "-sMODULARIZE=1",
     "-sEXPORT_NAME=createEmbfRuntime",
     "-sEXPORTED_FUNCTIONS=$exportsJson",
-    "-sEXPORTED_RUNTIME_METHODS=[`"stringToNewUTF8`",`"HEAPU8`"]",
+    "-sEXPORTED_RUNTIME_METHODS=[`"stringToNewUTF8`",`"HEAPU8`",`"HEAP32`",`"HEAPU32`"]",
     "-sALLOW_MEMORY_GROWTH=1",
     "-sINITIAL_MEMORY=33554432",
     "-sENVIRONMENT=web",
@@ -92,7 +101,7 @@ if (-not (Test-Path $OutJs)) {
     Write-Host ""
     Write-Host "--- Full output ---"
     $result | Select-Object -Last 30 | ForEach-Object { Write-Host $_ }
-    Write-Error "Build failed — output file not found: $OutJs"
+    Write-Error "Build failed - output file not found: $OutJs"
     exit 1
 }
 

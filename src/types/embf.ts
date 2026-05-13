@@ -92,6 +92,29 @@ export type ComponentType =
     | "container"
     | "panel";
 
+// ─── Events & Actions ─────────────────────────────────────────────────────────
+
+/** User-input triggers mapped to LVGL event codes */
+export type EventTrigger =
+    | "clicked"        // LV_EVENT_CLICKED
+    | "long_pressed"   // LV_EVENT_LONG_PRESSED
+    | "value_changed"; // LV_EVENT_VALUE_CHANGED
+
+/** What happens when an event fires */
+export type Action =
+    | { type: "navigate";    target: string }                        // load page by id
+    | { type: "set_text";    target: string; text: string }          // update label text
+    | { type: "set_value";   target: string; value: number }         // slider/bar/arc
+    | { type: "set_checked"; target: string; checked: boolean }      // switch/checkbox
+    | { type: "set_hidden";  target: string; hidden: boolean };      // show/hide widget
+
+export interface EventDef {
+    trigger: EventTrigger;
+    actions: Action[];
+}
+
+// ─── Base component ────────────────────────────────────────────────────────────
+
 export interface BaseComponent {
     id: string;
     type: ComponentType;
@@ -101,6 +124,7 @@ export interface BaseComponent {
     height: number;
     hidden?: boolean;
     styles?: StyleProps;
+    events?: EventDef[];
 }
 
 export interface StyleProps {

@@ -8,11 +8,11 @@
   "display": {
     "width": 800,
     "height": 480,
-    "bitDepth": 16,
-    "colorFormat": "RGB565",
+    "bitDepth": 32,
+    "colorFormat": "RGB888",
     "orientation": "landscape",
     "direction": "ltr",
-    "dpi": 100
+    "dpi": 500
   },
   "theme": {
     "dark": false
@@ -32,7 +32,7 @@
           "height": 30,
           "text": "Hello, EmbeddedFlow!",
           "styles": {
-            "fontSize": 16,
+            "fontSize": 12,
             "textColor": "#000000"
           }
         }

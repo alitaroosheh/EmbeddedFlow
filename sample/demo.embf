@@ -6,8 +6,8 @@
     "description": "A demo project to test the preview"
   },
   "display": {
-    "width": 320,
-    "height": 240,
+    "width": 800,
+    "height": 600,
     "bitDepth": 32,
     "colorFormat": "ARGB8888",
     "orientation": "landscape",
@@ -34,8 +34,8 @@
           "height": 28,
           "text": "EmbeddedFlow Demo",
           "styles": {
-            "fontSize": 20,
-            "textColor": "#0078d4"
+            "fontSize": 10,
+            "textColor": "#FF78d4"
           }
         },
         {
@@ -45,7 +45,15 @@
           "y": 44,
           "width": 100,
           "height": 36,
-          "label": "Click Me"
+          "label": "Settings",
+          "events": [
+            {
+              "trigger": "clicked",
+              "actions": [
+                { "type": "navigate", "target": "page_settings" }
+              ]
+            }
+          ]
         },
         {
           "id": "sw_dark",
@@ -230,7 +238,15 @@
           "y": 200,
           "width": 90,
           "height": 32,
-          "label": "< Back"
+          "label": "< Back",
+          "events": [
+            {
+              "trigger": "clicked",
+              "actions": [
+                { "type": "navigate", "target": "page_main" }
+              ]
+            }
+          ]
         }
       ]
     }

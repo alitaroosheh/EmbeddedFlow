@@ -122,6 +122,76 @@
         "align": { "type": "string", "enum": ["left", "center", "right"] }
       }
     },
+    "action": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["type", "target"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "navigate" },
+            "target": { "type": "string", "description": "Page ID to load" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "target", "text"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "set_text" },
+            "target": { "type": "string", "description": "Component ID of the label" },
+            "text": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "target", "value"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "set_value" },
+            "target": { "type": "string", "description": "Component ID of slider / bar / arc" },
+            "value": { "type": "number" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "target", "checked"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "set_checked" },
+            "target": { "type": "string", "description": "Component ID of switch / checkbox" },
+            "checked": { "type": "boolean" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "target", "hidden"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "set_hidden" },
+            "target": { "type": "string", "description": "Component ID" },
+            "hidden": { "type": "boolean" }
+          }
+        }
+      ]
+    },
+    "eventDef": {
+      "type": "object",
+      "required": ["trigger", "actions"],
+      "additionalProperties": false,
+      "properties": {
+        "trigger": {
+          "type": "string",
+          "enum": ["clicked", "long_pressed", "value_changed"],
+          "description": "LVGL event that fires this handler"
+        },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/action" },
+          "minItems": 1
+        }
+      }
+    },
     "baseComponent": {
       "type": "object",
       "required": ["id", "type", "x", "y", "width", "height"],
@@ -133,7 +203,11 @@
         "width": { "type": "integer", "minimum": 1 },
         "height": { "type": "integer", "minimum": 1 },
         "hidden": { "type": "boolean" },
-        "styles": { "$ref": "#/definitions/styleProps" }
+        "styles": { "$ref": "#/definitions/styleProps" },
+        "events": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/eventDef" }
+        }
       }
     },
     "component": {

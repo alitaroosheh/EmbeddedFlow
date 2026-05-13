@@ -45,6 +45,32 @@ let currentProject = null;
 /** @type {string | null} last loaded wasm js uri */
 let loadedWasmJsUri = null;
 
+/**
+ * Maps WASM object pointer (number) → component ID string.
+ * Rebuilt every time a screen is constructed.
+ * @type {Map<number, string>}
+ */
+let objPtrToId = new Map();
+
+/**
+ * Maps component ID → WASM object pointer.
+ * @type {Map<string, number>}
+ */
+let idToObjPtr = new Map();
+
+/**
+ * Cached pointer values for embf_poll_* result slots.
+ * Resolved once after WASM loads.
+ */
+let pPollObj   = 0; // uint32 WASM pointer address of g_poll_obj
+let pPollCode  = 0; // uint32 WASM pointer address of g_poll_code
+let pPollValue = 0; // int32  WASM pointer address of g_poll_value
+
+/** LVGL event codes (LVGL 9.x) */
+const LV_EVENT_CLICKED       = 7;
+const LV_EVENT_LONG_PRESSED  = 5;
+const LV_EVENT_VALUE_CHANGED = 30;
+
 // ── Entry point ────────────────────────────────────────────────────────────────
 window.addEventListener("message", event => {
     const msg = event.data;
@@ -141,7 +167,16 @@ async function loadWasm(jsUri, wasmBinUri, width, height, darkTheme) {
         throw new Error("_embf_init not exported — check EXPORTED_FUNCTIONS in build.ps1");
     }
 
-    WasmModule._embf_init(width, height, darkTheme ? 1 : 0);
+    const theme = currentProject?.theme ?? {};
+    const primaryArgb   = theme.primaryColor   ? parseColor(theme.primaryColor)   : 0;
+    const secondaryArgb = theme.secondaryColor ? parseColor(theme.secondaryColor) : 0;
+    WasmModule._embf_init(width, height, darkTheme ? 1 : 0, primaryArgb, secondaryArgb);
+
+    // Cache addresses of poll result slots (static C globals, stable for module lifetime)
+    pPollObj   = WasmModule._embf_poll_obj_ptr();
+    pPollCode  = WasmModule._embf_poll_code_ptr();
+    pPollValue = WasmModule._embf_poll_value_ptr();
+
     wasmReady = true;
 }
 
@@ -176,16 +211,63 @@ function buildWithEmbfApi(project, pageIndex) {
     const page = project.pages[pageIndex];
     if (!page) return;
 
+    // Reset pointer maps for this screen
+    objPtrToId = new Map();
+    idToObjPtr = new Map();
+
     const screenObj = wasm._embf_create_screen();
+
+    if (page.backgroundColor) {
+        wasm._embf_obj_set_style_bg_color(screenObj, parseColor(page.backgroundColor));
+    }
+
     for (const comp of page.components) {
         buildComponentEmbf(wasm, comp, screenObj);
     }
+
+    // Register LVGL event callbacks for components that have events defined
+    registerPageEvents(wasm, page);
+
     wasm._embf_load_screen(screenObj);
+}
+
+/** Register LVGL event callbacks for all components with events on the current page. */
+function registerPageEvents(wasm, page) {
+    for (const comp of flatComponents(page.components)) {
+        if (!comp.events?.length) continue;
+        const ptr = idToObjPtr.get(comp.id);
+        if (!ptr) continue;
+
+        for (const evtDef of comp.events) {
+            const code = triggerToLvCode(evtDef.trigger);
+            wasm._embf_register_event(ptr, code);
+        }
+    }
+}
+
+/** Collect all components recursively (for containers/panels). */
+function flatComponents(comps) {
+    const result = [];
+    for (const c of comps ?? []) {
+        result.push(c);
+        if (c.children) result.push(...flatComponents(c.children));
+    }
+    return result;
+}
+
+function triggerToLvCode(trigger) {
+    switch (trigger) {
+        case "clicked":       return LV_EVENT_CLICKED;
+        case "long_pressed":  return LV_EVENT_LONG_PRESSED;
+        case "value_changed": return LV_EVENT_VALUE_CHANGED;
+        default:              return LV_EVENT_CLICKED;
+    }
 }
 
 function buildComponentEmbf(wasm, comp, parent) {
     if (comp.hidden) return;
     let obj = 0;
+    // obj is tracked below after the switch
 
     switch (comp.type) {
         case "label": {
@@ -242,6 +324,63 @@ function buildComponentEmbf(wasm, comp, parent) {
             if (comp.checked) wasm._embf_checkbox_set_state(obj, 1);
             break;
         }
+        case "dropdown": {
+            obj = wasm._embf_create_dropdown(parent, comp.x, comp.y, comp.width, comp.height);
+            const optStr = (comp.options ?? []).join("\n");
+            const optPtr = wasm.stringToNewUTF8(optStr);
+            wasm._embf_dropdown_set_options(obj, optPtr);
+            wasm._free(optPtr);
+            wasm._embf_dropdown_set_selected(obj, comp.selectedIndex ?? 0);
+            break;
+        }
+        case "roller": {
+            obj = wasm._embf_create_roller(parent, comp.x, comp.y, comp.width, comp.height);
+            const optStr = (comp.options ?? []).join("\n");
+            const optPtr = wasm.stringToNewUTF8(optStr);
+            const infinite = comp.mode === "infinite" ? 1 : 0;
+            wasm._embf_roller_set_options(obj, optPtr, infinite);
+            wasm._free(optPtr);
+            wasm._embf_roller_set_selected(obj, comp.selectedIndex ?? 0);
+            break;
+        }
+        case "textarea": {
+            obj = wasm._embf_create_textarea(parent, comp.x, comp.y, comp.width, comp.height);
+            if (comp.text) {
+                const ptr = wasm.stringToNewUTF8(comp.text);
+                wasm._embf_textarea_set_text(obj, ptr);
+                wasm._free(ptr);
+            }
+            if (comp.placeholder) {
+                const ptr = wasm.stringToNewUTF8(comp.placeholder);
+                wasm._embf_textarea_set_placeholder(obj, ptr);
+                wasm._free(ptr);
+            }
+            if (comp.oneLine) wasm._embf_textarea_set_one_line(obj, 1);
+            break;
+        }
+        case "line": {
+            obj = wasm._embf_create_line(parent, comp.x, comp.y, comp.width, comp.height);
+            const pts = comp.points ?? [];
+            if (pts.length > 0) {
+                const buf = wasm._malloc(pts.length * 8); // 2 × int32 per point
+                pts.forEach((p, i) => {
+                    wasm.HEAP32[(buf >> 2) + i * 2]     = p.x;
+                    wasm.HEAP32[(buf >> 2) + i * 2 + 1] = p.y;
+                });
+                wasm._embf_line_set_points(obj, buf, pts.length);
+                wasm._free(buf);
+            }
+            break;
+        }
+        case "image": {
+            // Images require compiled-in asset data; show a labeled placeholder
+            obj = wasm._embf_create_container(parent, comp.x, comp.y, comp.width, comp.height);
+            const lbl = wasm._embf_create_label(obj, 0, 0, comp.width, comp.height);
+            const ptr = wasm.stringToNewUTF8(`[${comp.src ?? "image"}]`);
+            wasm._embf_label_set_text(lbl, ptr);
+            wasm._free(ptr);
+            break;
+        }
         case "container":
         case "panel": {
             obj = wasm._embf_create_container(parent, comp.x, comp.y, comp.width, comp.height);
@@ -253,6 +392,12 @@ function buildComponentEmbf(wasm, comp, parent) {
         default:
             log("warn", `Unknown component type: ${comp.type}`);
             return;
+    }
+
+    // Track pointer ↔ id mapping
+    if (obj) {
+        objPtrToId.set(obj, comp.id);
+        idToObjPtr.set(comp.id, obj);
     }
 
     applyStylesEmbf(wasm, obj, comp.styles ?? {});
@@ -271,6 +416,16 @@ function applyStylesEmbf(wasm, obj, styles) {
     }
     if (styles.borderRadius !== undefined) {
         wasm._embf_obj_set_style_radius(obj, styles.borderRadius);
+    }
+    if (styles.fontSize !== undefined) {
+        wasm._embf_obj_set_style_font_size(obj, styles.fontSize);
+    }
+    if (styles.borderColor !== undefined) {
+        wasm._embf_obj_set_style_border_color(obj, parseColor(styles.borderColor));
+    }
+    if (styles.align !== undefined) {
+        const alignCode = styles.align === "center" ? 1 : styles.align === "right" ? 2 : 0;
+        wasm._embf_obj_set_style_text_align(obj, alignCode);
     }
     if (typeof styles.padding === "number") {
         wasm._embf_obj_set_style_pad_all(obj, styles.padding);
@@ -302,6 +457,9 @@ function loop() {
             WasmModule._mainLoop();
         }
 
+        // Drain the LVGL event queue and dispatch actions
+        drainEventQueue();
+
         // Read pixel buffer and blit to canvas
         let bufAddr = 0;
         if (typeof WasmModule._embf_get_buffer === "function") {
@@ -326,6 +484,97 @@ function loop() {
     }
 
     rafHandle = requestAnimationFrame(loop);
+}
+
+// ── Event dispatch ─────────────────────────────────────────────────────────────
+
+function drainEventQueue() {
+    if (!wasmReady || !WasmModule || !currentProject || !pPollObj) return;
+
+    while (WasmModule._embf_poll_event()) {
+        // Read the result slots written by embf_poll_event()
+        const objPtr  = WasmModule.HEAPU32[pPollObj  >> 2];
+        const code    = WasmModule.HEAPU32[pPollCode  >> 2];
+        const value   = WasmModule.HEAP32 [pPollValue >> 2];
+
+        const compId  = objPtrToId.get(objPtr);
+        if (!compId) continue;
+
+        const pageIndex = parseInt(pageSelect.value, 10) || 0;
+        const page      = currentProject.pages[pageIndex];
+        if (!page) continue;
+
+        const comp = flatComponents(page.components).find(c => c.id === compId);
+        if (!comp?.events) continue;
+
+        const trigger = lvCodeToTrigger(code);
+        for (const evtDef of comp.events) {
+            if (evtDef.trigger === trigger) {
+                for (const action of evtDef.actions) {
+                    dispatchAction(action, value, page);
+                }
+            }
+        }
+    }
+}
+
+function lvCodeToTrigger(code) {
+    if (code === LV_EVENT_CLICKED)       return "clicked";
+    if (code === LV_EVENT_LONG_PRESSED)  return "long_pressed";
+    if (code === LV_EVENT_VALUE_CHANGED) return "value_changed";
+    return null;
+}
+
+function dispatchAction(action, eventValue, currentPage) {
+    const wasm = WasmModule;
+
+    switch (action.type) {
+        case "navigate": {
+            const targetIdx = currentProject.pages.findIndex(p => p.id === action.target);
+            if (targetIdx < 0) {
+                log("warn", `navigate: page "${action.target}" not found`);
+                return;
+            }
+            pageSelect.value = String(targetIdx);
+            buildUiFromProject(currentProject, targetIdx);
+            break;
+        }
+        case "set_text": {
+            const ptr = idToObjPtr.get(action.target);
+            if (!ptr) return;
+            const strPtr = wasm.stringToNewUTF8(action.text);
+            wasm._embf_label_set_text(ptr, strPtr);
+            wasm._free(strPtr);
+            break;
+        }
+        case "set_value": {
+            const ptr = idToObjPtr.get(action.target);
+            if (!ptr) return;
+            // Try all value-bearing widgets
+            wasm._embf_slider_set_value?.(ptr, action.value);
+            wasm._embf_bar_set_value?.(ptr, action.value);
+            wasm._embf_arc_set_value?.(ptr, action.value);
+            break;
+        }
+        case "set_checked": {
+            const ptr = idToObjPtr.get(action.target);
+            if (!ptr) return;
+            wasm._embf_switch_set_state?.(ptr, action.checked ? 1 : 0);
+            wasm._embf_checkbox_set_state?.(ptr, action.checked ? 1 : 0);
+            break;
+        }
+        case "set_hidden": {
+            const ptr = idToObjPtr.get(action.target);
+            if (!ptr) return;
+            if (action.hidden) {
+                // lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN) — flag value 1
+                wasm._embf_obj_set_hidden?.(ptr, 1);
+            } else {
+                wasm._embf_obj_set_hidden?.(ptr, 0);
+            }
+            break;
+        }
+    }
 }
 
 // ── Input forwarding ───────────────────────────────────────────────────────────

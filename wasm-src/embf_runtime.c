@@ -60,10 +60,31 @@ static uint32_t tick_get_cb(void)
     return (uint32_t)emscripten_get_now();
 }
 
+/* ── Color helper ───────────────────────────────────────────────────────── */
+
+/* color is packed as ARGB8888 in a uint32: 0xAARRGGBB */
+static lv_color_t unpack_color(uint32_t argb)
+{
+    uint8_t r = (argb >> 16) & 0xFF;
+    uint8_t g = (argb >>  8) & 0xFF;
+    uint8_t b = (argb >>  0) & 0xFF;
+    return lv_color_make(r, g, b);
+}
+
 /* ── Public API ─────────────────────────────────────────────────────────── */
 
+/**
+ * Initialise LVGL and create the display.
+ *
+ * @param width         Display width in pixels
+ * @param height        Display height in pixels
+ * @param dark_theme    1 = dark theme, 0 = light theme
+ * @param primary_argb  Primary theme color packed as 0xAARRGGBB (0 = default palette blue)
+ * @param secondary_argb Secondary theme color packed as 0xAARRGGBB (0 = default palette cyan)
+ */
 EMSCRIPTEN_KEEPALIVE
-void embf_init(int width, int height, int dark_theme)
+void embf_init(int width, int height, int dark_theme,
+               uint32_t primary_argb, uint32_t secondary_argb)
 {
     g_width  = width;
     g_height = height;
@@ -91,18 +112,13 @@ void embf_init(int width, int height, int dark_theme)
 
     lv_display_set_flush_cb(g_display, flush_cb);
 
+    /* Resolve theme colors */
+    lv_color_t primary   = primary_argb   ? unpack_color(primary_argb)   : lv_palette_main(LV_PALETTE_BLUE);
+    lv_color_t secondary = secondary_argb ? unpack_color(secondary_argb) : lv_palette_main(LV_PALETTE_CYAN);
+
     /* Apply theme */
-    lv_theme_t *theme = dark_theme
-        ? lv_theme_default_init(g_display,
-              lv_palette_main(LV_PALETTE_BLUE),
-              lv_palette_main(LV_PALETTE_CYAN),
-              true,  /* dark */
-              LV_FONT_DEFAULT)
-        : lv_theme_default_init(g_display,
-              lv_palette_main(LV_PALETTE_BLUE),
-              lv_palette_main(LV_PALETTE_CYAN),
-              false, /* light */
-              LV_FONT_DEFAULT);
+    lv_theme_t *theme = lv_theme_default_init(
+        g_display, primary, secondary, dark_theme ? true : false, LV_FONT_DEFAULT);
     lv_display_set_theme(g_display, theme);
 }
 
@@ -299,16 +315,100 @@ lv_obj_t *embf_create_container(lv_obj_t *parent, int x, int y, int w, int h)
     return obj;
 }
 
-/* ── Style setters ──────────────────────────────────────────────────────── */
-
-/* color is packed as ARGB8888 in a uint32: 0xAARRGGBB */
-static lv_color_t unpack_color(uint32_t argb)
+EMSCRIPTEN_KEEPALIVE
+lv_obj_t *embf_create_dropdown(lv_obj_t *parent, int x, int y, int w, int h)
 {
-    uint8_t r = (argb >> 16) & 0xFF;
-    uint8_t g = (argb >>  8) & 0xFF;
-    uint8_t b = (argb >>  0) & 0xFF;
-    return lv_color_make(r, g, b);
+    lv_obj_t *obj = lv_dropdown_create(parent);
+    set_pos_size(obj, x, y, w, h);
+    return obj;
 }
+
+EMSCRIPTEN_KEEPALIVE
+void embf_dropdown_set_options(lv_obj_t *obj, const char *options)
+{
+    lv_dropdown_set_options(obj, options);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void embf_dropdown_set_selected(lv_obj_t *obj, int index)
+{
+    lv_dropdown_set_selected(obj, (uint32_t)index);
+}
+
+EMSCRIPTEN_KEEPALIVE
+lv_obj_t *embf_create_roller(lv_obj_t *parent, int x, int y, int w, int h)
+{
+    lv_obj_t *obj = lv_roller_create(parent);
+    set_pos_size(obj, x, y, w, h);
+    return obj;
+}
+
+EMSCRIPTEN_KEEPALIVE
+void embf_roller_set_options(lv_obj_t *obj, const char *options, int infinite)
+{
+    lv_roller_set_options(obj, options, infinite ? LV_ROLLER_MODE_INFINITE : LV_ROLLER_MODE_NORMAL);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void embf_roller_set_selected(lv_obj_t *obj, int index)
+{
+    lv_roller_set_selected(obj, (uint32_t)index, LV_ANIM_OFF);
+}
+
+EMSCRIPTEN_KEEPALIVE
+lv_obj_t *embf_create_textarea(lv_obj_t *parent, int x, int y, int w, int h)
+{
+    lv_obj_t *obj = lv_textarea_create(parent);
+    set_pos_size(obj, x, y, w, h);
+    return obj;
+}
+
+EMSCRIPTEN_KEEPALIVE
+void embf_textarea_set_text(lv_obj_t *obj, const char *text)
+{
+    lv_textarea_set_text(obj, text);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void embf_textarea_set_placeholder(lv_obj_t *obj, const char *text)
+{
+    lv_textarea_set_placeholder_text(obj, text);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void embf_textarea_set_one_line(lv_obj_t *obj, int one_line)
+{
+    lv_textarea_set_one_line(obj, one_line ? true : false);
+}
+
+EMSCRIPTEN_KEEPALIVE
+lv_obj_t *embf_create_line(lv_obj_t *parent, int x, int y, int w, int h)
+{
+    lv_obj_t *obj = lv_line_create(parent);
+    set_pos_size(obj, x, y, w, h);
+    return obj;
+}
+
+/**
+ * Set line points from a flat int32 array: [x0, y0, x1, y1, ..., xn, yn].
+ * Internally allocates a persistent lv_point_precise_t array (never freed,
+ * acceptable for the preview's bounded lifetime).
+ */
+EMSCRIPTEN_KEEPALIVE
+void embf_line_set_points(lv_obj_t *obj, const int *xy, int count)
+{
+    if (count <= 0) return;
+    lv_point_precise_t *pts = (lv_point_precise_t *)malloc((size_t)count * sizeof(lv_point_precise_t));
+    if (!pts) return;
+    for (int i = 0; i < count; i++) {
+        pts[i].x = (lv_value_precise_t)xy[i * 2];
+        pts[i].y = (lv_value_precise_t)xy[i * 2 + 1];
+    }
+    lv_line_set_points(obj, pts, (uint32_t)count);
+    /* pts intentionally not freed: LVGL holds this pointer until the object is deleted */
+}
+
+/* ── Style setters ──────────────────────────────────────────────────────── */
 
 EMSCRIPTEN_KEEPALIVE
 void embf_obj_set_style_bg_color(lv_obj_t *obj, uint32_t argb)
@@ -340,6 +440,113 @@ void embf_obj_set_style_pad_all(lv_obj_t *obj, int pad)
 {
     lv_obj_set_style_pad_all(obj, (lv_coord_t)pad, LV_PART_MAIN);
 }
+
+/* Map an integer pixel size to the nearest compiled-in Montserrat variant.
+ * Enabled sizes (lv_conf.h): 12 14 16 18 20 24 32 48            */
+static const lv_font_t *font_by_size(int size)
+{
+    if (size <=  12) return &lv_font_montserrat_12;
+    if (size <=  15) return &lv_font_montserrat_14;
+    if (size <=  17) return &lv_font_montserrat_16;
+    if (size <=  19) return &lv_font_montserrat_18;
+    if (size <=  22) return &lv_font_montserrat_20;
+    if (size <=  28) return &lv_font_montserrat_24;
+    if (size <=  40) return &lv_font_montserrat_32;
+    return &lv_font_montserrat_48;
+}
+
+EMSCRIPTEN_KEEPALIVE
+void embf_obj_set_hidden(lv_obj_t *obj, int hidden)
+{
+    if (hidden) {
+        lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_remove_flag(obj, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+EMSCRIPTEN_KEEPALIVE
+void embf_obj_set_style_font_size(lv_obj_t *obj, int size)
+{
+    lv_obj_set_style_text_font(obj, font_by_size(size), LV_PART_MAIN);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void embf_obj_set_style_border_color(lv_obj_t *obj, uint32_t argb)
+{
+    lv_obj_set_style_border_color(obj, unpack_color(argb), LV_PART_MAIN);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void embf_obj_set_style_text_align(lv_obj_t *obj, int align)
+{
+    /* align: 0=left, 1=center, 2=right */
+    lv_text_align_t a = align == 1 ? LV_TEXT_ALIGN_CENTER
+                      : align == 2 ? LV_TEXT_ALIGN_RIGHT
+                      :              LV_TEXT_ALIGN_LEFT;
+    lv_obj_set_style_text_align(obj, a, LV_PART_MAIN);
+}
+
+/* ── Event queue ────────────────────────────────────────────────────────── */
+
+#define EMBF_EVENT_QUEUE_SIZE 32
+
+typedef struct {
+    lv_obj_t *obj;
+    uint32_t  code;
+    int32_t   value;
+} EmbfQueuedEvent;
+
+static EmbfQueuedEvent g_evt_queue[EMBF_EVENT_QUEUE_SIZE];
+static int g_evt_head = 0;
+static int g_evt_tail = 0;
+
+static void generic_event_cb(lv_event_t *e)
+{
+    lv_obj_t        *obj  = lv_event_get_target_obj(e);
+    lv_event_code_t  code = lv_event_get_code(e);
+
+    int32_t value = 0;
+    if (code == LV_EVENT_VALUE_CHANGED) {
+        /* Best-effort: try each value-bearing getter; LVGL returns 0 on mismatch */
+        value = (int32_t)lv_slider_get_value(obj);
+    }
+
+    int next = (g_evt_tail + 1) % EMBF_EVENT_QUEUE_SIZE;
+    if (next != g_evt_head) { /* queue not full */
+        g_evt_queue[g_evt_tail].obj   = obj;
+        g_evt_queue[g_evt_tail].code  = (uint32_t)code;
+        g_evt_queue[g_evt_tail].value = value;
+        g_evt_tail = next;
+    }
+}
+
+/* Static poll-result slots — JS reads these after embf_poll_event() returns 1 */
+static lv_obj_t *g_poll_obj   = NULL;
+static uint32_t  g_poll_code  = 0;
+static int32_t   g_poll_value = 0;
+
+EMSCRIPTEN_KEEPALIVE
+void embf_register_event(lv_obj_t *obj, uint32_t event_code)
+{
+    lv_obj_add_event_cb(obj, generic_event_cb, (lv_event_code_t)event_code, NULL);
+}
+
+EMSCRIPTEN_KEEPALIVE
+int embf_poll_event(void)
+{
+    if (g_evt_head == g_evt_tail) return 0; /* empty */
+    g_poll_obj   = g_evt_queue[g_evt_head].obj;
+    g_poll_code  = g_evt_queue[g_evt_head].code;
+    g_poll_value = g_evt_queue[g_evt_head].value;
+    g_evt_head   = (g_evt_head + 1) % EMBF_EVENT_QUEUE_SIZE;
+    return 1;
+}
+
+/* Accessors — return pointer into WASM linear memory so JS can read via HEAPU32/HEAP32 */
+EMSCRIPTEN_KEEPALIVE lv_obj_t **embf_poll_obj_ptr(void)   { return &g_poll_obj; }
+EMSCRIPTEN_KEEPALIVE uint32_t  *embf_poll_code_ptr(void)  { return &g_poll_code; }
+EMSCRIPTEN_KEEPALIVE int32_t   *embf_poll_value_ptr(void) { return &g_poll_value; }
 
 /* ── Input events ───────────────────────────────────────────────────────── */
 

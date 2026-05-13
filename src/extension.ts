@@ -50,10 +50,10 @@ export function activate(context: vscode.ExtensionContext): void {
         })
     );
 
-    // ── Auto-open preview + diagnostics when a .embf document is opened ─────
+    // ── Auto-open preview (optional) + diagnostics when a .embf document opens ─
     context.subscriptions.push(
         vscode.workspace.onDidOpenTextDocument(doc => {
-            if (doc.fileName.endsWith(".embf")) {
+            if (doc.fileName.endsWith(".embf") && shouldAutoOpenPreview()) {
                 openPreview(doc.fileName, context.extensionUri);
             }
             if (isEmbfDocument(doc)) {
@@ -62,9 +62,24 @@ export function activate(context: vscode.ExtensionContext): void {
         })
     );
 
-    // ── If a .embf is already active on startup, open its preview ────────────
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeConfiguration(ev => {
+            if (!ev.affectsConfiguration("embeddedflow.autoOpenPreview")) {
+                return;
+            }
+            if (!shouldAutoOpenPreview()) {
+                return;
+            }
+            const doc = vscode.window.activeTextEditor?.document;
+            if (doc?.fileName.endsWith(".embf")) {
+                openPreview(doc.fileName, context.extensionUri);
+            }
+        })
+    );
+
+    // ── If a .embf is already active on startup, open its preview (when enabled) ─
     const activeDoc = vscode.window.activeTextEditor?.document;
-    if (activeDoc?.fileName.endsWith(".embf")) {
+    if (activeDoc?.fileName.endsWith(".embf") && shouldAutoOpenPreview()) {
         openPreview(activeDoc.fileName, context.extensionUri);
     }
 
@@ -114,6 +129,27 @@ export function activate(context: vscode.ExtensionContext): void {
             );
         })
     );
+}
+
+function shouldAutoOpenPreview(): boolean {
+    return vscode.workspace.getConfiguration("embeddedflow").get<boolean>("autoOpenPreview", true);
+}
+
+/**
+ * `embeddedflow.outputDirectory`: empty → use codegen default; relative → under the .embf parent;
+ * absolute → that path.
+ */
+function resolveCodegenOutputDirFromSettings(embfPath: string): string | undefined {
+    const raw =
+        vscode.workspace.getConfiguration("embeddedflow").get<string>("outputDirectory") ?? "";
+    const t = raw.trim();
+    if (!t) {
+        return undefined;
+    }
+    if (path.isAbsolute(t)) {
+        return path.normalize(t);
+    }
+    return path.normalize(path.join(path.dirname(embfPath), t));
 }
 
 function isEmbfDocument(doc: vscode.TextDocument): boolean {
@@ -224,7 +260,7 @@ async function runCodeGen(filePath: string): Promise<void> {
         return;
     }
 
-    const result = generateCode(project, filePath);
+    const result = generateCode(project, filePath, resolveCodegenOutputDirFromSettings(filePath));
     const outputDir = result.outputDir;
 
     // Confirm if output directory already exists and has files

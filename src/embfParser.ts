@@ -188,10 +188,58 @@ function validateOptionalEvents(o: Record<string, unknown>, path: string): void 
             if (typeof a !== "object" || a === null) {
                 throw new EmbfParseError(`${evPath}.actions[${ai}] must be an object`);
             }
-            if (typeof (a as Record<string, unknown>)["type"] !== "string") {
+            const ao = a as Record<string, unknown>;
+            if (typeof ao["type"] !== "string") {
                 throw new EmbfParseError(`${evPath}.actions[${ai}].type must be a string`);
             }
+            validateEventActionShape(ao, `${evPath}.actions[${ai}]`);
         }
+    }
+}
+
+function validateEventActionShape(action: Record<string, unknown>, ap: string): void {
+    const ty = action["type"] as string;
+    const needTarget = (label: string) => {
+        if (typeof action["target"] !== "string" || !action["target"].trim()) {
+            throw new EmbfParseError(`${ap}: ${label} requires non-empty string "target"`);
+        }
+    };
+
+    switch (ty) {
+        case "navigate":
+            needTarget("navigate");
+            break;
+        case "set_text":
+            needTarget("set_text");
+            if (typeof action["text"] !== "string") {
+                throw new EmbfParseError(`${ap}: set_text requires string "text"`);
+            }
+            break;
+        case "set_value":
+            needTarget("set_value");
+            if (!isFiniteNumber(action["value"])) {
+                throw new EmbfParseError(`${ap}: set_value requires finite numeric "value"`);
+            }
+            break;
+        case "set_checked":
+            needTarget("set_checked");
+            if (typeof action["checked"] !== "boolean") {
+                throw new EmbfParseError(`${ap}: set_checked requires boolean "checked"`);
+            }
+            break;
+        case "set_hidden":
+            needTarget("set_hidden");
+            if (typeof action["hidden"] !== "boolean") {
+                throw new EmbfParseError(`${ap}: set_hidden requires boolean "hidden"`);
+            }
+            break;
+        case "set_theme":
+            if (action["dark"] !== undefined && typeof action["dark"] !== "boolean") {
+                throw new EmbfParseError(`${ap}: set_theme "dark" must be a boolean when set`);
+            }
+            break;
+        default:
+            throw new EmbfParseError(`${ap}: unknown action type "${ty}"`);
     }
 }
 

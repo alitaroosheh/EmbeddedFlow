@@ -82,6 +82,16 @@
           "default": "9.5.0",
           "enum": ["8.4.0", "9.2.2", "9.3.0", "9.4.0", "9.5.0"],
           "description": "Default LVGL version for new projects"
+        },
+        "embeddedflow.autoOpenPreview": {
+          "type": "boolean",
+          "default": true,
+          "description": "When true, opening a .embf file automatically opens the UI preview beside the editor."
+        },
+        "embeddedflow.outputDirectory": {
+          "type": "string",
+          "default": "",
+          "description": "Output folder for generated C code: relative to the .embf file’s directory, or an absolute path. Leave empty to use ui_output next to the .embf file."
         }
       }
     }

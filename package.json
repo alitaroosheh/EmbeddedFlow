@@ -7,22 +7,42 @@
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": ["Visualization", "Other"],
-  "keywords": ["lvgl", "embedded", "ui", "preview", "wasm"],
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "keywords": [
+    "lvgl",
+    "embedded",
+    "ui",
+    "preview",
+    "wasm"
+  ],
   "activationEvents": [
     "onLanguage:embf",
     "workspaceContains:**/*.embf",
     "onCommand:embeddedflow.openPreview",
     "onCommand:embeddedflow.newProject",
-    "onCommand:embeddedflow.generateCode"
+    "onCommand:embeddedflow.generateCode",
+    "onCommand:embeddedflow.showOutput"
   ],
   "main": "./out/extension.js",
+  "icon": "media/erminity-mark.png",
   "contributes": {
     "languages": [
       {
         "id": "embf",
-        "aliases": ["EmbeddedFlow Project", "embf"],
-        "extensions": [".embf"],
+        "aliases": [
+          "EmbeddedFlow Project",
+          "embf"
+        ],
+        "extensions": [
+          ".embf"
+        ],
+        "icon": {
+          "light": "./media/erminity-mark.png",
+          "dark": "./media/erminity-mark.png"
+        },
         "configuration": "./language-configuration.json"
       }
     ],
@@ -40,6 +60,11 @@
         "command": "embeddedflow.generateCode",
         "title": "EmbeddedFlow: Generate C Code",
         "icon": "$(file-code)"
+      },
+      {
+        "command": "embeddedflow.showOutput",
+        "title": "EmbeddedFlow: Show Output Log",
+        "icon": "$(output)"
       }
     ],
     "menus": {
@@ -53,6 +78,11 @@
           "command": "embeddedflow.generateCode",
           "when": "resourceExtname == .embf",
           "group": "navigation"
+        },
+        {
+          "command": "embeddedflow.showOutput",
+          "when": "resourceExtname == .embf",
+          "group": "navigation"
         }
       ],
       "explorer/context": [
@@ -63,6 +93,11 @@
         },
         {
           "command": "embeddedflow.generateCode",
+          "when": "resourceExtname == .embf",
+          "group": "embeddedflow"
+        },
+        {
+          "command": "embeddedflow.showOutput",
           "when": "resourceExtname == .embf",
           "group": "embeddedflow"
         }
@@ -80,7 +115,13 @@
         "embeddedflow.defaultLvglVersion": {
           "type": "string",
           "default": "9.5.0",
-          "enum": ["8.4.0", "9.2.2", "9.3.0", "9.4.0", "9.5.0"],
+          "enum": [
+            "8.4.0",
+            "9.2.2",
+            "9.3.0",
+            "9.4.0",
+            "9.5.0"
+          ],
           "description": "Default LVGL version for new projects"
         },
         "embeddedflow.autoOpenPreview": {
@@ -92,6 +133,11 @@
           "type": "string",
           "default": "",
           "description": "Output folder for generated C code: relative to the .embf file’s directory, or an absolute path. Leave empty to use ui_output next to the .embf file."
+        },
+        "embeddedflow.liveGenerateOnSave": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, saving a .embf file regenerates C code after a short delay. Overwrites output files without confirmation. Skipped if the project has parse or semantic errors."
         }
       }
     }
@@ -99,11 +145,14 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "watch": "tsc -watch -p ./",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
-    "typescript": "^5.3.0"
+    "typescript": "^5.3.0",
+    "vitest": "^2.1.9"
   }
 }

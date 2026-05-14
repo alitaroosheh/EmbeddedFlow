@@ -12,6 +12,7 @@
  * Communication protocol (webview → host):
  *   { type: "ready" }
  *   { type: "log", level: "info"|"warn"|"error", text: string }
+ *   { type: "addWidget", pageIndex: number, widgetType: string }
  */
 
 // ── VSCode API ────────────────────────────────────────────────────────────────
@@ -27,6 +28,7 @@ const ctx = canvas.getContext("2d");
 const errorOverlay = document.getElementById("error-overlay");
 const loadingOverlay = document.getElementById("loading-overlay");
 const pageSelect = document.getElementById("page-select");
+const widgetAddSelect = document.getElementById("widget-add-select");
 const statusEl = document.getElementById("status");
 
 // ── Runtime state ─────────────────────────────────────────────────────────────
@@ -690,6 +692,18 @@ pageSelect.addEventListener("change", () => {
     const idx = parseInt(pageSelect.value, 10);
     buildUiFromProject(currentProject, idx);
 });
+
+if (widgetAddSelect) {
+    widgetAddSelect.addEventListener("change", () => {
+        const widgetType = widgetAddSelect.value;
+        if (!widgetType || !currentProject) {
+            return;
+        }
+        const pageIndex = parseInt(pageSelect.value, 10) || 0;
+        vscode.postMessage({ type: "addWidget", pageIndex, widgetType });
+        widgetAddSelect.value = "";
+    });
+}
 
 function populatePageSelect(pages) {
     pageSelect.innerHTML = "";

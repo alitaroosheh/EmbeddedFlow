@@ -1,6 +1,8 @@
 .vscode/**
 .vscode-test/**
 src/**
+tests/**
+vitest.config.ts
 .gitignore
 **/*.map
 **/*.ts

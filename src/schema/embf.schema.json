@@ -47,6 +47,7 @@
     },
     "theme": {
       "type": "object",
+      "required": ["dark"],
       "additionalProperties": false,
       "properties": {
         "dark": { "type": "boolean" },
@@ -92,8 +93,8 @@
       "required": ["id", "name", "components"],
       "additionalProperties": false,
       "properties": {
-        "id": { "type": "string" },
-        "name": { "type": "string" },
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
         "backgroundColor": { "type": "string" },
         "components": {
           "type": "array",
@@ -134,7 +135,11 @@
           "additionalProperties": false,
           "properties": {
             "type": { "const": "navigate" },
-            "target": { "type": "string", "description": "Page ID to load" }
+            "target": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Page ID to load"
+            }
           }
         },
         {
@@ -143,7 +148,11 @@
           "additionalProperties": false,
           "properties": {
             "type": { "const": "set_text" },
-            "target": { "type": "string", "description": "Component ID of the label" },
+            "target": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Component ID of the label"
+            },
             "text": { "type": "string" }
           }
         },
@@ -153,7 +162,11 @@
           "additionalProperties": false,
           "properties": {
             "type": { "const": "set_value" },
-            "target": { "type": "string", "description": "Component ID of slider / bar / arc" },
+            "target": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Component ID of slider / bar / arc"
+            },
             "value": { "type": "number" }
           }
         },
@@ -163,7 +176,11 @@
           "additionalProperties": false,
           "properties": {
             "type": { "const": "set_checked" },
-            "target": { "type": "string", "description": "Component ID of switch / checkbox" },
+            "target": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Component ID of switch / checkbox"
+            },
             "checked": { "type": "boolean" }
           }
         },
@@ -173,7 +190,11 @@
           "additionalProperties": false,
           "properties": {
             "type": { "const": "set_hidden" },
-            "target": { "type": "string", "description": "Component ID" },
+            "target": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Component ID"
+            },
             "hidden": { "type": "boolean" }
           }
         },
@@ -204,7 +225,7 @@
         "actions": {
           "type": "array",
           "items": { "$ref": "#/definitions/action" },
-          "minItems": 1
+          "description": "May be empty; at least one action is typical"
         }
       }
     },
@@ -212,7 +233,7 @@
       "type": "object",
       "required": ["id", "type", "x", "y", "width", "height"],
       "properties": {
-        "id": { "type": "string" },
+        "id": { "type": "string", "minLength": 1 },
         "type": { "type": "string" },
         "x": { "type": "integer" },
         "y": { "type": "integer" },

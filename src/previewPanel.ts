@@ -1,8 +1,10 @@
 import * as vscode from "vscode";
 import * as path from "path";
-import * as fs from "fs";
-import { EmbfProject, LvglVersion } from "./types/embf";
-import { EmbfParseError, getEffectiveDisplaySize } from "./embfParser";
+import { EmbfProject } from "./types/embf";
+import { WIDGET_PALETTE_ORDER } from "./embfPalette";
+import { EmbfParseError, getEffectiveDisplaySize, parseEmbf, parseEmbfSource } from "./embfParser";
+import { appendWidgetToEmbfFile } from "./embfWidgetInsert";
+import { embeddedFlowLog } from "./outputLog";
 
 // Messages sent from extension host → webview
 export type HostToWebviewMessage =
@@ -12,7 +14,8 @@ export type HostToWebviewMessage =
 // Messages sent from webview → extension host
 export type WebviewToHostMessage =
     | { type: "ready" }
-    | { type: "log"; level: "info" | "warn" | "error"; text: string };
+    | { type: "log"; level: "info" | "warn" | "error"; text: string }
+    | { type: "addWidget"; pageIndex: number; widgetType: string };
 
 export interface WebviewLoadPayload {
     project: EmbfProject;
@@ -111,14 +114,30 @@ export class EmbfPreviewPanel {
 
     private _onWebviewMessage(msg: WebviewToHostMessage): void {
         if (msg.type === "log") {
-            const line = `[EmbeddedFlow Webview] ${msg.text}`;
-            if (msg.level === "error") {
-                console.error(line);
-            } else if (msg.level === "warn") {
-                console.warn(line);
-            } else {
-                console.log(line);
+            embeddedFlowLog("webview", msg.level, msg.text);
+        } else if (msg.type === "ready") {
+            embeddedFlowLog("webview", "info", "preview webview ready");
+        } else if (msg.type === "addWidget") {
+            const pageIndex = Number(msg.pageIndex);
+            const widgetType = String(msg.widgetType ?? "").trim();
+            if (!Number.isInteger(pageIndex) || pageIndex < 0 || !widgetType) {
+                return;
             }
+            void appendWidgetToEmbfFile(this._filePath, pageIndex, widgetType).then(ok => {
+                if (!ok) {
+                    return;
+                }
+                try {
+                    const doc = vscode.workspace.textDocuments.find(
+                        d => d.uri.scheme === "file" && d.uri.fsPath === this._filePath
+                    );
+                    const project = doc ? parseEmbfSource(doc.getText()) : parseEmbf(this._filePath);
+                    this.sendProject(project);
+                } catch (e) {
+                    const m = e instanceof EmbfParseError ? e.message : String(e);
+                    embeddedFlowLog("preview", "warn", `refresh after addWidget: ${m}`);
+                }
+            });
         }
     }
 
@@ -130,6 +149,7 @@ export class EmbfPreviewPanel {
 
     private _buildHtml(): string {
         const webviewJsUri = this._webviewUri("webview.js");
+        const faviconUri = this._webviewUri("erminity-mark.png").toString();
         const nonce = getNonce();
 
         // CSP: nonce for inline scripts, cspSource for extension-hosted scripts/wasm
@@ -148,6 +168,7 @@ export class EmbfPreviewPanel {
     <meta charset="UTF-8" />
     <meta http-equiv="Content-Security-Policy" content="${csp}" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/png" href="${faviconUri}" />
     <title>EmbeddedFlow Preview</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -179,6 +200,15 @@ export class EmbfPreviewPanel {
             border-radius: 3px;
         }
         #toolbar label { font-size: 12px; color: #999; }
+        #widget-add-select {
+            background: #3c3c3c;
+            color: #ccc;
+            border: 1px solid #555;
+            padding: 2px 6px;
+            font-size: 12px;
+            border-radius: 3px;
+            max-width: 160px;
+        }
         #status {
             margin-left: auto;
             font-size: 11px;
@@ -237,6 +267,11 @@ export class EmbfPreviewPanel {
     <div id="toolbar">
         <label>Page:</label>
         <select id="page-select"></select>
+        <label>Add widget:</label>
+        <select id="widget-add-select" title="Insert into current page (.embf is updated)">
+            <option value="">— type —</option>
+            ${WIDGET_PALETTE_ORDER.map(w => `<option value="${w}">${w}</option>`).join("")}
+        </select>
         <span id="status">Waiting for project…</span>
     </div>
     <div id="canvas-container">

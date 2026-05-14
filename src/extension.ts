@@ -6,6 +6,7 @@ import { EmbfParseError, parseEmbf, parseEmbfSource, watchEmbf } from "./embfPar
 import { lintEmbfProject } from "./embfSemanticLint";
 import { EmbfProject } from "./types/embf";
 import { generateCode, writeGeneratedFiles } from "./codeGen/index";
+import { registerEmbeddedFlowOutput, embeddedFlowLog } from "./outputLog";
 
 // Map from .embf file path → file watcher
 const watchers = new Map<string, fs.FSWatcher>();
@@ -13,8 +14,14 @@ const watchers = new Map<string, fs.FSWatcher>();
 const embfDiagnostics = vscode.languages.createDiagnosticCollection("embeddedflow");
 const embfLintDebounceMs = 400;
 const embfLintTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const liveGenDebounceMs = 600;
+const liveGenTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 export function activate(context: vscode.ExtensionContext): void {
+    const embfOutput = vscode.window.createOutputChannel("EmbeddedFlow");
+    context.subscriptions.push(embfOutput);
+    registerEmbeddedFlowOutput(embfOutput);
+
     context.subscriptions.push(embfDiagnostics);
 
     // ── Command: Open Preview ─────────────────────────────────────────────────
@@ -47,6 +54,12 @@ export function activate(context: vscode.ExtensionContext): void {
                 return;
             }
             await runCodeGen(filePath);
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand("embeddedflow.showOutput", () => {
+            embfOutput.show(true);
         })
     );
 
@@ -94,6 +107,7 @@ export function activate(context: vscode.ExtensionContext): void {
             if (isEmbfDocument(doc)) {
                 updateEmbfDiagnostics(doc);
             }
+            scheduleLiveGenerateOnSave(doc);
         })
     );
     context.subscriptions.push(
@@ -105,6 +119,11 @@ export function activate(context: vscode.ExtensionContext): void {
                 if (t) {
                     clearTimeout(t);
                     embfLintTimers.delete(key);
+                }
+                const liveT = liveGenTimers.get(doc.uri.fsPath);
+                if (liveT) {
+                    clearTimeout(liveT);
+                    liveGenTimers.delete(doc.uri.fsPath);
                 }
             }
         })
@@ -199,6 +218,14 @@ export function deactivate(): void {
         watcher.close();
     }
     watchers.clear();
+    for (const t of embfLintTimers.values()) {
+        clearTimeout(t);
+    }
+    embfLintTimers.clear();
+    for (const t of liveGenTimers.values()) {
+        clearTimeout(t);
+    }
+    liveGenTimers.clear();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -226,8 +253,14 @@ function openPreview(filePath: string, extensionUri: vscode.Uri): void {
     const panel = EmbfPreviewPanel.createOrShow(filePath, extensionUri);
 
     if (project instanceof EmbfParseError) {
+        embeddedFlowLog("preview", "error", `${path.basename(filePath)}: ${project.message}`);
         panel.sendError(project.message);
     } else {
+        embeddedFlowLog(
+            "preview",
+            "info",
+            `loaded ${path.basename(filePath)} (${project.pages.length} page(s), LVGL ${project.project.lvglVersion})`
+        );
         panel.sendProject(project);
     }
 
@@ -242,6 +275,7 @@ function openPreview(filePath: string, extensionUri: vscode.Uri): void {
                 return;
             }
             if (result instanceof EmbfParseError) {
+                embeddedFlowLog("preview", "error", `${path.basename(filePath)}: ${result.message}`);
                 p.sendError(result.message);
             } else {
                 p.sendProject(result);
@@ -251,11 +285,86 @@ function openPreview(filePath: string, extensionUri: vscode.Uri): void {
     }
 }
 
+function shouldLiveGenerateOnSave(): boolean {
+    return vscode.workspace.getConfiguration("embeddedflow").get<boolean>("liveGenerateOnSave", false);
+}
+
+function scheduleLiveGenerateOnSave(doc: vscode.TextDocument): void {
+    if (!shouldLiveGenerateOnSave()) {
+        return;
+    }
+    if (doc.uri.scheme !== "file" || !doc.fileName.toLowerCase().endsWith(".embf")) {
+        return;
+    }
+    const fp = doc.uri.fsPath;
+    const prev = liveGenTimers.get(fp);
+    if (prev) {
+        clearTimeout(prev);
+    }
+    liveGenTimers.set(
+        fp,
+        setTimeout(() => {
+            liveGenTimers.delete(fp);
+            void runLiveCodeGen(fp);
+        }, liveGenDebounceMs)
+    );
+}
+
+/**
+ * Regenerate C output after save. No overwrite prompt; skips on parse/semantic errors.
+ */
+async function runLiveCodeGen(filePath: string): Promise<void> {
+    let raw: string;
+    try {
+        raw = fs.readFileSync(filePath, "utf-8");
+    } catch {
+        return;
+    }
+    let project: EmbfProject;
+    try {
+        project = parseEmbfSource(raw);
+    } catch {
+        return;
+    }
+    const semantic = lintEmbfProject(raw, project);
+    if (semantic.length > 0) {
+        embeddedFlowLog(
+            "live",
+            "warn",
+            `skipped ${path.basename(filePath)}: ${semantic.length} semantic issue(s)`
+        );
+        vscode.window.setStatusBarMessage(
+            `EmbeddedFlow: live codegen skipped (${semantic.length} semantic issue(s))`,
+            5000
+        );
+        return;
+    }
+
+    const result = generateCode(project, filePath, resolveCodegenOutputDirFromSettings(filePath));
+    try {
+        const written = writeGeneratedFiles(result);
+        const rel = path.relative(path.dirname(filePath), result.outputDir);
+        embeddedFlowLog(
+            "live",
+            "info",
+            `wrote ${written.length} file(s) → ${rel}/ (${result.outputDir})`
+        );
+        vscode.window.setStatusBarMessage(
+            `EmbeddedFlow: wrote ${written.length} file(s) → ${rel}/`,
+            5000
+        );
+    } catch (e: any) {
+        embeddedFlowLog("live", "error", e.message ?? String(e));
+        vscode.window.showErrorMessage(`EmbeddedFlow (live generate): ${e.message}`);
+    }
+}
+
 async function runCodeGen(filePath: string): Promise<void> {
     let project: EmbfProject;
     try {
         project = parseEmbf(filePath);
     } catch (e: any) {
+        embeddedFlowLog("codegen", "error", e.message ?? String(e));
         vscode.window.showErrorMessage(`EmbeddedFlow: ${e.message}`);
         return;
     }
@@ -278,21 +387,28 @@ async function runCodeGen(filePath: string): Promise<void> {
     try {
         written = writeGeneratedFiles(result);
     } catch (e: any) {
+        embeddedFlowLog("codegen", "error", e.message ?? String(e));
         vscode.window.showErrorMessage(`EmbeddedFlow: Failed to write files: ${e.message}`);
         return;
     }
+
+    embeddedFlowLog("codegen", "info", `wrote ${written.length} file(s) → ${outputDir}`);
 
     // Show success notification with a button to open the output folder
     const rel = path.relative(path.dirname(filePath), outputDir);
     const action = await vscode.window.showInformationMessage(
         `Generated ${written.length} files → ${rel}/`,
         "Open Folder",
+        "Reveal in Explorer",
         "Show ui.c",
         "Show ui_display.h"
     );
 
     if (action === "Open Folder") {
         await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(outputDir));
+    } else if (action === "Reveal in Explorer") {
+        const revealUri = vscode.Uri.file(path.join(outputDir, "ui.c"));
+        await vscode.commands.executeCommand("revealInExplorer", revealUri);
     } else if (action === "Show ui.c") {
         const uiC = path.join(outputDir, "ui.c");
         const doc = await vscode.workspace.openTextDocument(uiC);

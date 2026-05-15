@@ -25,8 +25,7 @@ without manually editing JSON. It is the primary design surface of EmbeddedFlow.
 - [ ] Single-click selects a widget (highlights it with selection handles)
 - [ ] Drag a selected widget to reposition it
 - [ ] Drag resize handles to change width/height
-- [~] **Preview design overlay** — Ctrl/Cmd+click toggles selection; Shift+click adds; click empty canvas clears widget selection (page inspector); dragging moves all selected widgets together; **`selectedComponentIds` round-trips through host reload after edits**
-- [ ] Rubber-band (marquee) multi-select on canvas
+- [~] **Preview design overlay** — Ctrl/Cmd+click toggles; Shift+click adds; plain click empty ⇒ page inspector; **empty drag ⇒ marquee** (Shift/Ctrl augment as in §13.12); group drag moves all selected; **`selectedComponentIds`** round-trip on host reload.
 - [~] Bulk move and bulk delete (**preview overlay** sends `bulkMoveWidgets` / `bulkDeleteWidgets` to host)
 - [ ] Alt+drag duplicates a widget
 - [~] **Escape** clears widget selection in preview design mode (page inspector)

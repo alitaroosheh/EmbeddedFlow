@@ -26,6 +26,9 @@
  *   { type: "bulkDeleteWidgets", pageIndex: number, componentIds: string[] }
  *   { type: "undo", pageIndex: number, selectedComponentIds?: string[] }
  *   { type: "redo", pageIndex: number, selectedComponentIds?: string[] }
+ *
+ * Design overlay UX: rubber-band marquee on empty-canvas drag (replace selection; Shift = union;
+ * Ctrl/Cmd = toggle hits vs selection). Movement below threshold: plain ⇒ page inspector; with modifiers ⇒ noop.
  */
 
 // ── VSCode API ────────────────────────────────────────────────────────────────
@@ -117,6 +120,15 @@ let inspectorShowingPage = false;
 let dragState = null;
 
 /**
+ * Rubber-band selection on empty overlay (logical display coords).
+ * @type {{ ox: number; oy: number; x: number; y: number; shift: boolean; ctrl: boolean } | null}
+ */
+let marqueeState = null;
+
+/** At least one axis must exceed this delta (logical px) to count as marquee vs empty click */
+const MARQUEE_DRAG_THRESHOLD = 5;
+
+/**
  * Maps WASM object pointer (number) → component ID string.
  * Rebuilt every time a screen is constructed.
  * @type {Map<number, string>}
@@ -205,6 +217,8 @@ async function handleLoad(payload) {
     previewDarkOverride = null;
     displayWidth = payload.displayWidth;
     displayHeight = payload.displayHeight;
+    dragState = null;
+    marqueeState = null;
 
     /** Same WASM URI + running module → JSON-only rebalance (inspector debounced refresh): skip shimmer. */
     const quietReload =
@@ -834,6 +848,7 @@ function dispatchAction(action, eventValue, currentPage) {
             selectedComponentOrder = [];
             inspectorShowingPage = false;
             dragState = null;
+            marqueeState = null;
             pageSelectProgrammatic = true;
             try {
                 if (pageSelect) {
@@ -903,6 +918,7 @@ if (designModeCheck) {
             selectedComponentOrder = [];
             inspectorShowingPage = false;
             dragState = null;
+            marqueeState = null;
         }
         setDesignPointerMode();
         drawDesignOverlay();
@@ -953,7 +969,50 @@ function hitTestAt(page, px, py) {
     return walk(page.components ?? [], 0, 0);
 }
 
-/** @returns {{ x: number, y: number, width: number, height: number } | null} */
+/** @returns {{ id: string; ax: number; ay: number; width: number; height: number }[]} */
+function listAllWidgetsAbsRects(page) {
+    /** @type {{ id: string; ax: number; ay: number; width: number; height: number }[]} */
+    const out = [];
+    /** @param {object[]} components @param {number} parentX @param {number} parentY */
+    function walk(components, parentX, parentY) {
+        for (const c of components ?? []) {
+            const ax = parentX + c.x;
+            const ay = parentY + c.y;
+            out.push({ id: c.id, ax, ay, width: c.width, height: c.height });
+            if (c.children?.length) {
+                walk(c.children, ax, ay);
+            }
+        }
+    }
+    walk(page.components ?? [], 0, 0);
+    return out;
+}
+
+/** Axis-aligned intersection (closed boxes, logical pixels). */
+function rectsIntersect(ax, ay, aw, ah, bx, by, bw, bh) {
+    return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+}
+
+function normalizedMarqueeRect(m) {
+    const x = Math.min(m.ox, m.x);
+    const y = Math.min(m.oy, m.y);
+    const w = Math.abs(m.x - m.ox);
+    const h = Math.abs(m.y - m.oy);
+    return { x, y, w, h };
+}
+
+/** Ids that intersect the marquee rect, in tree preorder (parents before children). */
+function idsInMarqueeRect(page, rect) {
+    const all = listAllWidgetsAbsRects(page);
+    const chosen = [];
+    for (const w of all) {
+        if (rectsIntersect(rect.x, rect.y, rect.w, rect.h, w.ax, w.ay, w.width, w.height)) {
+            chosen.push(w.id);
+        }
+    }
+    return chosen;
+}
+
 function getAbsBounds(page, componentId) {
     /** @param {object[]} components @param {number} parentX @param {number} parentY */
     function walk(components, parentX, parentY) {
@@ -1009,13 +1068,29 @@ function drawDesignOverlay() {
     if (inspectorShowingPage) {
         designCtx.strokeRect(0.5, 0.5, displayWidth, displayHeight);
         designCtx.setLineDash([]);
-        return;
     }
 
-    for (const id of selectedComponentOrder) {
-        const b = getAbsBounds(page, id);
-        if (b) {
-            designCtx.strokeRect(b.x + 0.5, b.y + 0.5, b.width, b.height);
+    if (!inspectorShowingPage || selectedComponentOrder.length > 0) {
+        designCtx.strokeStyle = "#007acc";
+        designCtx.lineWidth = 2;
+        designCtx.setLineDash([4, 3]);
+        for (const id of selectedComponentOrder) {
+            const b = getAbsBounds(page, id);
+            if (b) {
+                designCtx.strokeRect(b.x + 0.5, b.y + 0.5, b.width, b.height);
+            }
+        }
+    }
+
+    if (marqueeState) {
+        const norm = normalizedMarqueeRect(marqueeState);
+        if (norm.w > 0 || norm.h > 0) {
+            designCtx.save();
+            designCtx.strokeStyle = "rgba(218, 165, 32, 0.95)";
+            designCtx.lineWidth = 1;
+            designCtx.setLineDash([3, 3]);
+            designCtx.strokeRect(norm.x + 0.5, norm.y + 0.5, norm.w, norm.h);
+            designCtx.restore();
         }
     }
     designCtx.setLineDash([]);
@@ -1080,15 +1155,8 @@ function layoutToolbarButton(act, label) {
     return `<button type="button" class="layout-act-btn tb-btn-small" data-layout-act="${esc(act)}">${esc(label)}</button>`;
 }
 
-function renderMultiInspectorHtml(ids) {
-    const list = ids.map(esc).join(", ");
+function multiInspectorLayoutActsHtml() {
     return (
-        `<div id="inspector-readonly"><strong>${ids.length}</strong> widgets selected</div>` +
-        `<div class="inspector-group-title">Multi-select</div>` +
-        `<p class="inspector-hint" style="font-size:11px;color:#888;line-height:1.35;margin:0 0 8px;">` +
-        `Ctrl+click: toggle · Shift+click: add · Click an already-selected widget to keep the group.` +
-        `</p>` +
-        `<div class="inspector-hint" style="font-size:11px;color:#aaa;margin:-4px 0 12px;line-height:1.3">${esc(list)}</div>` +
         `<div class="inspector-group-title">Align together</div>` +
         `<div class="inspector-layout-grid">` +
         layoutToolbarButton("align-left", "Left") +
@@ -1111,6 +1179,47 @@ function renderMultiInspectorHtml(ids) {
         layoutToolbarButton("grp-top", "To top") +
         layoutToolbarButton("grp-center", "Center in page") +
         `</div>`
+    );
+}
+
+function renderMultiInspectorHtml(ids) {
+    const list = ids.map(esc).join(", ");
+    return (
+        `<div id="inspector-readonly"><strong>${ids.length}</strong> widgets selected</div>` +
+        `<div class="inspector-group-title">Multi-select</div>` +
+        `<p class="inspector-hint" style="font-size:11px;color:#888;line-height:1.35;margin:0 0 8px;">` +
+        `Ctrl+click: toggle · Shift+click: add · Drag empty: marquee (Shift: add · Ctrl: toggle hits) · Click selected to keep group.` +
+        `</p>` +
+        `<div class="inspector-hint" style="font-size:11px;color:#aaa;margin:-4px 0 12px;line-height:1.3">${esc(list)}</div>` +
+        multiInspectorLayoutActsHtml()
+    );
+}
+
+function renderHomogeneousMultiInspectorHtml(ids, comps) {
+    const list = ids.map(esc).join(", ");
+    const t = /** @type {string} */ (comps[0].type);
+    const layoutM = {
+        x: consensusNum(comps, "x", 0),
+        y: consensusNum(comps, "y", 0),
+        width: consensusNum(comps, "width", 0),
+        height: consensusNum(comps, "height", 0),
+        hidden: consensusBool(comps, "hidden")
+    };
+    const typeM = buildConsensusWidgetModel(comps);
+    const stM = consensusStylesModel(comps);
+    const evM = consensusEventsModel(comps);
+    return (
+        `<div id="inspector-readonly"><strong>${ids.length}</strong> × <strong>${esc(t)}</strong></div>` +
+        `<div class="inspector-group-title">Multi-select (same type)</div>` +
+        `<p class="inspector-hint" style="font-size:11px;color:#888;line-height:1.35;margin:0 0 8px;">` +
+        `Edits apply to every selected widget. Fields marked (mixed) differ — leave blank to keep each widget’s value, or set a new shared value.` +
+        `</p>` +
+        `<div class="inspector-hint" style="font-size:11px;color:#aaa;margin:-4px 0 12px;line-height:1.3">${esc(list)}</div>` +
+        multiInspectorLayoutActsHtml() +
+        inspectorLayoutFieldsHtml(layoutM) +
+        `<div class="inspector-group-title">${esc(t)}</div>` +
+        widgetTypeSpecificFieldsHtml(t, typeM) +
+        inspectorAppearancesFromModels(stM, evM)
     );
 }
 
@@ -1255,6 +1364,7 @@ function clearInspectorSelection() {
     selectedComponentOrder = [];
     inspectorShowingPage = false;
     dragState = null;
+    marqueeState = null;
     drawDesignOverlay();
     renderInspector();
 }
@@ -1263,6 +1373,7 @@ function selectPageInspector() {
     inspectorShowingPage = true;
     selectedComponentOrder = [];
     dragState = null;
+    marqueeState = null;
     drawDesignOverlay();
     renderInspector();
 }
@@ -1271,6 +1382,7 @@ function setSelection(componentId) {
     inspectorShowingPage = false;
     selectedComponentOrder = componentId ? [componentId] : [];
     dragState = null;
+    marqueeState = null;
     drawDesignOverlay();
     renderInspector();
 }
@@ -1297,6 +1409,253 @@ function esc(s) {
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
         .replace(/"/g, "&quot;");
+}
+
+/** Consensus sentinel for homogeneous multi-inspector fields. */
+const INSP_MIXED = Symbol.for("embeddedflow.inspect.mixed");
+function isInspMixed(v) {
+    return v === INSP_MIXED;
+}
+
+function deepInspectEqual(a, b) {
+    if (a === b) {
+        return true;
+    }
+    if (a === undefined || b === undefined || a === null || b === null) {
+        return a === b;
+    }
+    if (typeof a === "number" && typeof b === "number") {
+        return Number.isFinite(a) && Number.isFinite(b) && a === b;
+    }
+    return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/** Consensus for floating / integer JSON fields (slider, arc, spinner, …). */
+function consensusNumeric(comps, key) {
+    const raw = comps.map(c => /** @type {Record<string, unknown>} */ (c)[key]);
+    if (!raw.every(v => deepInspectEqual(v, raw[0]))) {
+        return INSP_MIXED;
+    }
+    const n = Number(raw[0]);
+    return Number.isFinite(n) ? n : INSP_MIXED;
+}
+
+/** Consensus for integer-ish widget fields (`selectedIndex`, layout x/y, …). */
+function consensusNum(comps, key, fallback = 0) {
+    const n = consensusNumeric(comps, key);
+    if (isInspMixed(n)) return INSP_MIXED;
+    return Number.isFinite(n) ? Math.round(Number(n)) : fallback;
+}
+
+function consensusBool(comps, key) {
+    const v0 = !!/** @type {object} */ (comps[0])[key];
+    if (comps.every(c => !!/** @type {object} */ (c)[key] === v0)) {
+        return v0;
+    }
+    return INSP_MIXED;
+}
+
+function consensusStr(comps, key) {
+    const v0 = String(/** @type {object} */ (comps[0])[key] ?? "");
+    if (comps.every(c => String(/** @type {object} */ (c)[key] ?? "") === v0)) {
+        return v0;
+    }
+    return INSP_MIXED;
+}
+
+function consensusEnumStr(comps, key, emptyMeans = "") {
+    const v0 = /** @type {object} */ (comps[0])[key];
+    const s0 = typeof v0 === "string" ? v0 : emptyMeans;
+    if (comps.every(c => String(/** @type {object} */ (c)[key] ?? emptyMeans) === s0)) {
+        return s0;
+    }
+    return INSP_MIXED;
+}
+
+/** @param {object[]} comps */
+function consensusOptionsLines(comps) {
+    const lines0 = (/** @type {Record<string, unknown>} */ (comps[0]).options ?? []).map(String);
+    if (
+        comps.every(c =>
+            deepInspectEqual((/** @type {Record<string, unknown>} */ (c).options ?? []).map(String), lines0)
+        )
+    ) {
+        return lines0;
+    }
+    return INSP_MIXED;
+}
+
+/** @param {object[]} comps */
+function consensusLinePointsText(comps) {
+    const t0 = (/** @type {object} */ (comps[0]).points ?? [])
+        .map(p => `${p.x}, ${p.y}`)
+        .join("\n");
+    if (
+        comps.every(c =>
+            deepInspectEqual(
+                (/** @type {object} */ (c).points ?? []).map(p => ({ x: p.x, y: p.y })),
+                (/** @type {object} */ (comps[0]).points ?? []).map(p => ({ x: p.x, y: p.y }))
+            )
+        )
+    ) {
+        return t0;
+    }
+    return INSP_MIXED;
+}
+
+/** @param {object[]} comps */
+function consensusStylesModel(comps) {
+    /** @type {Record<string, unknown>} */
+    const out = {};
+    const strKeys = ["bgColor", "indicatorColor", "textColor", "borderColor", "fontFamily"];
+    for (const k of strKeys) {
+        const v0 = String((comps[0].styles ?? {})[k] ?? "");
+        if (comps.every(c => String((c.styles ?? {})[k] ?? "") === v0)) {
+            out[k] = v0;
+        } else {
+            out[k] = INSP_MIXED;
+        }
+    }
+
+    const numStyle = (key, pred) => {
+        const vals = comps.map(c => (c.styles ?? {})[key]);
+        if (vals.every(v => deepInspectEqual(v, vals[0])) && (pred ? pred(vals[0]) : true)) {
+            return vals[0];
+        }
+        return INSP_MIXED;
+    };
+
+    out.bgOpacity = numStyle("bgOpacity", v => v === undefined || v === null || v === "" || Number.isFinite(Number(v)));
+    out.borderWidth = numStyle("borderWidth", () => true);
+    out.borderRadius = numStyle("borderRadius", () => true);
+    out.fontSize = numStyle("fontSize", () => true);
+
+    const pad0 = (comps[0].styles ?? {}).padding;
+    if (comps.every(c => deepInspectEqual((c.styles ?? {}).padding, pad0))) {
+        out.padding = pad0;
+    } else {
+        out.padding = INSP_MIXED;
+    }
+
+    const al0 = String((comps[0].styles ?? {}).align ?? "");
+    if (comps.every(c => String((c.styles ?? {}).align ?? "") === al0)) {
+        out.align = al0;
+    } else {
+        out.align = INSP_MIXED;
+    }
+
+    return out;
+}
+
+/** @param {object[]} comps */
+function consensusEventsModel(comps) {
+    const e0 = comps[0].events ?? [];
+    const s0 = JSON.stringify(e0);
+    if (comps.every(c => JSON.stringify(c.events ?? []) === s0)) {
+        return e0;
+    }
+    return INSP_MIXED;
+}
+
+/** @param {object[]} comps */
+function buildConsensusWidgetModel(comps) {
+    const t = comps[0].type;
+    /** @type {Record<string, unknown>} */
+    const m = {};
+    switch (t) {
+        case "label":
+            m.text = consensusStr(comps, "text");
+            m.longMode = consensusEnumStr(comps, "longMode", "");
+            break;
+        case "button":
+            m.label = consensusStr(comps, "label");
+            break;
+        case "image":
+            m.src = consensusStr(comps, "src");
+            break;
+        case "slider":
+            m.min = consensusNumeric(comps, "min");
+            m.max = consensusNumeric(comps, "max");
+            m.value = consensusNumeric(comps, "value");
+            break;
+        case "bar":
+            m.min = consensusNumeric(comps, "min");
+            m.max = consensusNumeric(comps, "max");
+            m.value = consensusNumeric(comps, "value");
+            m.mode = consensusEnumStr(comps, "mode", "");
+            break;
+        case "arc":
+            m.min = consensusNumeric(comps, "min");
+            m.max = consensusNumeric(comps, "max");
+            m.value = consensusNumeric(comps, "value");
+            m.startAngle = consensusNumeric(comps, "startAngle");
+            m.endAngle = consensusNumeric(comps, "endAngle");
+            m.mode = consensusEnumStr(comps, "mode", "");
+            break;
+        case "switch":
+            m.checked = consensusBool(comps, "checked");
+            break;
+        case "checkbox":
+            m.text = consensusStr(comps, "text");
+            m.checked = consensusBool(comps, "checked");
+            break;
+        case "dropdown":
+            m.options = consensusOptionsLines(comps);
+            m.selectedIndex = consensusNum(comps, "selectedIndex", 0);
+            break;
+        case "roller":
+            m.options = consensusOptionsLines(comps);
+            m.selectedIndex = consensusNum(comps, "selectedIndex", 0);
+            m.mode = consensusEnumStr(comps, "mode", "");
+            break;
+        case "textarea":
+            m.text = consensusStr(comps, "text");
+            m.placeholder = consensusStr(comps, "placeholder");
+            m.oneLine = consensusBool(comps, "oneLine");
+            break;
+        case "spinner":
+            m.speed = consensusNumeric(comps, "speed");
+            m.arcLength = consensusNumeric(comps, "arcLength");
+            break;
+        case "line": {
+            m.linePointsText = consensusLinePointsText(comps);
+            m.rounded = consensusBool(comps, "rounded");
+            break;
+        }
+        case "container": {
+            const l0 = /** @type {unknown} */ (/** @type {Record<string, unknown>} */ (comps[0]).layout);
+            const s0 =
+                typeof l0 === "string" && /^(none|flex|grid)$/.test(l0) ? l0 : "none";
+            if (
+                comps.every(c => {
+                    const lv = /** @type {Record<string, unknown>} */ (c).layout;
+                    const s =
+                        typeof lv === "string" && /^(none|flex|grid)$/.test(lv) ? lv : "none";
+                    return s === s0;
+                })
+            ) {
+                m.layout = s0;
+            } else {
+                m.layout = INSP_MIXED;
+            }
+            m.flexFlow = consensusEnumStr(comps, "flexFlow", "");
+            break;
+        }
+        default:
+            break;
+    }
+    return m;
+}
+
+function refreshMixedCheckboxes(inspectorRoot) {
+    if (!inspectorRoot) {
+        return;
+    }
+    for (const el of inspectorRoot.querySelectorAll("input.inspector-mixed-cb[type=\"checkbox\"]")) {
+        if (el instanceof HTMLInputElement) {
+            el.indeterminate = true;
+        }
+    }
 }
 
 /** Parses #rgb / #rrggbb / #rrggbbaa into #rrggbb for &lt;input type="color"&gt;; null if unrecognized. */
@@ -1377,6 +1736,354 @@ function fieldSelect(name, label, options, current) {
     return `<div class="field"><label>${esc(label)}</label><select name="${esc(name)}">${opts}</select></div>`;
 }
 
+const INSPECT_MIX_SEL = "__insp_mixed__";
+
+function mixNum(name, label, v) {
+    if (isInspMixed(v)) {
+        return (
+            `<div class="field" data-inspector-mixed="1"><label>${esc(label)}</label>` +
+            `<input type="number" name="${esc(name)}" value="" placeholder="(mixed)" step="1" /></div>`
+        );
+    }
+    return fieldNum(name, label, Number(v));
+}
+
+function mixFloat(name, label, v) {
+    if (isInspMixed(v)) {
+        return (
+            `<div class="field" data-inspector-mixed="1"><label>${esc(label)}</label>` +
+            `<input type="number" name="${esc(name)}" value="" placeholder="(mixed)" step="any" /></div>`
+        );
+    }
+    return fieldFloat(name, label, v);
+}
+
+function mixText(name, label, val) {
+    if (isInspMixed(val)) {
+        return (
+            `<div class="field" data-inspector-mixed="1"><label>${esc(label)}</label>` +
+            `<input type="text" name="${esc(name)}" value="" placeholder="(mixed)" /></div>`
+        );
+    }
+    return fieldText(name, label, val ?? "");
+}
+
+function mixTextarea(name, label, val) {
+    if (isInspMixed(val)) {
+        return (
+            `<div class="field" data-inspector-mixed="1"><label>${esc(label)}</label>` +
+            `<textarea name="${esc(name)}" placeholder="(mixed)"></textarea></div>`
+        );
+    }
+    return fieldTextarea(name, label, typeof val === "string" ? val : "");
+}
+
+function mixSelect(name, label, options, current) {
+    if (isInspMixed(current)) {
+        const opts =
+            `<option value="${esc(INSPECT_MIX_SEL)}" selected>(mixed)</option>` +
+            options
+                .map(
+                    o =>
+                        `<option value="${esc(o.value)}">${esc(o.label)}</option>`
+                )
+                .join("");
+        return `<div class="field" data-inspector-mixed="1"><label>${esc(label)}</label><select name="${esc(name)}">${opts}</select></div>`;
+    }
+    return fieldSelect(name, label, options, current);
+}
+
+function mixCheck(name, label, v) {
+    if (isInspMixed(v)) {
+        return (
+            `<div class="field check-row" data-inspector-mixed="1"><label>` +
+            `<input type="checkbox" name="${esc(name)}" class="inspector-mixed-cb" /> ${esc(label)}` +
+            `</label></div>`
+        );
+    }
+    return fieldCheck(name, label, !!v);
+}
+
+function mixColor(name, label, value) {
+    if (isInspMixed(value)) {
+        const fb = INSPECTOR_COLOR_PICKER_FALLBACK;
+        return `<div class="field" data-inspector-mixed="1"><label>${esc(label)}</label><div class="inspector-color-row">
+<input type="text" name="${esc(name)}" value="" autocomplete="off" spellcheck="false" placeholder="(mixed)" />
+<div class="inspector-color-swatch-wrap" title="Pick color">
+<span class="inspector-color-face" style="background-color:${esc(fb)}" aria-hidden="true"></span>
+<input type="color" class="inspector-color-picker-native" value="${esc(fb)}" title="Pick color" aria-label="Pick ${esc(label)}" />
+</div>
+</div></div>`;
+    }
+    return fieldColor(name, label, typeof value === "string" ? value : "");
+}
+
+function mixNumOpt(name, label, value) {
+    if (isInspMixed(value)) {
+        return (
+            `<div class="field" data-inspector-mixed="1"><label>${esc(label)}</label>` +
+            `<input type="number" name="${esc(name)}" value="" placeholder="(mixed)" step="1" /></div>`
+        );
+    }
+    return fieldNumOpt(name, label, value);
+}
+
+function mixNumFloatOpt(name, label, value, step = "any") {
+    if (isInspMixed(value)) {
+        return (
+            `<div class="field" data-inspector-mixed="1"><label>${esc(label)}</label>` +
+            `<input type="number" name="${esc(name)}" value="" placeholder="(mixed)" step="${esc(step)}" /></div>`
+        );
+    }
+    return fieldNumFloatOpt(name, label, value, step);
+}
+
+function mixPaddingRow(paddingVal) {
+    const padHint = "(number or top,left or top,right,bottom,left)";
+    if (isInspMixed(paddingVal)) {
+        return (
+            `<div class="field" data-inspector-mixed="1"><label>Padding ${esc(padHint)}</label>` +
+            `<input type="text" name="style_padding" value="" placeholder="(mixed)"></div>`
+        );
+    }
+    return (
+        `<div class="field"><label>Padding ${esc(padHint)}</label>` +
+        `<input type="text" name="style_padding" value="${esc(stylePaddingToLabel(paddingVal))}" placeholder="e.g. 8 or 8, 16"></div>`
+    );
+}
+
+function inspectorLayoutFieldsHtml(layoutM) {
+    return (
+        `<div class="inspector-group-title">Layout</div>` +
+        `<div class="row2">${mixNum("x", "X", layoutM.x)}${mixNum("y", "Y", layoutM.y)}</div>` +
+        `<div class="row2">${mixNum("width", "Width", layoutM.width)}${mixNum("height", "Height", layoutM.height)}</div>` +
+        `${mixCheck("hidden", "Hidden", layoutM.hidden)}`
+    );
+}
+
+/**
+ * Shared type-specific inspector fields (`m` may be one component object or consensus model).
+ * @param {string} type
+ * @param {Record<string, unknown>} m
+ */
+function widgetTypeSpecificFieldsHtml(type, m) {
+    let html = "";
+    switch (type) {
+        case "label":
+            html += mixText("text", "Text", /** @type {unknown} */ (m.text));
+            html += mixSelect("longMode", "Long mode", [
+                { value: "", label: "(default)" },
+                { value: "wrap", label: "wrap" },
+                { value: "dot", label: "dot" },
+                { value: "scroll", label: "scroll" },
+                { value: "clip", label: "clip" }
+            ], /** @type {unknown} */ (m.longMode) ?? "");
+            break;
+        case "button":
+            html += mixText("label", "Label text", /** @type {unknown} */ (m.label));
+            break;
+        case "image":
+            html += mixText("src", "Source / path", /** @type {unknown} */ (m.src));
+            break;
+        case "slider":
+            html +=
+                `<div class="row2">${mixFloat("min", "Min", /** @type {unknown} */ (m.min))}${mixFloat(
+                    "max",
+                    "Max",
+                    /** @type {unknown} */ (m.max)
+                )}</div>`;
+            html += mixFloat("value", "Value", /** @type {unknown} */ (m.value));
+            break;
+        case "bar":
+            html +=
+                `<div class="row2">${mixFloat("min", "Min", /** @type {unknown} */ (m.min))}${mixFloat(
+                    "max",
+                    "Max",
+                    /** @type {unknown} */ (m.max)
+                )}</div>`;
+            html += mixFloat("value", "Value", /** @type {unknown} */ (m.value));
+            html += mixSelect("bar_mode", "Mode", [
+                { value: "", label: "(default)" },
+                { value: "normal", label: "normal" },
+                { value: "symmetrical", label: "symmetrical" },
+                { value: "range", label: "range" }
+            ], /** @type {unknown} */ (m.mode) ?? "");
+            break;
+        case "arc":
+            html +=
+                `<div class="row2">${mixFloat("min", "Min", /** @type {unknown} */ (m.min))}${mixFloat(
+                    "max",
+                    "Max",
+                    /** @type {unknown} */ (m.max)
+                )}</div>`;
+            html += mixFloat("value", "Value", /** @type {unknown} */ (m.value));
+            html +=
+                `<div class="row2">${mixFloat(
+                    "startAngle",
+                    "Start °",
+                    /** @type {unknown} */ (m.startAngle)
+                )}${mixFloat("endAngle", "End °", /** @type {unknown} */ (m.endAngle))}</div>`;
+            html += mixSelect("arc_mode", "Mode", [
+                { value: "", label: "(default)" },
+                { value: "normal", label: "normal" },
+                { value: "reverse", label: "reverse" },
+                { value: "symmetrical", label: "symmetrical" }
+            ], /** @type {unknown} */ (m.mode) ?? "");
+            break;
+        case "switch":
+            html += mixCheck("checked", "Checked", /** @type {unknown} */ (m.checked));
+            break;
+        case "checkbox":
+            html += mixText("text", "Label text", /** @type {unknown} */ (m.text));
+            html += mixCheck("checked", "Checked", /** @type {unknown} */ (m.checked));
+            break;
+        case "dropdown":
+            html += mixTextarea(
+                "options",
+                "Options (one per line)",
+                isInspMixed(/** @type {unknown} */ (m.options))
+                    ? INSP_MIXED
+                    : (/** @type {unknown[]} */ (m.options ?? [])).join("\n")
+            );
+            html += mixNum("selectedIndex", "Selected index", /** @type {unknown} */ (m.selectedIndex) ?? 0);
+            break;
+        case "roller":
+            html += mixTextarea(
+                "options",
+                "Options (one per line)",
+                isInspMixed(/** @type {unknown} */ (m.options))
+                    ? INSP_MIXED
+                    : (/** @type {unknown[]} */ (m.options ?? [])).join("\n")
+            );
+            html += mixNum("selectedIndex", "Selected index", /** @type {unknown} */ (m.selectedIndex) ?? 0);
+            html += mixSelect("roller_mode", "Mode", [
+                { value: "", label: "(default)" },
+                { value: "normal", label: "normal" },
+                { value: "infinite", label: "infinite" }
+            ], /** @type {unknown} */ (m.mode) ?? "");
+            break;
+        case "textarea":
+            html += mixTextarea("textareaText", "Text", /** @type {unknown} */ (m.text ?? ""));
+            html += mixText("placeholder", "Placeholder", /** @type {unknown} */ (m.placeholder ?? ""));
+            html += mixCheck("oneLine", "Single line", /** @type {unknown} */ (m.oneLine));
+            break;
+        case "spinner":
+            html += mixNumFloatOpt(
+                "speed",
+                "Speed (ms)",
+                /** @type {unknown} */ (m.speed ?? 1000),
+                "1"
+            );
+            html += mixNumFloatOpt(
+                "arcLength",
+                "Arc length (°)",
+                /** @type {unknown} */ (m.arcLength ?? 60),
+                "1"
+            );
+            break;
+        case "line":
+            html += mixTextarea("linePoints", "Points (x,y per line)", /** @type {unknown} */ (m.linePointsText));
+            html += mixCheck("rounded", "Rounded corners", /** @type {unknown} */ (m.rounded));
+            break;
+        case "container": {
+            const rawLayout = /** @type {unknown} */ (/** @type {Record<string, unknown>} */ (m).layout);
+            const layoutSel = isInspMixed(rawLayout)
+                ? INSPECT_MIXED
+                : typeof rawLayout === "string" && /^(none|flex|grid)$/.test(rawLayout)
+                  ? rawLayout
+                  : "none";
+            html += mixSelect(
+                "layout",
+                "Layout",
+                [
+                    { value: "none", label: "none" },
+                    { value: "flex", label: "flex" },
+                    { value: "grid", label: "grid" }
+                ],
+                layoutSel
+            );
+            html += mixSelect("flexFlow", "Flex flow (flex)", [
+                { value: "", label: "(default)" },
+                { value: "row", label: "row" },
+                { value: "column", label: "column" },
+                { value: "row_wrap", label: "row_wrap" },
+                { value: "column_wrap", label: "column_wrap" }
+            ], /** @type {unknown} */ (m.flexFlow) ?? "");
+            html += `<div class="field"><p style="font-size:11px;color:#888;line-height:1.35;margin:0;">Nested widgets: edit JSON or attach from tooling; not listed here.</p></div>`;
+            break;
+        }
+        case "panel":
+            html += `<div class="field"><p style="font-size:11px;color:#888;line-height:1.35;margin:0;">Panel holds child widgets. Edit children in the .embf file.</p></div>`;
+            break;
+        default:
+            break;
+    }
+    return html;
+}
+
+/**
+ * Appearance + Events block (solo `styles`/`events`, or homogeneous multi consensus models).
+ * @param {Record<string, unknown>} sm styles field bag (possibly INSP_MIXED per key)
+ * @param {unknown} eventsVal events array or INSP_MIXED
+ */
+function inspectorAppearancesFromModels(sm, eventsVal) {
+    const alignForSelect = isInspMixed(sm.align)
+        ? INSP_MIXED
+        : String(typeof sm.align === "string" ? sm.align : "");
+    let html =
+        `<div class="inspector-group-title">Appearance</div>` +
+        mixColor("style_bgColor", "Bg color (#hex)", sm.bgColor ?? "") +
+        mixColor("style_indicatorColor", "Indicator color", sm.indicatorColor ?? "") +
+        mixNumFloatOpt(
+            "style_bgOpacity",
+            "Bg opacity (0–255)",
+            /** @type {unknown} */ (sm.bgOpacity),
+            "1"
+        ) +
+        mixColor("style_textColor", "Text color", sm.textColor ?? "") +
+        mixColor("style_borderColor", "Border color", sm.borderColor ?? "") +
+        `<div class="row2">${mixNumOpt("style_borderWidth", "Border width", /** @type {unknown} */ (sm.borderWidth))}${mixNumOpt("style_borderRadius", "Corner radius", /** @type {unknown} */ (sm.borderRadius))}</div>` +
+        `${mixPaddingRow(/** @type {unknown} */ (sm.padding))}` +
+        mixNumOpt("style_fontSize", "Font size (px)", /** @type {unknown} */ (sm.fontSize)) +
+        mixText("style_fontFamily", "Font family", /** @type {unknown} */ (sm.fontFamily ?? "")) +
+        mixSelect(
+            "style_align",
+            "Text align",
+            [
+                { value: "", label: "(default)" },
+                { value: "left", label: "Left" },
+                { value: "center", label: "Center" },
+                { value: "right", label: "Right" }
+            ],
+            alignForSelect
+        );
+
+    html += `<div class="inspector-group-title">Events (JSON)</div>`;
+    if (isInspMixed(eventsVal)) {
+        html +=
+            `<div class="field" data-inspector-mixed="1"><label title='JSON array: [{ "trigger", "actions" }]'>Handlers</label>` +
+            `<textarea id="inspector-events-json" name="eventsJson" rows="5" spellcheck="false" placeholder="(mixed)"></textarea></div>`;
+    } else {
+        const evPretty = JSON.stringify(eventsVal ?? [], null, 2);
+        html += `<div class="field"><label title='JSON array: [{ "trigger", "actions" }]'>Handlers</label><textarea id="inspector-events-json" name="eventsJson" rows="5" spellcheck="false">${esc(evPretty)}</textarea></div>`;
+    }
+    return html;
+}
+
+function typeModelFromComp(comp) {
+    const m = /** @type {Record<string, unknown>} */ ({ ...(comp ?? {}) });
+    if (comp && comp.type === "line") {
+        m.linePointsText = (comp.points ?? [])
+            .map(p => `${p.x}, ${p.y}`)
+            .join("\n");
+    }
+    return m;
+}
+
+function inspectorAppearancesSection(comp) {
+    return inspectorAppearancesFromModels(comp.styles ?? {}, comp.events ?? []);
+}
+
 function fieldNumOpt(name, label, value) {
     let shown = "";
     if (value !== undefined && value !== null && value !== "") {
@@ -1394,36 +2101,6 @@ function fieldNumFloatOpt(name, label, value, step = "any") {
     }
     return `<div class="field"><label>${esc(label)}</label><input type="number" name="${esc(name)}" value="${esc(shown)}" step="${step}" /></div>`;
 }
-
-function inspectorAppearancesSection(comp) {
-    const st = comp.styles ?? {};
-    const align = typeof st.align === "string" ? st.align : "";
-    const padHint = "(number or top,left or top,right,bottom,left)";
-    let html =
-        `<div class="inspector-group-title">Appearance</div>` +
-        fieldColor("style_bgColor", "Bg color (#hex)", st.bgColor ?? "") +
-        fieldColor("style_indicatorColor", "Indicator color", st.indicatorColor ?? "") +
-        fieldNumFloatOpt("style_bgOpacity", "Bg opacity (0–255)", st.bgOpacity, "1") +
-        fieldColor("style_textColor", "Text color", st.textColor ?? "") +
-        fieldColor("style_borderColor", "Border color", st.borderColor ?? "") +
-        `<div class="row2">${fieldNumOpt("style_borderWidth", "Border width", st.borderWidth)}${fieldNumOpt("style_borderRadius", "Corner radius", st.borderRadius)}</div>` +
-        `<div class="field"><label>Padding ${esc(padHint)}</label>` +
-        `<input type="text" name="style_padding" value="${esc(stylePaddingToLabel(st.padding))}" placeholder="e.g. 8 or 8, 16"></div>` +
-        fieldNumOpt("style_fontSize", "Font size (px)", st.fontSize) +
-        fieldText("style_fontFamily", "Font family", st.fontFamily ?? "") +
-        fieldSelect("style_align", "Text align", [
-            { value: "", label: "(default)" },
-            { value: "left", label: "Left" },
-            { value: "center", label: "Center" },
-            { value: "right", label: "Right" }
-        ], align);
-
-    html += `<div class="inspector-group-title">Events (JSON)</div>`;
-    const evPretty = JSON.stringify(comp.events ?? [], null, 2);
-    html += `<div class="field"><label title='JSON array: [{ "trigger", "actions" }]'>Handlers</label><textarea id="inspector-events-json" name="eventsJson" rows="5" spellcheck="false">${esc(evPretty)}</textarea></div>`;
-    return html;
-}
-
 /**
  * Keeps caret/cursor alive when redraw replaces innerHTML (e.g. after preview reload).
  * @typedef {{
@@ -1570,10 +2247,20 @@ function renderInspector() {
         inspectorForm.hidden = false;
         inspectorDelete.disabled = false;
 
+        const ids = [...selectedComponentOrder];
+        const comps = ids.map(id => findComponentById(page.components, id)).filter(Boolean);
+        const homogeneous =
+            comps.length === ids.length &&
+            comps.length >= 2 &&
+            comps.every(c => c.type === comps[0].type);
+
         const inspectorFocusSnap = snapshotInspectorFocus();
         inspectorSyncing = true;
-        inspectorForm.innerHTML = renderMultiInspectorHtml([...selectedComponentOrder]);
+        inspectorForm.innerHTML = homogeneous
+            ? renderHomogeneousMultiInspectorHtml(ids, comps)
+            : renderMultiInspectorHtml(ids);
         inspectorSyncing = false;
+        refreshMixedCheckboxes(inspectorForm);
 
         if (inspectorFocusSnap) {
             requestAnimationFrame(() => {
@@ -1602,118 +2289,21 @@ function renderInspector() {
 
     inspectorSyncing = true;
     let html = `<div id="inspector-readonly"><strong>${esc(comp.id)}</strong> · ${esc(comp.type)}</div>`;
-    html += `<div class="inspector-group-title">Layout</div>`;
-    html += `<div class="row2">${fieldNum("x", "X", comp.x)}${fieldNum("y", "Y", comp.y)}</div>`;
-    html += `<div class="row2">${fieldNum("width", "Width", comp.width)}${fieldNum("height", "Height", comp.height)}</div>`;
-    html += fieldCheck("hidden", "Hidden", !!comp.hidden);
-
+    html += inspectorLayoutFieldsHtml({
+        x: comp.x,
+        y: comp.y,
+        width: comp.width,
+        height: comp.height,
+        hidden: !!comp.hidden
+    });
     html += `<div class="inspector-group-title">${esc(comp.type)}</div>`;
-
-    switch (comp.type) {
-        case "label":
-            html += fieldText("text", "Text", comp.text);
-            html += fieldSelect("longMode", "Long mode", [
-                { value: "", label: "(default)" },
-                { value: "wrap", label: "wrap" },
-                { value: "dot", label: "dot" },
-                { value: "scroll", label: "scroll" },
-                { value: "clip", label: "clip" }
-            ], comp.longMode ?? "");
-            break;
-        case "button":
-            html += fieldText("label", "Label text", comp.label);
-            break;
-        case "image":
-            html += fieldText("src", "Source / path", comp.src);
-            break;
-        case "slider":
-            html += `<div class="row2">${fieldFloat("min", "Min", comp.min)}${fieldFloat("max", "Max", comp.max)}</div>`;
-            html += fieldFloat("value", "Value", comp.value);
-            break;
-        case "bar":
-            html += `<div class="row2">${fieldFloat("min", "Min", comp.min)}${fieldFloat("max", "Max", comp.max)}</div>`;
-            html += fieldFloat("value", "Value", comp.value);
-            html += fieldSelect("bar_mode", "Mode", [
-                { value: "", label: "(default)" },
-                { value: "normal", label: "normal" },
-                { value: "symmetrical", label: "symmetrical" },
-                { value: "range", label: "range" }
-            ], comp.mode ?? "");
-            break;
-        case "arc":
-            html += `<div class="row2">${fieldFloat("min", "Min", comp.min)}${fieldFloat("max", "Max", comp.max)}</div>`;
-            html += fieldFloat("value", "Value", comp.value);
-            html += `<div class="row2">${fieldFloat("startAngle", "Start °", comp.startAngle)}${fieldFloat("endAngle", "End °", comp.endAngle)}</div>`;
-            html += fieldSelect("arc_mode", "Mode", [
-                { value: "", label: "(default)" },
-                { value: "normal", label: "normal" },
-                { value: "reverse", label: "reverse" },
-                { value: "symmetrical", label: "symmetrical" }
-            ], comp.mode ?? "");
-            break;
-        case "switch":
-            html += fieldCheck("checked", "Checked", !!comp.checked);
-            break;
-        case "checkbox":
-            html += fieldText("text", "Label text", comp.text);
-            html += fieldCheck("checked", "Checked", !!comp.checked);
-            break;
-        case "dropdown":
-            html += fieldTextarea("options", "Options (one per line)", (comp.options ?? []).join("\n"));
-            html += fieldNum("selectedIndex", "Selected index", comp.selectedIndex ?? 0);
-            break;
-        case "roller":
-            html += fieldTextarea("options", "Options (one per line)", (comp.options ?? []).join("\n"));
-            html += fieldNum("selectedIndex", "Selected index", comp.selectedIndex ?? 0);
-            html += fieldSelect("roller_mode", "Mode", [
-                { value: "", label: "(default)" },
-                { value: "normal", label: "normal" },
-                { value: "infinite", label: "infinite" }
-            ], comp.mode ?? "");
-            break;
-        case "textarea":
-            html += fieldTextarea("textareaText", "Text", comp.text ?? "");
-            html += fieldText("placeholder", "Placeholder", comp.placeholder);
-            html += fieldCheck("oneLine", "Single line", !!comp.oneLine);
-            break;
-        case "spinner":
-            html += fieldNumFloat("speed", "Speed (ms)", comp.speed ?? 1000, "1");
-            html += fieldNumFloat("arcLength", "Arc length (°)", comp.arcLength ?? 60, "1");
-            break;
-        case "line": {
-            const pts = (comp.points ?? [])
-                .map(p => `${p.x}, ${p.y}`)
-                .join("\n");
-            html += fieldTextarea("linePoints", "Points (x,y per line)", pts);
-            html += fieldCheck("rounded", "Rounded corners", !!comp.rounded);
-            break;
-        }
-        case "container":
-            html += fieldSelect("layout", "Layout", [
-                { value: "none", label: "none" },
-                { value: "flex", label: "flex" },
-                { value: "grid", label: "grid" }
-            ], comp.layout ?? "none");
-            html += fieldSelect("flexFlow", "Flex flow (flex)", [
-                { value: "", label: "(default)" },
-                { value: "row", label: "row" },
-                { value: "column", label: "column" },
-                { value: "row_wrap", label: "row_wrap" },
-                { value: "column_wrap", label: "column_wrap" }
-            ], comp.flexFlow ?? "");
-            html += `<div class="field"><p style="font-size:11px;color:#888;line-height:1.35;margin:0;">Nested widgets: edit JSON or attach from tooling; not listed here.</p></div>`;
-            break;
-        case "panel":
-            html += `<div class="field"><p style="font-size:11px;color:#888;line-height:1.35;margin:0;">Panel holds child widgets. Edit children in the .embf file.</p></div>`;
-            break;
-        default:
-            break;
-    }
-
+    html += widgetTypeSpecificFieldsHtml(comp.type, typeModelFromComp(comp));
     html += inspectorAppearancesSection(comp);
 
     inspectorForm.innerHTML = html;
     inspectorSyncing = false;
+
+    refreshMixedCheckboxes(inspectorForm);
 
     if (inspectorFocusSnap) {
         requestAnimationFrame(() => {
@@ -1757,9 +2347,17 @@ function buildStyleSnapshotFromInspector() {
     /** @type {Record<string, unknown>} */
     const s = {};
 
+    const snapSkip = el => {
+        if (!(el instanceof HTMLElement)) return false;
+        if (!el.closest("[data-inspector-mixed]")) return false;
+        if (el instanceof HTMLSelectElement && el.value === INSPECT_MIX_SEL) return true;
+        return "value" in el && typeof el.value === "string" && el.value.trim() === "";
+    };
+
     const setStr = (id, key) => {
         const el = textInputNamed(id);
         if (!(el instanceof HTMLInputElement)) return;
+        if (snapSkip(el)) return;
         const t = el.value.trim();
         s[key] = t === "" ? null : t;
     };
@@ -1771,7 +2369,7 @@ function buildStyleSnapshotFromInspector() {
     setStr("style_fontFamily", "fontFamily");
 
     const sop = inspectorForm.elements.namedItem("style_bgOpacity");
-    if (sop instanceof HTMLInputElement) {
+    if (sop instanceof HTMLInputElement && !snapSkip(sop)) {
         if (sop.value.trim() === "") {
             s.bgOpacity = null;
         } else {
@@ -1781,7 +2379,7 @@ function buildStyleSnapshotFromInspector() {
     }
 
     const sbw = inspectorForm.elements.namedItem("style_borderWidth");
-    if (sbw instanceof HTMLInputElement) {
+    if (sbw instanceof HTMLInputElement && !snapSkip(sbw)) {
         if (sbw.value.trim() === "") {
             s.borderWidth = null;
         } else {
@@ -1791,7 +2389,7 @@ function buildStyleSnapshotFromInspector() {
     }
 
     const sbr = inspectorForm.elements.namedItem("style_borderRadius");
-    if (sbr instanceof HTMLInputElement) {
+    if (sbr instanceof HTMLInputElement && !snapSkip(sbr)) {
         if (sbr.value.trim() === "") {
             s.borderRadius = null;
         } else {
@@ -1801,7 +2399,7 @@ function buildStyleSnapshotFromInspector() {
     }
 
     const sfz = inspectorForm.elements.namedItem("style_fontSize");
-    if (sfz instanceof HTMLInputElement) {
+    if (sfz instanceof HTMLInputElement && !snapSkip(sfz)) {
         if (sfz.value.trim() === "") {
             s.fontSize = null;
         } else {
@@ -1812,7 +2410,7 @@ function buildStyleSnapshotFromInspector() {
     }
 
     const spd = inspectorForm.elements.namedItem("style_padding");
-    if (spd instanceof HTMLInputElement) {
+    if (spd instanceof HTMLInputElement && !snapSkip(spd)) {
         const raw = spd.value.trim();
         if (raw === "") {
             s.padding = null;
@@ -1825,7 +2423,7 @@ function buildStyleSnapshotFromInspector() {
     }
 
     const alignEl = inspectorForm.elements.namedItem("style_align");
-    if (alignEl instanceof HTMLSelectElement) {
+    if (alignEl instanceof HTMLSelectElement && !snapSkip(alignEl)) {
         const t = alignEl.value.trim();
         s.align = t === "" ? null : t;
     }
@@ -1841,30 +2439,30 @@ function readInspectorPatch() {
     const patch = {};
     const num = name => {
         const el = inspectorForm.elements.namedItem(name);
-        if (el instanceof HTMLInputElement && el.type === "number") {
-            const v = Number(el.value);
-            if (Number.isFinite(v)) {
-                patch[name] = v;
-            }
+        if (!(el instanceof HTMLInputElement) || el.type !== "number") return;
+        if (el.closest("[data-inspector-mixed]") && el.value.trim() === "") return;
+        const v = Number(el.value);
+        if (Number.isFinite(v)) {
+            patch[name] = v;
         }
     };
     const floatOrOmit = name => {
         const el = inspectorForm.elements.namedItem(name);
-        if (el instanceof HTMLInputElement && el.type === "number") {
-            if (el.value.trim() === "") {
-                return;
-            }
-            const v = Number(el.value);
-            if (Number.isFinite(v)) {
-                patch[name] = v;
-            }
+        if (!(el instanceof HTMLInputElement) || el.type !== "number") return;
+        if (el.closest("[data-inspector-mixed]") && el.value.trim() === "") return;
+        if (el.value.trim() === "") {
+            return;
+        }
+        const v = Number(el.value);
+        if (Number.isFinite(v)) {
+            patch[name] = v;
         }
     };
     const chk = name => {
         const el = inspectorForm.elements.namedItem(name);
-        if (el instanceof HTMLInputElement && el.type === "checkbox") {
-            patch[name] = el.checked;
-        }
+        if (!(el instanceof HTMLInputElement) || el.type !== "checkbox") return;
+        if (el.indeterminate) return;
+        patch[name] = el.checked;
     };
 
     num("x");
@@ -1874,55 +2472,71 @@ function readInspectorPatch() {
     chk("hidden");
 
     const layoutEl = inspectorForm.elements.namedItem("layout");
-    if (layoutEl instanceof HTMLSelectElement) {
+    if (layoutEl instanceof HTMLSelectElement && layoutEl.value !== INSPECT_MIX_SEL) {
         patch.layout = layoutEl.value;
     }
 
     const flexFlowEl = inspectorForm.elements.namedItem("flexFlow");
-    if (flexFlowEl instanceof HTMLSelectElement) {
+    if (flexFlowEl instanceof HTMLSelectElement && flexFlowEl.value !== INSPECT_MIX_SEL) {
         patch.flexFlow = flexFlowEl.value;
     }
 
     const longModeEl = inspectorForm.elements.namedItem("longMode");
-    if (longModeEl instanceof HTMLSelectElement) {
+    if (longModeEl instanceof HTMLSelectElement && longModeEl.value !== INSPECT_MIX_SEL) {
         patch.longMode = longModeEl.value;
     }
 
     const barModeEl = inspectorForm.elements.namedItem("bar_mode");
-    if (barModeEl instanceof HTMLSelectElement && barModeEl.value !== undefined) {
+    if (
+        barModeEl instanceof HTMLSelectElement &&
+        barModeEl.value !== INSPECT_MIX_SEL &&
+        barModeEl.value !== undefined
+    ) {
         patch.mode = barModeEl.value;
     }
 
     const arcModeEl = inspectorForm.elements.namedItem("arc_mode");
-    if (arcModeEl instanceof HTMLSelectElement && arcModeEl.value !== undefined) {
+    if (
+        arcModeEl instanceof HTMLSelectElement &&
+        arcModeEl.value !== INSPECT_MIX_SEL &&
+        arcModeEl.value !== undefined
+    ) {
         patch.mode = arcModeEl.value;
     }
 
     const rollerModeEl = inspectorForm.elements.namedItem("roller_mode");
-    if (rollerModeEl instanceof HTMLSelectElement && rollerModeEl.value !== undefined) {
+    if (
+        rollerModeEl instanceof HTMLSelectElement &&
+        rollerModeEl.value !== INSPECT_MIX_SEL &&
+        rollerModeEl.value !== undefined
+    ) {
         patch.mode = rollerModeEl.value;
     }
 
     const optionsEl = inspectorForm.elements.namedItem("options");
     if (optionsEl instanceof HTMLTextAreaElement) {
-        patch.options = optionsEl.value
-            .split("\n")
-            .map(s => s.trim())
-            .filter(Boolean);
+        if (!(optionsEl.closest("[data-inspector-mixed]") && optionsEl.value.trim() === "")) {
+            patch.options = optionsEl.value
+                .split("\n")
+                .map(s => s.trim())
+                .filter(Boolean);
+        }
     }
 
     const linePtsEl = inspectorForm.elements.namedItem("linePoints");
     if (linePtsEl instanceof HTMLTextAreaElement) {
-        const lines = linePtsEl.value.split(/[\r\n]+/).map(s => s.trim()).filter(Boolean);
-        const pts = [];
-        for (const ln of lines) {
-            const m = ln.split(/[, ]+/).map(p => Number(p.trim()));
-            if (m.length >= 2 && Number.isFinite(m[0]) && Number.isFinite(m[1])) {
-                pts.push({ x: Math.round(m[0]), y: Math.round(m[1]) });
+        if (!(linePtsEl.closest("[data-inspector-mixed]") && linePtsEl.value.trim() === "")) {
+            const lines = linePtsEl.value.split(/[\r\n]+/).map(s => s.trim()).filter(Boolean);
+            const pts = [];
+            for (const ln of lines) {
+                const m = ln.split(/[, ]+/).map(p => Number(p.trim()));
+                if (m.length >= 2 && Number.isFinite(m[0]) && Number.isFinite(m[1])) {
+                    pts.push({ x: Math.round(m[0]), y: Math.round(m[1]) });
+                }
             }
-        }
-        if (pts.length >= 2) {
-            patch.points = pts;
+            if (pts.length >= 2) {
+                patch.points = pts;
+            }
         }
     }
 
@@ -1930,10 +2544,15 @@ function readInspectorPatch() {
 
     const taTextEl = inspectorForm.elements.namedItem("textareaText");
     if (taTextEl instanceof HTMLTextAreaElement) {
-        patch.text = taTextEl.value;
+        if (!(taTextEl.closest("[data-inspector-mixed]") && taTextEl.value.trim() === "")) {
+            patch.text = taTextEl.value;
+        }
     } else {
         const textEl = inspectorForm.elements.namedItem("text");
-        if (textEl instanceof HTMLInputElement) {
+        if (
+            textEl instanceof HTMLInputElement &&
+            !(textEl.closest("[data-inspector-mixed]") && textEl.value.trim() === "")
+        ) {
             patch.text = textEl.value;
         }
     }
@@ -1941,17 +2560,26 @@ function readInspectorPatch() {
     chk("oneLine");
 
     const phEl = inspectorForm.elements.namedItem("placeholder");
-    if (phEl instanceof HTMLInputElement) {
+    if (
+        phEl instanceof HTMLInputElement &&
+        !(phEl.closest("[data-inspector-mixed]") && phEl.value.trim() === "")
+    ) {
         patch.placeholder = phEl.value;
     }
 
     const labelEl = inspectorForm.elements.namedItem("label");
-    if (labelEl instanceof HTMLInputElement) {
+    if (
+        labelEl instanceof HTMLInputElement &&
+        !(labelEl.closest("[data-inspector-mixed]") && labelEl.value.trim() === "")
+    ) {
         patch.label = labelEl.value;
     }
 
     const srcEl = inspectorForm.elements.namedItem("src");
-    if (srcEl instanceof HTMLInputElement) {
+    if (
+        srcEl instanceof HTMLInputElement &&
+        !(srcEl.closest("[data-inspector-mixed]") && srcEl.value.trim() === "")
+    ) {
         patch.src = srcEl.value;
     }
 
@@ -1965,7 +2593,11 @@ function readInspectorPatch() {
     floatOrOmit("arcLength");
 
     const selIdx = inspectorForm.elements.namedItem("selectedIndex");
-    if (selIdx instanceof HTMLInputElement && selIdx.type === "number" && selIdx.value.trim() !== "") {
+    if (!(selIdx instanceof HTMLInputElement) || selIdx.type !== "number") {
+        /* skip */
+    } else if (selIdx.closest("[data-inspector-mixed]") && selIdx.value.trim() === "") {
+        /* omit — keep each widget */
+    } else if (selIdx.value.trim() !== "") {
         const v = Number(selIdx.value);
         if (Number.isFinite(v)) {
             patch.selectedIndex = Math.round(v);
@@ -1974,17 +2606,22 @@ function readInspectorPatch() {
 
     chk("checked");
 
-    patch.styles = buildStyleSnapshotFromInspector();
+    const styles = buildStyleSnapshotFromInspector();
+    if (Object.keys(styles).length) {
+        patch.styles = styles;
+    }
 
     const evEl = inspectorForm.elements.namedItem("eventsJson");
     if (evEl instanceof HTMLTextAreaElement) {
-        try {
-            const parsed = JSON.parse(evEl.value);
-            if (Array.isArray(parsed)) {
-                patch.events = parsed;
+        if (!(evEl.closest("[data-inspector-mixed]") && evEl.value.trim() === "")) {
+            try {
+                const parsed = JSON.parse(evEl.value);
+                if (Array.isArray(parsed)) {
+                    patch.events = parsed;
+                }
+            } catch {
+                /* invalid JSON: omit */
             }
-        } catch {
-            /* invalid JSON: omit — write will keep prior file if host blocks */
         }
     }
 
@@ -2040,6 +2677,32 @@ function commitInspector() {
             type: "updatePage",
             pageIndex: currentPageIndex,
             patch
+        });
+        return;
+    }
+
+    if (selectedComponentOrder.length >= 2) {
+        const page = currentProject.pages[currentPageIndex];
+        if (!page) {
+            return;
+        }
+        const ids = [...selectedComponentOrder];
+        const comps = ids.map(id => findComponentById(page.components, id)).filter(Boolean);
+        const homogeneous =
+            comps.length === ids.length &&
+            comps.length >= 2 &&
+            comps.every(c => c.type === comps[0].type);
+        if (!homogeneous) {
+            return;
+        }
+        const patch = readInspectorPatch();
+        if (Object.keys(patch).length === 0) {
+            return;
+        }
+        vscode.postMessage({
+            type: "bulkPatchWidgets",
+            pageIndex: currentPageIndex,
+            updates: ids.map(componentId => ({ componentId, patch }))
         });
         return;
     }
@@ -2246,10 +2909,15 @@ function setupDesignOverlay() {
         }
 
         if (!hit) {
-            if (!additive && !extend) {
-                selectPageInspector();
-            }
-            releaseCap();
+            marqueeState = {
+                ox: x,
+                oy: y,
+                x,
+                y,
+                shift: extend,
+                ctrl: additive
+            };
+            e.preventDefault();
             return;
         }
 
@@ -2264,6 +2932,7 @@ function setupDesignOverlay() {
             }
             inspectorShowingPage = false;
             dragState = null;
+            marqueeState = null;
             drawDesignOverlay();
             renderInspector();
             releaseCap();
@@ -2295,6 +2964,8 @@ function setupDesignOverlay() {
             return;
         }
 
+        marqueeState = null;
+
         dragState = {
             pointerX: x,
             pointerY: y,
@@ -2310,7 +2981,18 @@ function setupDesignOverlay() {
     });
 
     designOverlay.addEventListener("pointermove", e => {
-        if (!designMode || !dragState) {
+        if (!designMode) {
+            return;
+        }
+        if (marqueeState && !dragState) {
+            const { x, y } = overlayCoords(e);
+            marqueeState.x = x;
+            marqueeState.y = y;
+            drawDesignOverlay();
+            e.preventDefault();
+            return;
+        }
+        if (!dragState) {
             return;
         }
         const { x, y } = overlayCoords(e);
@@ -2321,12 +3003,84 @@ function setupDesignOverlay() {
     });
 
     designOverlay.addEventListener("pointerup", e => {
-        if (!designMode || !dragState || !currentProject) {
+        const releaseCaptureSafe = () => {
             try {
                 designOverlay.releasePointerCapture(e.pointerId);
             } catch {
                 /* ignore */
             }
+        };
+
+        if (!designMode) {
+            marqueeState = null;
+            releaseCaptureSafe();
+            return;
+        }
+
+        // Rubber-band marquee (started on empty canvas)
+        if (marqueeState && !dragState) {
+            const page = currentProject?.pages[currentPageIndex];
+            if (page && currentProject) {
+                const m = marqueeState;
+                const dxM = Math.abs(m.x - m.ox);
+                const dyM = Math.abs(m.y - m.oy);
+                const isMarquee = dxM >= MARQUEE_DRAG_THRESHOLD || dyM >= MARQUEE_DRAG_THRESHOLD;
+
+                if (!isMarquee) {
+                    if (!m.shift && !m.ctrl) {
+                        selectPageInspector();
+                    }
+                } else {
+                    const norm = normalizedMarqueeRect(m);
+                    const picks = idsInMarqueeRect(page, norm);
+
+                    if (m.ctrl) {
+                        let next = [...selectedComponentOrder];
+                        for (const id of picks) {
+                            const ix = next.indexOf(id);
+                            if (ix >= 0) {
+                                next.splice(ix, 1);
+                            } else {
+                                next.push(id);
+                            }
+                        }
+                        selectedComponentOrder = next;
+                        if (next.length === 0) {
+                            selectPageInspector();
+                        } else {
+                            inspectorShowingPage = false;
+                        }
+                    } else if (m.shift) {
+                        const next = [...selectedComponentOrder];
+                        for (const id of picks) {
+                            if (!next.includes(id)) {
+                                next.push(id);
+                            }
+                        }
+                        selectedComponentOrder = next;
+                        if (next.length > 0) {
+                            inspectorShowingPage = false;
+                        }
+                    } else {
+                        selectedComponentOrder = picks;
+                        if (picks.length === 0) {
+                            selectPageInspector();
+                        } else {
+                            inspectorShowingPage = false;
+                        }
+                    }
+                }
+            }
+            marqueeState = null;
+            drawDesignOverlay();
+            renderInspector();
+            releaseCaptureSafe();
+            e.preventDefault();
+            return;
+        }
+
+        if (!dragState || !currentProject) {
+            releaseCaptureSafe();
             return;
         }
         const { x, y } = overlayCoords(e);
@@ -2348,16 +3102,13 @@ function setupDesignOverlay() {
         dragState = null;
         drawDesignOverlay();
         renderInspector();
-        try {
-            designOverlay.releasePointerCapture(e.pointerId);
-        } catch {
-            /* ignore */
-        }
+        releaseCaptureSafe();
         e.preventDefault();
     });
 
     designOverlay.addEventListener("pointercancel", e => {
         dragState = null;
+        marqueeState = null;
         drawDesignOverlay();
         renderInspector();
         try {
@@ -2489,6 +3240,7 @@ if (pageSelect) {
         selectedComponentOrder = [];
         inspectorShowingPage = true;
         dragState = null;
+        marqueeState = null;
         buildUiFromProject(currentProject, idx);
         drawDesignOverlay();
         renderInspector();

@@ -86,10 +86,11 @@ Requirements for the WASM preview’s **interactive design overlay** (toggle in 
 - [x] Plain click on an already-selected widget (with others selected): keeps the multi-selection (start drag).
 - [x] Ctrl/Cmd+click: toggle widget in/out of selection.
 - [x] Shift+click: add widget to selection (union).
-- [x] Click empty canvas with no modifiers: clear widget selection; show **page** inspector instead of closing inspector.
+- [x] Click or short drag on empty canvas (no modifiers, below marquee-move threshold): clear widget selection; show **page** inspector.
 - [x] Overlay draws rectangles for **all** selected widgets.
 - [x] Escape clears widget selection (shows page inspector when design mode stays on).
-- [ ] Rubber-band marquee selection.
+- [x] **Drag marquee** — drag on empty canvas (no widget hit) with pointer captured: **replace** selection with every widget whose bounds intersect the axis-aligned marquee; **Shift+drag** unions with current selection; **Ctrl/Cmd+drag** toggles each intersected widget in/out.
+- Small movement below threshold falls back to: plain → page inspector focused; modifiers → no-op (selection unchanged).
 
 ### 13.12.2 Move & delete
 
@@ -100,13 +101,14 @@ Requirements for the WASM preview’s **interactive design overlay** (toggle in 
 
 ### 13.12.3 Multi-inspector & alignment
 
-- When `|selection| ≥ 2` and design mode on, inspector shows **multi** panel only (no per-field property spreadsheet yet).
+- With `|selection| ≥ 2` and **design mode** on:
+  - If widgets are **different types**, the inspector shows only the layout toolbar (**Align**, **Match size**, **Move group**) and hints (no typed property fields yet).
+  - If all selected widgets share the **same `type`**, the inspector additionally shows **shared fields**: Layout (x/y/width/height/hidden), type-specific controls, **Appearance**, and **Events**. Values that disagree show **(mixed)**; leaving a mixed field unchanged omits it from the patch so each widget keeps its own value on disk. Applies via **`bulkPatchWidgets`** using one patch broadcast to each selected component.
 - [x] Section **Align** — align edges of all widgets to the axis-aligned bounding box of the selection: left, right, top, bottom; center horizontal / vertical relative to bbox.
 - [x] Section **Space** — distribute centers evenly along X and along Y (`distribute-h` / `distribute-v`); require ≥2 widgets.
 - [x] Section **Match** — resize all widgets to the **maximum** width and **maximum** height within the selection (`match-width`, `match-height`).
 - [x] Section **Move group** — move the whole bbox so its **left/top** aligns to parent page `0`; **center bbox** horizontally on the page canvas.
 - [x] All layout actions persist through `bulkPatchWidgets` with a single file read/write on the host.
-- [ ] Extend multi-inspector with shared fields (bulk edit identical properties) when all selected widgets share a type.
 
 ### 13.12.4 Host/extension API summary
 
@@ -115,7 +117,7 @@ Messages from webview handled by [`previewPanel.ts`](../src/previewPanel.ts) (de
 | Message | Purpose |
 |---------|---------|
 | `bulkMoveWidgets` | Reposition multiple components after overlay drag |
-| `bulkPatchWidgets` | Batch style/geometry patches (layout buttons) |
+| `bulkPatchWidgets` | Batch property / style / geometry patches (layout buttons & homogeneous bulk inspector edits) |
 | `bulkDeleteWidgets` | Remove many components |
 
 Load payload extras: **`selectedComponentIds?: string[]`**, **`selectedComponentId?`** (deprecated single).

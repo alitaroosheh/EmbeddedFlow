@@ -2,7 +2,9 @@ import * as vscode from "vscode";
 import * as path from "path";
 import { EmbfProject } from "./types/embf";
 import { WIDGET_PALETTE_ORDER } from "./embfPalette";
-import { EmbfParseError, getEffectiveDisplaySize, parseEmbf, parseEmbfSource } from "./embfParser";
+import { EmbfParseError, getEffectiveDisplaySize } from "./embfParser";
+import { moveWidgetInEmbfFile } from "./embfComponentEdit";
+import { readEmbfProject } from "./embfProjectWrite";
 import { appendWidgetToEmbfFile } from "./embfWidgetInsert";
 import { embeddedFlowLog } from "./outputLog";
 
@@ -15,7 +17,8 @@ export type HostToWebviewMessage =
 export type WebviewToHostMessage =
     | { type: "ready" }
     | { type: "log"; level: "info" | "warn" | "error"; text: string }
-    | { type: "addWidget"; pageIndex: number; widgetType: string };
+    | { type: "addWidget"; pageIndex: number; widgetType: string }
+    | { type: "moveWidget"; pageIndex: number; componentId: string; x: number; y: number };
 
 export interface WebviewLoadPayload {
     project: EmbfProject;
@@ -23,6 +26,8 @@ export interface WebviewLoadPayload {
     displayHeight: number;
     wasmJsUri: string;
     wasmBinUri: string;
+    /** When set, preview stays on this page after reload (0-based). */
+    pageIndex?: number;
 }
 
 export class EmbfPreviewPanel {
@@ -34,6 +39,10 @@ export class EmbfPreviewPanel {
     private readonly _extensionUri: vscode.Uri;
     private _filePath: string;
     private _disposables: vscode.Disposable[] = [];
+    /** False until the webview script posts `{ type: "ready" }`. */
+    private _webviewReady = false;
+    /** Last load/error held until the webview is ready (avoids lost `postMessage`). */
+    private _pendingMessage: HostToWebviewMessage | null = null;
 
     static createOrShow(filePath: string, extensionUri: vscode.Uri): EmbfPreviewPanel {
         const existing = EmbfPreviewPanel._panels.get(filePath);
@@ -82,7 +91,15 @@ export class EmbfPreviewPanel {
         );
     }
 
-    sendProject(project: EmbfProject): void {
+    private postToWebview(msg: HostToWebviewMessage): void {
+        if (this._webviewReady) {
+            void this._panel.webview.postMessage(msg);
+        } else {
+            this._pendingMessage = msg;
+        }
+    }
+
+    sendProject(project: EmbfProject, pageIndex?: number): void {
         const { width, height } = getEffectiveDisplaySize(project);
 
         // Always use the custom embf_runtime (supports LVGL 9.5.0).
@@ -90,22 +107,21 @@ export class EmbfPreviewPanel {
         const wasmJsUri  = this._webviewUri("wasm", "embf_runtime.js").toString();
         const wasmBinUri = this._webviewUri("wasm", "embf_runtime.wasm").toString();
 
-        const msg: HostToWebviewMessage = {
+        this.postToWebview({
             type: "load",
             payload: {
                 project,
                 displayWidth: width,
                 displayHeight: height,
                 wasmJsUri,
-                wasmBinUri
+                wasmBinUri,
+                pageIndex
             }
-        };
-        this._panel.webview.postMessage(msg);
+        });
     }
 
     sendError(message: string): void {
-        const msg: HostToWebviewMessage = { type: "error", message };
-        this._panel.webview.postMessage(msg);
+        this.postToWebview({ type: "error", message });
     }
 
     updateTitle(fileName: string): void {
@@ -117,6 +133,12 @@ export class EmbfPreviewPanel {
             embeddedFlowLog("webview", msg.level, msg.text);
         } else if (msg.type === "ready") {
             embeddedFlowLog("webview", "info", "preview webview ready");
+            this._webviewReady = true;
+            if (this._pendingMessage) {
+                const pending = this._pendingMessage;
+                this._pendingMessage = null;
+                void this._panel.webview.postMessage(pending);
+            }
         } else if (msg.type === "addWidget") {
             const pageIndex = Number(msg.pageIndex);
             const widgetType = String(msg.widgetType ?? "").trim();
@@ -124,20 +146,33 @@ export class EmbfPreviewPanel {
                 return;
             }
             void appendWidgetToEmbfFile(this._filePath, pageIndex, widgetType).then(ok => {
-                if (!ok) {
-                    return;
-                }
-                try {
-                    const doc = vscode.workspace.textDocuments.find(
-                        d => d.uri.scheme === "file" && d.uri.fsPath === this._filePath
-                    );
-                    const project = doc ? parseEmbfSource(doc.getText()) : parseEmbf(this._filePath);
-                    this.sendProject(project);
-                } catch (e) {
-                    const m = e instanceof EmbfParseError ? e.message : String(e);
-                    embeddedFlowLog("preview", "warn", `refresh after addWidget: ${m}`);
+                if (ok) {
+                    this.reloadPreview(pageIndex);
                 }
             });
+        } else if (msg.type === "moveWidget") {
+            const pageIndex = Number(msg.pageIndex);
+            const componentId = String(msg.componentId ?? "").trim();
+            const x = Number(msg.x);
+            const y = Number(msg.y);
+            if (!Number.isInteger(pageIndex) || pageIndex < 0 || !componentId || !Number.isFinite(x) || !Number.isFinite(y)) {
+                return;
+            }
+            void moveWidgetInEmbfFile(this._filePath, pageIndex, componentId, x, y).then(ok => {
+                if (ok) {
+                    this.reloadPreview(pageIndex);
+                }
+            });
+        }
+    }
+
+    private reloadPreview(pageIndex: number): void {
+        try {
+            const project = readEmbfProject(this._filePath);
+            this.sendProject(project, pageIndex);
+        } catch (e) {
+            const m = e instanceof EmbfParseError ? e.message : String(e);
+            embeddedFlowLog("preview", "warn", `refresh preview: ${m}`);
         }
     }
 
@@ -230,6 +265,18 @@ export class EmbfPreviewPanel {
             display: block;
             image-rendering: pixelated;
         }
+        #design-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            display: block;
+            image-rendering: pixelated;
+            cursor: default;
+        }
+        #toolbar input[type="checkbox"] {
+            margin: 0 4px 0 0;
+            vertical-align: middle;
+        }
         #error-overlay {
             display: none;
             position: absolute;
@@ -272,11 +319,16 @@ export class EmbfPreviewPanel {
             <option value="">— type —</option>
             ${WIDGET_PALETTE_ORDER.map(w => `<option value="${w}">${w}</option>`).join("")}
         </select>
+        <label title="Select and drag widgets; updates .embf position">
+            <input type="checkbox" id="design-mode" checked />
+            Design
+        </label>
         <span id="status">Waiting for project…</span>
     </div>
     <div id="canvas-container">
         <div id="display-wrapper">
             <canvas id="lvgl-canvas"></canvas>
+            <canvas id="design-overlay"></canvas>
             <div id="error-overlay"></div>
             <div id="loading-overlay">
                 <div class="spinner"></div>
@@ -291,6 +343,8 @@ export class EmbfPreviewPanel {
 
     dispose(): void {
         EmbfPreviewPanel._panels.delete(this._filePath);
+        this._webviewReady = false;
+        this._pendingMessage = null;
         this._panel.dispose();
         this._disposables.forEach(d => d.dispose());
         this._disposables = [];

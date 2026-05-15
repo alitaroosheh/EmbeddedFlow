@@ -28,8 +28,8 @@
         {
           "id": "lbl_title",
           "type": "label",
-          "x": 10,
-          "y": 8,
+          "x": 15,
+          "y": 14,
           "width": 200,
           "height": 28,
           "text": "EmbeddedFlow Demo",
@@ -41,8 +41,8 @@
         {
           "id": "btn_ok",
           "type": "button",
-          "x": 10,
-          "y": 44,
+          "x": 363,
+          "y": 227,
           "width": 100,
           "height": 36,
           "label": "Settings",
@@ -50,7 +50,10 @@
             {
               "trigger": "clicked",
               "actions": [
-                { "type": "navigate", "target": "page_settings" }
+                {
+                  "type": "navigate",
+                  "target": "page_settings"
+                }
               ]
             }
           ]
@@ -58,27 +61,33 @@
         {
           "id": "sw_dark",
           "type": "switch",
-          "x": 130,
-          "y": 50,
+          "x": 269,
+          "y": 23,
           "width": 60,
           "height": 28,
           "checked": false,
           "events": [
             {
               "trigger": "value_changed",
-              "actions": [{ "type": "set_theme" }]
+              "actions": [
+                {
+                  "type": "set_theme"
+                }
+              ]
             }
           ]
         },
         {
           "id": "lbl_sw",
           "type": "label",
-          "x": 196,
-          "y": 56,
+          "x": 329,
+          "y": 27,
           "width": 80,
           "height": 20,
           "text": "Dark mode",
-          "styles": { "fontSize": 12 }
+          "styles": {
+            "fontSize": 12
+          }
         },
         {
           "id": "bar_progress",
@@ -103,13 +112,15 @@
           "width": 60,
           "height": 20,
           "text": "65%",
-          "styles": { "fontSize": 12 }
+          "styles": {
+            "fontSize": 12
+          }
         },
         {
           "id": "slider_val",
           "type": "slider",
-          "x": 10,
-          "y": 124,
+          "x": 53,
+          "y": 291,
           "width": 200,
           "height": 20,
           "min": 0,
@@ -134,7 +145,7 @@
           "id": "chk_enable",
           "type": "checkbox",
           "x": 10,
-          "y": 158,
+          "y": 37,
           "width": 140,
           "height": 24,
           "text": "Enable feature",
@@ -162,6 +173,45 @@
             "fontSize": 11,
             "textColor": "#888888"
           }
+        },
+        {
+          "id": "sld_1",
+          "x": 300,
+          "y": 100,
+          "width": 140,
+          "height": 24,
+          "type": "slider",
+          "min": 0,
+          "max": 100,
+          "value": 50
+        },
+        {
+          "id": "chk_1",
+          "x": 399,
+          "y": 65,
+          "width": 140,
+          "height": 28,
+          "type": "checkbox",
+          "text": "Check",
+          "checked": false
+        },
+        {
+          "id": "sw_1",
+          "x": 108,
+          "y": 144,
+          "width": 52,
+          "height": 28,
+          "type": "switch",
+          "checked": false
+        },
+        {
+          "id": "btn_1",
+          "x": 188,
+          "y": 241,
+          "width": 88,
+          "height": 36,
+          "type": "button",
+          "label": "Button"
         }
       ]
     },
@@ -178,7 +228,10 @@
           "width": 200,
           "height": 28,
           "text": "Settings",
-          "styles": { "fontSize": 20, "textColor": "#333333" }
+          "styles": {
+            "fontSize": 20,
+            "textColor": "#333333"
+          }
         },
         {
           "id": "lbl_brightness",
@@ -188,7 +241,9 @@
           "width": 100,
           "height": 20,
           "text": "Brightness",
-          "styles": { "fontSize": 13 }
+          "styles": {
+            "fontSize": 13
+          }
         },
         {
           "id": "slider_brightness",
@@ -209,7 +264,9 @@
           "width": 100,
           "height": 20,
           "text": "Volume",
-          "styles": { "fontSize": 13 }
+          "styles": {
+            "fontSize": 13
+          }
         },
         {
           "id": "slider_volume",
@@ -239,7 +296,9 @@
           "width": 60,
           "height": 20,
           "text": "Wi-Fi",
-          "styles": { "fontSize": 13 }
+          "styles": {
+            "fontSize": 13
+          }
         },
         {
           "id": "btn_back",
@@ -253,10 +312,22 @@
             {
               "trigger": "clicked",
               "actions": [
-                { "type": "navigate", "target": "page_main" }
+                {
+                  "type": "navigate",
+                  "target": "page_main"
+                }
               ]
             }
           ]
+        },
+        {
+          "id": "ta_1",
+          "x": 12,
+          "y": 100,
+          "width": 160,
+          "height": 72,
+          "type": "textarea",
+          "text": ""
         }
       ]
     }

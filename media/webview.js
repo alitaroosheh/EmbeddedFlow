@@ -13,6 +13,7 @@
  *   { type: "ready" }
  *   { type: "log", level: "info"|"warn"|"error", text: string }
  *   { type: "addWidget", pageIndex: number, widgetType: string }
+ *   { type: "moveWidget", pageIndex: number, componentId: string, x: number, y: number }
  */
 
 // ── VSCode API ────────────────────────────────────────────────────────────────
@@ -23,8 +24,11 @@ function log(level, text) {
 }
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
-const canvas = /** @type {HTMLCanvasElement} */ (document.getElementById("lvgl-canvas"));
-const ctx = canvas.getContext("2d");
+const canvas = /** @type {HTMLCanvasElement | null} */ (document.getElementById("lvgl-canvas"));
+const ctx = canvas?.getContext("2d") ?? null;
+const designOverlay = /** @type {HTMLCanvasElement | null} */ (document.getElementById("design-overlay"));
+const designCtx = designOverlay?.getContext("2d") ?? null;
+const designModeCheck = /** @type {HTMLInputElement | null} */ (document.getElementById("design-mode"));
 const errorOverlay = document.getElementById("error-overlay");
 const loadingOverlay = document.getElementById("loading-overlay");
 const pageSelect = document.getElementById("page-select");
@@ -52,6 +56,18 @@ let previewDarkOverride = null;
 
 /** Skip duplicate rebuild when `pageSelect.value` is set from code (navigate). */
 let pageSelectProgrammatic = false;
+
+/** Active page index (0-based); preserved across project reloads. */
+let currentPageIndex = 0;
+
+/** Design mode: select and drag widgets (updates .embf); off = LVGL interaction. */
+let designMode = true;
+
+/** @type {string | null} */
+let selectedComponentId = null;
+
+/** @type {{ id: string, pointerX: number, pointerY: number, compX: number, compY: number, absX: number, absY: number, width: number, height: number, previewX: number, previewY: number } | null} */
+let dragState = null;
 
 /**
  * Maps WASM object pointer (number) → component ID string.
@@ -92,8 +108,6 @@ window.addEventListener("message", event => {
     }
 });
 
-vscode.postMessage({ type: "ready" });
-
 function applyEmbfThemeFromProject(project) {
     if (!wasmReady || !WasmModule) return;
     const theme = project.theme ?? {};
@@ -118,8 +132,19 @@ async function handleLoad(payload) {
     canvas.width = displayWidth;
     canvas.height = displayHeight;
 
-    // Populate page selector
-    populatePageSelect(payload.project.pages);
+    // Populate page selector and stay on the current page when possible
+    const pages = payload.project.pages;
+    const requestedPage =
+        typeof payload.pageIndex === "number" && Number.isFinite(payload.pageIndex)
+            ? payload.pageIndex
+            : currentPageIndex;
+    populatePageSelect(pages);
+    currentPageIndex = Math.min(Math.max(0, requestedPage), Math.max(0, pages.length - 1));
+    if (pageSelect) {
+        pageSelectProgrammatic = true;
+        pageSelect.value = String(currentPageIndex);
+        pageSelectProgrammatic = false;
+    }
 
     // Load WASM module (only if URI changed)
     if (payload.wasmJsUri !== loadedWasmJsUri) {
@@ -138,12 +163,16 @@ async function handleLoad(payload) {
 
     // Build the UI from the project JSON
     try {
-        buildUiFromProject(currentProject, 0);
+        buildUiFromProject(currentProject, currentPageIndex);
     } catch (e) {
         showError(`UI build error: ${e.message ?? e}`);
         log("error", `UI build error: ${e}`);
         return;
     }
+
+    resizeDesignOverlay();
+    setDesignPointerMode();
+    drawDesignOverlay();
 
     showLoading(false);
     setStatus(`${currentProject.project.name} · LVGL ${currentProject.project.lvglVersion} · ${displayWidth}×${displayHeight}`);
@@ -503,7 +532,7 @@ function loop() {
                 displayWidth * displayHeight * 4
             );
             const imageData = new ImageData(pixels, displayWidth, displayHeight);
-            ctx.putImageData(imageData, 0, 0);
+            ctx?.putImageData(imageData, 0, 0);
         }
     } catch (e) {
         showError(`Runtime error: ${e.message ?? e}`);
@@ -528,7 +557,7 @@ function drainEventQueue() {
         const compId  = objPtrToId.get(objPtr);
         if (!compId) continue;
 
-        const pageIndex = parseInt(pageSelect.value, 10) || 0;
+        const pageIndex = currentPageIndex;
         const page      = currentProject.pages[pageIndex];
         if (!page) continue;
 
@@ -563,10 +592,16 @@ function dispatchAction(action, eventValue, currentPage) {
                 log("warn", `navigate: page "${action.target}" not found`);
                 return;
             }
+            currentPageIndex = targetIdx;
+            selectedComponentId = null;
+            dragState = null;
             pageSelectProgrammatic = true;
             try {
-                pageSelect.value = String(targetIdx);
+                if (pageSelect) {
+                    pageSelect.value = String(targetIdx);
+                }
                 buildUiFromProject(currentProject, targetIdx);
+                drawDesignOverlay();
             } finally {
                 pageSelectProgrammatic = false;
             }
@@ -619,48 +654,285 @@ function dispatchAction(action, eventValue, currentPage) {
     }
 }
 
-// ── Input forwarding ───────────────────────────────────────────────────────────
-canvas.addEventListener("pointerdown", e => {
-    canvas.setPointerCapture(e.pointerId);
-    sendPointer(e, true, 4);
-});
-canvas.addEventListener("pointermove", e => {
-    const drag = e.buttons > 0;
-    sendPointer(e, drag, drag ? 1 : 0);
-});
-canvas.addEventListener("pointerup", e => {
-    sendPointer(e, false, 4);
-    try {
-        canvas.releasePointerCapture(e.pointerId);
-    } catch {
-        /* ignore if not captured */
+// ── Design overlay (select / move widgets) ────────────────────────────────────
+if (designModeCheck) {
+    designMode = designModeCheck.checked;
+    designModeCheck.addEventListener("change", () => {
+        designMode = designModeCheck.checked;
+        if (!designMode) {
+            selectedComponentId = null;
+            dragState = null;
+        }
+        setDesignPointerMode();
+        drawDesignOverlay();
+    });
+}
+
+function setDesignPointerMode() {
+    if (!designOverlay || !canvas) {
+        return;
     }
-});
-canvas.addEventListener("pointercancel", e => {
-    sendPointer(e, false, 4);
-    try {
-        canvas.releasePointerCapture(e.pointerId);
-    } catch {
-        /* ignore */
+    if (designMode) {
+        designOverlay.style.pointerEvents = "auto";
+        canvas.style.pointerEvents = "none";
+    } else {
+        designOverlay.style.pointerEvents = "none";
+        canvas.style.pointerEvents = "auto";
     }
+}
+
+function resizeDesignOverlay() {
+    if (!designOverlay || !canvas) {
+        return;
+    }
+    designOverlay.width = displayWidth;
+    designOverlay.height = displayHeight;
+    const rect = canvas.getBoundingClientRect();
+    designOverlay.style.width = `${rect.width}px`;
+    designOverlay.style.height = `${rect.height}px`;
+}
+
+/**
+ * Hit-test topmost component at display coordinates (children use parent-relative x/y).
+ * @returns {{ comp: object, absX: number, absY: number } | null}
+ */
+function hitTestAt(page, px, py) {
+    /** @param {object[]} components @param {number} parentX @param {number} parentY */
+    function walk(components, parentX, parentY) {
+        for (let i = components.length - 1; i >= 0; i--) {
+            const c = components[i];
+            const ax = parentX + c.x;
+            const ay = parentY + c.y;
+            if (px >= ax && px < ax + c.width && py >= ay && py < ay + c.height) {
+                if (c.children?.length) {
+                    const inner = walk(c.children, ax, ay);
+                    if (inner) {
+                        return inner;
+                    }
+                }
+                return { comp: c, absX: ax, absY: ay };
+            }
+        }
+        return null;
+    }
+    return walk(page.components ?? [], 0, 0);
+}
+
+/** @returns {{ x: number, y: number, width: number, height: number } | null} */
+function getAbsBounds(page, componentId) {
+    /** @param {object[]} components @param {number} parentX @param {number} parentY */
+    function walk(components, parentX, parentY) {
+        for (const c of components ?? []) {
+            const ax = parentX + c.x;
+            const ay = parentY + c.y;
+            if (c.id === componentId) {
+                return { x: ax, y: ay, width: c.width, height: c.height };
+            }
+            if (c.children?.length) {
+                const inner = walk(c.children, ax, ay);
+                if (inner) {
+                    return inner;
+                }
+            }
+        }
+        return null;
+    }
+    return walk(page.components ?? [], 0, 0);
+}
+
+function drawDesignOverlay() {
+    if (!designCtx || !designOverlay) {
+        return;
+    }
+    designCtx.clearRect(0, 0, displayWidth, displayHeight);
+    if (!designMode || !currentProject) {
+        return;
+    }
+    const page = currentProject.pages[currentPageIndex];
+    if (!page) {
+        return;
+    }
+    let bounds = null;
+    if (dragState) {
+        bounds = {
+            x: dragState.previewX,
+            y: dragState.previewY,
+            width: dragState.width,
+            height: dragState.height
+        };
+    } else if (selectedComponentId) {
+        bounds = getAbsBounds(page, selectedComponentId);
+    }
+    if (!bounds) {
+        return;
+    }
+    designCtx.strokeStyle = "#007acc";
+    designCtx.lineWidth = 2;
+    designCtx.setLineDash([4, 3]);
+    designCtx.strokeRect(bounds.x + 0.5, bounds.y + 0.5, bounds.width, bounds.height);
+    designCtx.setLineDash([]);
+}
+
+function overlayCoords(e) {
+    const el = designOverlay ?? canvas;
+    const rect = el.getBoundingClientRect();
+    const scaleX = displayWidth / rect.width;
+    const scaleY = displayHeight / rect.height;
+    return {
+        x: Math.round((e.clientX - rect.left) * scaleX),
+        y: Math.round((e.clientY - rect.top) * scaleY)
+    };
+}
+
+function setupDesignOverlay() {
+    if (!designOverlay) {
+        return;
+    }
+    designOverlay.addEventListener("pointerdown", e => {
+        if (!designMode || !currentProject) {
+            return;
+        }
+        const page = currentProject.pages[currentPageIndex];
+        if (!page) {
+            return;
+        }
+        designOverlay.setPointerCapture(e.pointerId);
+        const { x, y } = overlayCoords(e);
+        const hit = hitTestAt(page, x, y);
+        if (!hit) {
+            selectedComponentId = null;
+            dragState = null;
+            drawDesignOverlay();
+            return;
+        }
+        selectedComponentId = hit.comp.id;
+        dragState = {
+            id: hit.comp.id,
+            pointerX: x,
+            pointerY: y,
+            compX: hit.comp.x,
+            compY: hit.comp.y,
+            absX: hit.absX,
+            absY: hit.absY,
+            previewX: hit.absX,
+            previewY: hit.absY,
+            width: hit.comp.width,
+            height: hit.comp.height
+        };
+        drawDesignOverlay();
+        e.preventDefault();
+    });
+
+    designOverlay.addEventListener("pointermove", e => {
+        if (!designMode || !dragState) {
+            return;
+        }
+        const { x, y } = overlayCoords(e);
+        const dx = x - dragState.pointerX;
+        const dy = y - dragState.pointerY;
+        dragState.previewX = dragState.absX + dx;
+        dragState.previewY = dragState.absY + dy;
+        drawDesignOverlay();
+        e.preventDefault();
+    });
+
+    designOverlay.addEventListener("pointerup", e => {
+        if (!designMode || !dragState || !currentProject) {
+            try {
+                designOverlay.releasePointerCapture(e.pointerId);
+            } catch {
+                /* ignore */
+            }
+            return;
+        }
+        const { x, y } = overlayCoords(e);
+        const dx = x - dragState.pointerX;
+        const dy = y - dragState.pointerY;
+        const moved = Math.abs(dx) > 2 || Math.abs(dy) > 2;
+        if (moved) {
+            const newX = Math.max(0, Math.round(dragState.compX + dx));
+            const newY = Math.max(0, Math.round(dragState.compY + dy));
+            vscode.postMessage({
+                type: "moveWidget",
+                pageIndex: currentPageIndex,
+                componentId: dragState.id,
+                x: newX,
+                y: newY
+            });
+        }
+        dragState = null;
+        drawDesignOverlay();
+        try {
+            designOverlay.releasePointerCapture(e.pointerId);
+        } catch {
+            /* ignore */
+        }
+        e.preventDefault();
+    });
+
+    designOverlay.addEventListener("pointercancel", e => {
+        dragState = null;
+        drawDesignOverlay();
+        try {
+            designOverlay.releasePointerCapture(e.pointerId);
+        } catch {
+            /* ignore */
+        }
+    });
+}
+
+setupDesignOverlay();
+setDesignPointerMode();
+
+window.addEventListener("resize", () => {
+    resizeDesignOverlay();
+    drawDesignOverlay();
 });
 
-canvas.addEventListener("wheel", e => {
-    e.preventDefault();
-    if (!wasmReady || !WasmModule) return;
-    const delta = Math.sign(e.deltaY);
-    const fn = WasmModule._embf_on_wheel ?? WasmModule._onMouseWheelEvent;
-    fn?.(delta, 0);
-}, { passive: false });
+// ── Input forwarding (LVGL interaction when design mode is off) ───────────────
+if (canvas) {
+    canvas.addEventListener("pointerdown", e => {
+        canvas.setPointerCapture(e.pointerId);
+        sendPointer(e, true, 4);
+    });
+    canvas.addEventListener("pointermove", e => {
+        const drag = e.buttons > 0;
+        sendPointer(e, drag, drag ? 1 : 0);
+    });
+    canvas.addEventListener("pointerup", e => {
+        sendPointer(e, false, 4);
+        try {
+            canvas.releasePointerCapture(e.pointerId);
+        } catch {
+            /* ignore if not captured */
+        }
+    });
+    canvas.addEventListener("pointercancel", e => {
+        sendPointer(e, false, 4);
+        try {
+            canvas.releasePointerCapture(e.pointerId);
+        } catch {
+            /* ignore */
+        }
+    });
 
-canvas.addEventListener("keydown", e => {
-    if (!wasmReady || !WasmModule) return;
-    const fn = WasmModule._embf_on_key ?? WasmModule._onKeyPressed;
-    fn?.(e.key.charCodeAt(0));
-});
+    canvas.addEventListener("wheel", e => {
+        e.preventDefault();
+        if (!wasmReady || !WasmModule) return;
+        const delta = Math.sign(e.deltaY);
+        const fn = WasmModule._embf_on_wheel ?? WasmModule._onMouseWheelEvent;
+        fn?.(delta, 0);
+    }, { passive: false });
+
+    canvas.addEventListener("keydown", e => {
+        if (!wasmReady || !WasmModule) return;
+        const fn = WasmModule._embf_on_key ?? WasmModule._onKeyPressed;
+        fn?.(e.key.charCodeAt(0));
+    });
+}
 
 function sendPointer(e, pressed, pumpLevel) {
-    if (!wasmReady || !WasmModule) return;
+    if (!wasmReady || !WasmModule || !canvas) return;
     const rect = canvas.getBoundingClientRect();
     const scaleX = displayWidth / rect.width;
     const scaleY = displayHeight / rect.height;
@@ -687,11 +959,17 @@ function pumpLvglAfterPointer(iterations) {
 }
 
 // ── Page selector ─────────────────────────────────────────────────────────────
-pageSelect.addEventListener("change", () => {
-    if (!currentProject || pageSelectProgrammatic) return;
-    const idx = parseInt(pageSelect.value, 10);
-    buildUiFromProject(currentProject, idx);
-});
+if (pageSelect) {
+    pageSelect.addEventListener("change", () => {
+        if (!currentProject || pageSelectProgrammatic) return;
+        const idx = parseInt(pageSelect.value, 10) || 0;
+        currentPageIndex = idx;
+        selectedComponentId = null;
+        dragState = null;
+        buildUiFromProject(currentProject, idx);
+        drawDesignOverlay();
+    });
+}
 
 if (widgetAddSelect) {
     widgetAddSelect.addEventListener("change", () => {
@@ -699,13 +977,16 @@ if (widgetAddSelect) {
         if (!widgetType || !currentProject) {
             return;
         }
-        const pageIndex = parseInt(pageSelect.value, 10) || 0;
+        const pageIndex = currentPageIndex;
         vscode.postMessage({ type: "addWidget", pageIndex, widgetType });
         widgetAddSelect.value = "";
     });
 }
 
 function populatePageSelect(pages) {
+    if (!pageSelect) {
+        return;
+    }
     pageSelect.innerHTML = "";
     pages.forEach((p, i) => {
         const opt = document.createElement("option");
@@ -715,24 +996,38 @@ function populatePageSelect(pages) {
     });
 }
 
+// Notify host only after listeners are registered (host queues project until this).
+if (!canvas) {
+    log("error", "Preview DOM missing #lvgl-canvas — reload the window");
+}
+vscode.postMessage({ type: "ready" });
+
 // ── UI helpers ─────────────────────────────────────────────────────────────────
 function showLoading(visible) {
-    loadingOverlay.style.display = visible ? "flex" : "none";
+    if (loadingOverlay) {
+        loadingOverlay.style.display = visible ? "flex" : "none";
+    }
 }
 
 function showError(message) {
     showLoading(false);
-    errorOverlay.style.display = "block";
-    errorOverlay.textContent = message;
+    if (errorOverlay) {
+        errorOverlay.style.display = "block";
+        errorOverlay.textContent = message;
+    }
 }
 
 function hideError() {
-    errorOverlay.style.display = "none";
-    errorOverlay.textContent = "";
+    if (errorOverlay) {
+        errorOverlay.style.display = "none";
+        errorOverlay.textContent = "";
+    }
 }
 
 function setStatus(text) {
-    statusEl.textContent = text;
+    if (statusEl) {
+        statusEl.textContent = text;
+    }
 }
 
 // ── Color helper ───────────────────────────────────────────────────────────────

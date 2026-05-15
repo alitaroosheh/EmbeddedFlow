@@ -242,6 +242,16 @@ function resolveFilePath(uri?: vscode.Uri): string | undefined {
 }
 
 function openPreview(filePath: string, extensionUri: vscode.Uri): void {
+    let panel: EmbfPreviewPanel;
+    try {
+        panel = EmbfPreviewPanel.createOrShow(filePath, extensionUri);
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        embeddedFlowLog("preview", "error", `failed to open preview panel: ${msg}`);
+        void vscode.window.showErrorMessage(`EmbeddedFlow: could not open preview — ${msg}`);
+        return;
+    }
+
     // Parse immediately so the panel can show the current state
     let project: EmbfProject | EmbfParseError;
     try {
@@ -249,8 +259,6 @@ function openPreview(filePath: string, extensionUri: vscode.Uri): void {
     } catch (e) {
         project = e instanceof EmbfParseError ? e : new EmbfParseError(String(e));
     }
-
-    const panel = EmbfPreviewPanel.createOrShow(filePath, extensionUri);
 
     if (project instanceof EmbfParseError) {
         embeddedFlowLog("preview", "error", `${path.basename(filePath)}: ${project.message}`);

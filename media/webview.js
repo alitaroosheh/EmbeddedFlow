@@ -35,6 +35,7 @@ const errorOverlay = document.getElementById("error-overlay");
 const loadingOverlay = document.getElementById("loading-overlay");
 const pageSelect = document.getElementById("page-select");
 const widgetPalette = document.getElementById("widget-palette");
+const canvasContainer = document.getElementById("canvas-container");
 const statusEl = document.getElementById("status");
 const inspectorEmpty = document.getElementById("inspector-empty");
 const inspectorForm = document.getElementById("inspector-form");
@@ -1180,6 +1181,47 @@ window.addEventListener("resize", () => {
     drawDesignOverlay();
 });
 
+/** Scroll the preview viewport when the display is larger than the panel. */
+function scrollPreviewContainer(e) {
+    if (!canvasContainer) {
+        return false;
+    }
+    const maxY = canvasContainer.scrollHeight - canvasContainer.clientHeight;
+    const maxX = canvasContainer.scrollWidth - canvasContainer.clientWidth;
+    if (maxY <= 0 && maxX <= 0) {
+        return false;
+    }
+    const prevTop = canvasContainer.scrollTop;
+    const prevLeft = canvasContainer.scrollLeft;
+    canvasContainer.scrollTop = Math.max(0, Math.min(maxY, prevTop + e.deltaY));
+    canvasContainer.scrollLeft = Math.max(0, Math.min(maxX, prevLeft + e.deltaX));
+    return canvasContainer.scrollTop !== prevTop || canvasContainer.scrollLeft !== prevLeft;
+}
+
+function onPreviewWheel(e) {
+    if (scrollPreviewContainer(e)) {
+        e.preventDefault();
+        return;
+    }
+    if (designMode) {
+        return;
+    }
+    if (!wasmReady || !WasmModule || !canvas) {
+        return;
+    }
+    e.preventDefault();
+    const delta = Math.sign(e.deltaY);
+    const fn = WasmModule._embf_on_wheel ?? WasmModule._onMouseWheelEvent;
+    fn?.(delta, 0);
+}
+
+if (canvasContainer) {
+    canvasContainer.addEventListener("wheel", onPreviewWheel, { passive: false });
+}
+if (designOverlay) {
+    designOverlay.addEventListener("wheel", onPreviewWheel, { passive: false });
+}
+
 // ── Input forwarding (LVGL interaction when design mode is off) ───────────────
 if (canvas) {
     canvas.addEventListener("pointerdown", e => {
@@ -1207,13 +1249,7 @@ if (canvas) {
         }
     });
 
-    canvas.addEventListener("wheel", e => {
-        e.preventDefault();
-        if (!wasmReady || !WasmModule) return;
-        const delta = Math.sign(e.deltaY);
-        const fn = WasmModule._embf_on_wheel ?? WasmModule._onMouseWheelEvent;
-        fn?.(delta, 0);
-    }, { passive: false });
+    canvas.addEventListener("wheel", onPreviewWheel, { passive: false });
 
     canvas.addEventListener("keydown", e => {
         if (!wasmReady || !WasmModule) return;

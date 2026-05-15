@@ -61,8 +61,8 @@
         {
           "id": "sw_dark",
           "type": "switch",
-          "x": 269,
-          "y": 23,
+          "x": 271,
+          "y": 3,
           "width": 60,
           "height": 28,
           "checked": false,
@@ -75,34 +75,24 @@
                 }
               ]
             }
-          ]
-        },
-        {
-          "id": "lbl_sw",
-          "type": "label",
-          "x": 329,
-          "y": 27,
-          "width": 80,
-          "height": 20,
-          "text": "Dark mode",
-          "styles": {
-            "fontSize": 12
-          }
+          ],
+          "hidden": false
         },
         {
           "id": "bar_progress",
           "type": "bar",
           "x": 10,
           "y": 96,
-          "width": 200,
+          "width": 100,
           "height": 16,
           "min": 0,
           "max": 100,
-          "value": 65,
+          "value": 50,
           "styles": {
             "bgColor": "#D4D4D4",
             "indicatorColor": "#FE7D32"
-          }
+          },
+          "hidden": false
         },
         {
           "id": "lbl_progress",
@@ -130,7 +120,7 @@
         {
           "id": "arc_gauge",
           "type": "arc",
-          "x": 230,
+          "x": 0,
           "y": 110,
           "width": 80,
           "height": 80,
@@ -139,7 +129,8 @@
           "value": 72,
           "startAngle": 135,
           "endAngle": 45,
-          "mode": "normal"
+          "mode": "normal",
+          "hidden": false
         },
         {
           "id": "chk_enable",
@@ -176,24 +167,14 @@
         },
         {
           "id": "sld_1",
-          "x": 300,
-          "y": 100,
+          "x": 306,
+          "y": 260,
           "width": 140,
           "height": 24,
           "type": "slider",
           "min": 0,
           "max": 100,
           "value": 50
-        },
-        {
-          "id": "chk_1",
-          "x": 399,
-          "y": 65,
-          "width": 140,
-          "height": 28,
-          "type": "checkbox",
-          "text": "Check",
-          "checked": false
         },
         {
           "id": "sw_1",
@@ -224,8 +205,8 @@
         },
         {
           "id": "sld_2",
-          "x": 12,
-          "y": 188,
+          "x": 19,
+          "y": 348,
           "width": 140,
           "height": 24,
           "type": "slider",
@@ -236,7 +217,7 @@
         {
           "id": "sw_2",
           "x": 108,
-          "y": 188,
+          "y": 283,
           "width": 52,
           "height": 28,
           "type": "switch",
@@ -253,8 +234,8 @@
         },
         {
           "id": "ln_1",
-          "x": 452,
-          "y": 113,
+          "x": 446,
+          "y": 34,
           "width": 80,
           "height": 40,
           "type": "line",

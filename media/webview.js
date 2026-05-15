@@ -14,6 +14,8 @@
  *   { type: "log", level: "info"|"warn"|"error", text: string }
  *   { type: "addWidget", pageIndex: number, widgetType: string }
  *   { type: "moveWidget", pageIndex: number, componentId: string, x: number, y: number }
+ *   { type: "updateWidget", pageIndex: number, componentId: string, patch: object }
+ *   { type: "deleteWidget", pageIndex: number, componentId: string }
  */
 
 // ── VSCode API ────────────────────────────────────────────────────────────────
@@ -34,6 +36,12 @@ const loadingOverlay = document.getElementById("loading-overlay");
 const pageSelect = document.getElementById("page-select");
 const widgetPalette = document.getElementById("widget-palette");
 const statusEl = document.getElementById("status");
+const inspectorEmpty = document.getElementById("inspector-empty");
+const inspectorForm = document.getElementById("inspector-form");
+const inspectorDelete = document.getElementById("inspector-delete");
+/** @type {ReturnType<typeof setTimeout> | null} */
+let inspectorDebounce = null;
+let inspectorSyncing = false;
 
 // ── Runtime state ─────────────────────────────────────────────────────────────
 /** @type {any} Current Emscripten module instance */
@@ -172,7 +180,15 @@ async function handleLoad(payload) {
 
     resizeDesignOverlay();
     setDesignPointerMode();
+    if (typeof payload.selectedComponentId === "string" && payload.selectedComponentId) {
+        const page = currentProject.pages[currentPageIndex];
+        selectedComponentId =
+            page && findComponentById(page.components, payload.selectedComponentId)
+                ? payload.selectedComponentId
+                : null;
+    }
     drawDesignOverlay();
+    renderInspector();
 
     showLoading(false);
     setStatus(`${currentProject.project.name} · LVGL ${currentProject.project.lvglVersion} · ${displayWidth}×${displayHeight}`);
@@ -602,6 +618,7 @@ function dispatchAction(action, eventValue, currentPage) {
                 }
                 buildUiFromProject(currentProject, targetIdx);
                 drawDesignOverlay();
+                renderInspector();
             } finally {
                 pageSelectProgrammatic = false;
             }
@@ -665,6 +682,7 @@ if (designModeCheck) {
         }
         setDesignPointerMode();
         drawDesignOverlay();
+        renderInspector();
     });
 }
 
@@ -784,6 +802,279 @@ function overlayCoords(e) {
     };
 }
 
+// ── Property inspector ────────────────────────────────────────────────────────
+
+/** @param {object[]} components */
+function findComponentById(components, id) {
+    for (const c of components ?? []) {
+        if (c.id === id) {
+            return c;
+        }
+        if (c.children?.length) {
+            const inner = findComponentById(c.children, id);
+            if (inner) {
+                return inner;
+            }
+        }
+    }
+    return null;
+}
+
+function setSelection(componentId) {
+    selectedComponentId = componentId;
+    dragState = null;
+    drawDesignOverlay();
+    renderInspector();
+}
+
+function esc(s) {
+    return String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/"/g, "&quot;");
+}
+
+function fieldNum(name, label, value) {
+    return `<div class="field"><label>${esc(label)}</label><input type="number" name="${esc(name)}" value="${Number(value)}" step="1" /></div>`;
+}
+
+function fieldText(name, label, value) {
+    return `<div class="field"><label>${esc(label)}</label><input type="text" name="${esc(name)}" value="${esc(value ?? "")}" /></div>`;
+}
+
+function fieldCheck(name, label, checked) {
+    const c = checked ? " checked" : "";
+    return `<div class="field check-row"><label><input type="checkbox" name="${esc(name)}"${c} /> ${esc(label)}</label></div>`;
+}
+
+function fieldTextarea(name, label, value) {
+    return `<div class="field"><label>${esc(label)}</label><textarea name="${esc(name)}">${esc(value ?? "")}</textarea></div>`;
+}
+
+function renderInspector() {
+    if (!inspectorEmpty || !inspectorForm || !inspectorDelete) {
+        return;
+    }
+    if (!designMode || !currentProject) {
+        inspectorEmpty.hidden = false;
+        inspectorForm.hidden = true;
+        inspectorForm.innerHTML = "";
+        inspectorDelete.disabled = true;
+        return;
+    }
+    const page = currentProject.pages[currentPageIndex];
+    const comp =
+        selectedComponentId && page
+            ? findComponentById(page.components, selectedComponentId)
+            : null;
+    if (!comp) {
+        inspectorEmpty.hidden = false;
+        inspectorForm.hidden = true;
+        inspectorForm.innerHTML = "";
+        inspectorDelete.disabled = true;
+        return;
+    }
+
+    inspectorEmpty.hidden = true;
+    inspectorForm.hidden = false;
+    inspectorDelete.disabled = false;
+
+    inspectorSyncing = true;
+    let html = `<div id="inspector-readonly"><strong>${esc(comp.id)}</strong> · ${esc(comp.type)}</div>`;
+    html += `<div class="row2">${fieldNum("x", "X", comp.x)}${fieldNum("y", "Y", comp.y)}</div>`;
+    html += `<div class="row2">${fieldNum("width", "Width", comp.width)}${fieldNum("height", "Height", comp.height)}</div>`;
+    html += fieldCheck("hidden", "Hidden", !!comp.hidden);
+
+    switch (comp.type) {
+        case "label":
+            html += fieldText("text", "Text", comp.text);
+            break;
+        case "button":
+            html += fieldText("label", "Label", comp.label);
+            break;
+        case "image":
+            html += fieldText("src", "Source", comp.src);
+            break;
+        case "slider":
+        case "bar":
+        case "arc":
+            html += fieldNum("min", "Min", comp.min);
+            html += fieldNum("max", "Max", comp.max);
+            html += fieldNum("value", "Value", comp.value);
+            break;
+        case "switch":
+            html += fieldCheck("checked", "Checked", !!comp.checked);
+            break;
+        case "checkbox":
+            html += fieldText("text", "Text", comp.text);
+            html += fieldCheck("checked", "Checked", !!comp.checked);
+            break;
+        case "dropdown":
+        case "roller":
+            html += fieldTextarea(
+                "options",
+                "Options (one per line)",
+                (comp.options ?? []).join("\n")
+            );
+            html += fieldNum("selectedIndex", "Selected index", comp.selectedIndex ?? 0);
+            break;
+        case "textarea":
+            html += fieldText("text", "Text", comp.text);
+            html += fieldText("placeholder", "Placeholder", comp.placeholder);
+            break;
+        case "spinner":
+            html += fieldNum("speed", "Speed", comp.speed ?? 1000);
+            html += fieldNum("arcLength", "Arc length", comp.arcLength ?? 60);
+            break;
+        case "container":
+            html += `<div class="field"><label>Layout</label><select name="layout">
+                <option value="none"${comp.layout === "none" || !comp.layout ? " selected" : ""}>none</option>
+                <option value="flex"${comp.layout === "flex" ? " selected" : ""}>flex</option>
+                <option value="grid"${comp.layout === "grid" ? " selected" : ""}>grid</option>
+            </select></div>`;
+            break;
+        default:
+            break;
+    }
+
+    inspectorForm.innerHTML = html;
+    inspectorSyncing = false;
+}
+
+function readInspectorPatch() {
+    if (!inspectorForm) {
+        return {};
+    }
+    /** @type {Record<string, unknown>} */
+    const patch = {};
+    const num = (name) => {
+        const el = inspectorForm.elements.namedItem(name);
+        if (el instanceof HTMLInputElement && el.type === "number") {
+            const v = Number(el.value);
+            if (Number.isFinite(v)) {
+                patch[name] = v;
+            }
+        }
+    };
+    const txt = (name) => {
+        const el = inspectorForm.elements.namedItem(name);
+        if (el instanceof HTMLInputElement) {
+            patch[name] = el.value;
+        } else if (el instanceof HTMLTextAreaElement) {
+            patch[name] = el.value;
+        }
+    };
+    const chk = (name) => {
+        const el = inspectorForm.elements.namedItem(name);
+        if (el instanceof HTMLInputElement && el.type === "checkbox") {
+            patch[name] = el.checked;
+        }
+    };
+
+    num("x");
+    num("y");
+    num("width");
+    num("height");
+    chk("hidden");
+
+    const layoutEl = inspectorForm.elements.namedItem("layout");
+    if (layoutEl instanceof HTMLSelectElement) {
+        patch.layout = layoutEl.value;
+    }
+
+    const optionsEl = inspectorForm.elements.namedItem("options");
+    if (optionsEl instanceof HTMLTextAreaElement) {
+        patch.options = optionsEl.value
+            .split("\n")
+            .map(s => s.trim())
+            .filter(Boolean);
+    }
+
+    for (const k of [
+        "text", "label", "src", "min", "max", "value", "selectedIndex", "placeholder", "speed", "arcLength"
+    ]) {
+        const el = inspectorForm.elements.namedItem(k);
+        if (el instanceof HTMLInputElement) {
+            if (el.type === "checkbox") {
+                patch[k] = el.checked;
+            } else if (el.type === "number") {
+                num(k);
+            } else {
+                txt(k);
+            }
+        }
+    }
+    chk("checked");
+    return patch;
+}
+
+function commitInspector() {
+    if (inspectorSyncing || !selectedComponentId || !currentProject) {
+        return;
+    }
+    vscode.postMessage({
+        type: "updateWidget",
+        pageIndex: currentPageIndex,
+        componentId: selectedComponentId,
+        patch: readInspectorPatch()
+    });
+}
+
+if (inspectorForm) {
+    inspectorForm.addEventListener("input", () => {
+        if (inspectorSyncing) {
+            return;
+        }
+        if (inspectorDebounce) {
+            clearTimeout(inspectorDebounce);
+        }
+        inspectorDebounce = setTimeout(() => {
+            inspectorDebounce = null;
+            commitInspector();
+        }, 450);
+    });
+    inspectorForm.addEventListener("change", () => {
+        if (!inspectorSyncing) {
+            commitInspector();
+        }
+    });
+}
+
+if (inspectorDelete) {
+    inspectorDelete.addEventListener("click", () => {
+        if (!selectedComponentId) {
+            return;
+        }
+        vscode.postMessage({
+            type: "deleteWidget",
+            pageIndex: currentPageIndex,
+            componentId: selectedComponentId
+        });
+    });
+}
+
+document.addEventListener("keydown", e => {
+    if (!designMode) {
+        return;
+    }
+    if (e.key === "Escape") {
+        setSelection(null);
+        return;
+    }
+    if ((e.key === "Delete" || e.key === "Backspace") && selectedComponentId) {
+        const t = e.target;
+        if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement) {
+            return;
+        }
+        e.preventDefault();
+        vscode.postMessage({
+            type: "deleteWidget",
+            pageIndex: currentPageIndex,
+            componentId: selectedComponentId
+        });
+    }
+});
+
 function setupDesignOverlay() {
     if (!designOverlay) {
         return;
@@ -800,9 +1091,7 @@ function setupDesignOverlay() {
         const { x, y } = overlayCoords(e);
         const hit = hitTestAt(page, x, y);
         if (!hit) {
-            selectedComponentId = null;
-            dragState = null;
-            drawDesignOverlay();
+            setSelection(null);
             return;
         }
         selectedComponentId = hit.comp.id;
@@ -862,6 +1151,7 @@ function setupDesignOverlay() {
         }
         dragState = null;
         drawDesignOverlay();
+        renderInspector();
         try {
             designOverlay.releasePointerCapture(e.pointerId);
         } catch {
@@ -873,6 +1163,7 @@ function setupDesignOverlay() {
     designOverlay.addEventListener("pointercancel", e => {
         dragState = null;
         drawDesignOverlay();
+        renderInspector();
         try {
             designOverlay.releasePointerCapture(e.pointerId);
         } catch {
@@ -968,6 +1259,7 @@ if (pageSelect) {
         dragState = null;
         buildUiFromProject(currentProject, idx);
         drawDesignOverlay();
+        renderInspector();
     });
 }
 
@@ -1006,6 +1298,7 @@ function populatePageSelect(pages) {
 if (!canvas) {
     log("error", "Preview DOM missing #lvgl-canvas — reload the window");
 }
+renderInspector();
 vscode.postMessage({ type: "ready" });
 
 // ── UI helpers ─────────────────────────────────────────────────────────────────

@@ -3,7 +3,7 @@ import * as path from "path";
 import { EmbfProject } from "./types/embf";
 import { buildWidgetPaletteHtml } from "./embfPaletteIcons";
 import { EmbfParseError, getEffectiveDisplaySize } from "./embfParser";
-import { moveWidgetInEmbfFile } from "./embfComponentEdit";
+import { deleteWidgetFromEmbfFile, moveWidgetInEmbfFile, updateWidgetInEmbfFile } from "./embfComponentEdit";
 import { readEmbfProject } from "./embfProjectWrite";
 import { appendWidgetToEmbfFile } from "./embfWidgetInsert";
 import { embeddedFlowLog } from "./outputLog";
@@ -18,7 +18,9 @@ export type WebviewToHostMessage =
     | { type: "ready" }
     | { type: "log"; level: "info" | "warn" | "error"; text: string }
     | { type: "addWidget"; pageIndex: number; widgetType: string }
-    | { type: "moveWidget"; pageIndex: number; componentId: string; x: number; y: number };
+    | { type: "moveWidget"; pageIndex: number; componentId: string; x: number; y: number }
+    | { type: "updateWidget"; pageIndex: number; componentId: string; patch: Record<string, unknown> }
+    | { type: "deleteWidget"; pageIndex: number; componentId: string };
 
 export interface WebviewLoadPayload {
     project: EmbfProject;
@@ -28,6 +30,8 @@ export interface WebviewLoadPayload {
     wasmBinUri: string;
     /** When set, preview stays on this page after reload (0-based). */
     pageIndex?: number;
+    /** When set, re-select this component after reload. */
+    selectedComponentId?: string;
 }
 
 export class EmbfPreviewPanel {
@@ -99,7 +103,7 @@ export class EmbfPreviewPanel {
         }
     }
 
-    sendProject(project: EmbfProject, pageIndex?: number): void {
+    sendProject(project: EmbfProject, pageIndex?: number, selectedComponentId?: string): void {
         const { width, height } = getEffectiveDisplaySize(project);
 
         // Always use the custom embf_runtime (supports LVGL 9.5.0).
@@ -115,7 +119,8 @@ export class EmbfPreviewPanel {
                 displayHeight: height,
                 wasmJsUri,
                 wasmBinUri,
-                pageIndex
+                pageIndex,
+                selectedComponentId
             }
         });
     }
@@ -160,16 +165,45 @@ export class EmbfPreviewPanel {
             }
             void moveWidgetInEmbfFile(this._filePath, pageIndex, componentId, x, y).then(ok => {
                 if (ok) {
+                    this.reloadPreview(pageIndex, componentId);
+                }
+            });
+        } else if (msg.type === "updateWidget") {
+            const pageIndex = Number(msg.pageIndex);
+            const componentId = String(msg.componentId ?? "").trim();
+            const patch = msg.patch;
+            if (
+                !Number.isInteger(pageIndex) ||
+                pageIndex < 0 ||
+                !componentId ||
+                !patch ||
+                typeof patch !== "object"
+            ) {
+                return;
+            }
+            void updateWidgetInEmbfFile(this._filePath, pageIndex, componentId, patch).then(ok => {
+                if (ok) {
+                    this.reloadPreview(pageIndex, componentId);
+                }
+            });
+        } else if (msg.type === "deleteWidget") {
+            const pageIndex = Number(msg.pageIndex);
+            const componentId = String(msg.componentId ?? "").trim();
+            if (!Number.isInteger(pageIndex) || pageIndex < 0 || !componentId) {
+                return;
+            }
+            void deleteWidgetFromEmbfFile(this._filePath, pageIndex, componentId).then(ok => {
+                if (ok) {
                     this.reloadPreview(pageIndex);
                 }
             });
         }
     }
 
-    private reloadPreview(pageIndex: number): void {
+    private reloadPreview(pageIndex: number, selectedComponentId?: string): void {
         try {
             const project = readEmbfProject(this._filePath);
-            this.sendProject(project, pageIndex);
+            this.sendProject(project, pageIndex, selectedComponentId);
         } catch (e) {
             const m = e instanceof EmbfParseError ? e.message : String(e);
             embeddedFlowLog("preview", "warn", `refresh preview: ${m}`);
@@ -249,6 +283,7 @@ export class EmbfPreviewPanel {
         #widget-palette {
             flex-shrink: 0;
             width: 52px;
+            order: 1;
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -287,8 +322,112 @@ export class EmbfPreviewPanel {
             height: 20px;
             pointer-events: none;
         }
+        #property-inspector {
+            flex: 0 0 220px;
+            width: 220px;
+            min-width: 220px;
+            max-width: 220px;
+            display: flex;
+            flex-direction: column;
+            background: #252526;
+            border-left: 1px solid #3c3c3c;
+            overflow: hidden;
+            order: 3;
+        }
+        #inspector-body {
+            flex: 1;
+            min-height: 240px;
+            overflow-y: auto;
+            padding: 0 12px 8px;
+        }
+        #property-inspector h2 {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: #999;
+            padding: 10px 12px 6px;
+        }
+        #inspector-empty {
+            font-size: 12px;
+            color: #888;
+            line-height: 1.4;
+            padding: 4px 0 12px;
+        }
+        #inspector-empty[hidden] {
+            display: none;
+        }
+        #inspector-form {
+            display: block;
+        }
+        #inspector-form[hidden] {
+            display: none;
+        }
+        #inspector-form .field {
+            margin-bottom: 10px;
+        }
+        #inspector-form label {
+            display: block;
+            font-size: 11px;
+            color: #999;
+            margin-bottom: 3px;
+        }
+        #inspector-form input[type="text"],
+        #inspector-form input[type="number"],
+        #inspector-form textarea,
+        #inspector-form select {
+            width: 100%;
+            background: #3c3c3c;
+            color: #ccc;
+            border: 1px solid #555;
+            border-radius: 3px;
+            padding: 4px 6px;
+            font-size: 12px;
+            font-family: inherit;
+        }
+        #inspector-form textarea {
+            min-height: 56px;
+            resize: vertical;
+        }
+        #inspector-form .row2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+        }
+        #inspector-form .check-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        #inspector-form .check-row input {
+            width: auto;
+        }
+        #inspector-delete {
+            flex-shrink: 0;
+            margin: 0 12px 12px;
+            padding: 6px 10px;
+            background: #5a1d1d;
+            color: #f48771;
+            border: 1px solid #8b2e2e;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        #inspector-delete:hover:not(:disabled) {
+            background: #6e2424;
+        }
+        #inspector-delete:disabled {
+            opacity: 0.35;
+            cursor: default;
+        }
+        #inspector-readonly {
+            font-size: 12px;
+            color: #aaa;
+            margin-bottom: 10px;
+        }
         #canvas-container {
             flex: 1;
+            order: 2;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -374,6 +513,14 @@ export class EmbfPreviewPanel {
             </div>
         </div>
         </div>
+        <aside id="property-inspector" aria-label="Properties">
+            <h2>Properties</h2>
+            <div id="inspector-body">
+                <div id="inspector-empty">Select a widget on the canvas (Design mode).</div>
+                <form id="inspector-form" hidden></form>
+            </div>
+            <button type="button" id="inspector-delete" disabled title="Delete selected widget">Delete widget</button>
+        </aside>
     </div>
     <script nonce="${nonce}" src="${webviewJsUri}"></script>
 </body>

@@ -1141,6 +1141,91 @@ function inspectorAppearancesSection(comp) {
     return html;
 }
 
+/**
+ * Keeps caret/cursor alive when redraw replaces innerHTML (e.g. after preview reload).
+ * @typedef {{ tag: string, name: string, inputType: string | null, selStart: number | null, selEnd: number | null }} InspectorFocusSnap
+ */
+
+/** @returns {InspectorFocusSnap | null} */
+function snapshotInspectorFocus() {
+    if (!inspectorForm) {
+        return null;
+    }
+    const ae = document.activeElement;
+    if (!(ae instanceof HTMLElement) || !inspectorForm.contains(ae)) {
+        return null;
+    }
+    if (
+        ae instanceof HTMLInputElement ||
+        ae instanceof HTMLTextAreaElement ||
+        ae instanceof HTMLSelectElement
+    ) {
+        const name = ae.getAttribute("name");
+        if (!name) {
+            return null;
+        }
+        const tag = ae.tagName.toLowerCase();
+        /** @type {string | null} */
+        let inputType = ae instanceof HTMLInputElement ? ae.type : null;
+        /** @type {number | null} */
+        let selStart = null;
+        /** @type {number | null} */
+        let selEnd = null;
+        if (
+            "selectionStart" in ae &&
+            typeof ae.selectionStart === "number" &&
+            typeof ae.selectionEnd === "number"
+        ) {
+            selStart = ae.selectionStart;
+            selEnd = ae.selectionEnd;
+        }
+        return { tag, name, inputType, selStart, selEnd };
+    }
+    return null;
+}
+
+/** @param {InspectorFocusSnap | null} snap */
+function restoreInspectorFocus(snap) {
+    if (!snap?.name || !inspectorForm) {
+        return;
+    }
+    const item = inspectorForm.elements.namedItem(snap.name);
+    if (!item || item instanceof RadioNodeList) {
+        return;
+    }
+    if (!(item instanceof HTMLElement)) {
+        return;
+    }
+    if (item.tagName.toLowerCase() !== snap.tag) {
+        return;
+    }
+    if (
+        snap.inputType !== null &&
+        item instanceof HTMLInputElement &&
+        item.type !== snap.inputType
+    ) {
+        return;
+    }
+
+    item.focus();
+
+    if (
+        (item instanceof HTMLInputElement || item instanceof HTMLTextAreaElement) &&
+        snap.selStart != null &&
+        snap.selEnd != null &&
+        typeof item.setSelectionRange === "function"
+    ) {
+        try {
+            const len = ("value" in item ? item.value : "").length;
+            const a = Math.max(0, Math.min(snap.selStart, len));
+            const b = Math.max(0, Math.min(snap.selEnd, len));
+            item.setSelectionRange(a, b);
+        } catch {
+            /* e.g. some number/date inputs disallow selection APIs */
+        }
+    }
+}
+
 function renderInspector() {
     if (!inspectorEmpty || !inspectorForm || !inspectorDelete) {
         return;
@@ -1168,6 +1253,8 @@ function renderInspector() {
     inspectorEmpty.hidden = true;
     inspectorForm.hidden = false;
     inspectorDelete.disabled = false;
+
+    const inspectorFocusSnap = snapshotInspectorFocus();
 
     inspectorSyncing = true;
     let html = `<div id="inspector-readonly"><strong>${esc(comp.id)}</strong> · ${esc(comp.type)}</div>`;
@@ -1283,6 +1370,12 @@ function renderInspector() {
 
     inspectorForm.innerHTML = html;
     inspectorSyncing = false;
+
+    if (inspectorFocusSnap) {
+        queueMicrotask(() => {
+            restoreInspectorFocus(inspectorFocusSnap);
+        });
+    }
 }
 
 function parsePaddingInput(raw) {

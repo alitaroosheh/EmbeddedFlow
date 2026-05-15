@@ -167,10 +167,10 @@
           "y": 210,
           "width": 300,
           "height": 20,
-          "text": "EmbeddedFlow - LVGL 9.5.0 preview",
+          "text": "LVGL 9.5.0 preview",
           "styles": {
             "fontSize": 19,
-            "textColor": "#88888",
+            "textColor": "#f00a0a",
             "align": "center"
           },
           "hidden": false,
@@ -216,8 +216,8 @@
         },
         {
           "id": "ta_2",
-          "x": 204,
-          "y": 188,
+          "x": 360,
+          "y": 231,
           "width": 160,
           "height": 72,
           "type": "textarea",

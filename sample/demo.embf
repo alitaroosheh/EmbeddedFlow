@@ -23,7 +23,7 @@
     {
       "id": "page_main",
       "name": "Main",
-      "backgroundColor": "#f0f0f0",
+      "backgroundColor": "#0b0a0a",
       "components": [
         {
           "id": "lbl_title",
@@ -221,7 +221,14 @@
           "width": 160,
           "height": 72,
           "type": "textarea",
-          "text": ""
+          "text": "",
+          "hidden": false,
+          "styles": {
+            "bgColor": "#4b87c3"
+          },
+          "events": [],
+          "placeholder": "",
+          "oneLine": false
         },
         {
           "id": "ln_1",

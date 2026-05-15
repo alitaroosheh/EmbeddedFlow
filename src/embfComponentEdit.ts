@@ -4,7 +4,8 @@ import type { EmbfProject, Page } from "./types/embf";
 import {
     deleteComponentOnPage,
     patchComponentOnPage,
-    setComponentPositionOnPage
+    setComponentPositionOnPage,
+    applyPageInspectorPatch
 } from "./embfComponentModel";
 import { cloneEmbfProject } from "./embfWidgetFactory";
 import { embeddedFlowLog } from "./outputLog";
@@ -41,6 +42,23 @@ async function persistPageEdit(
     const page = next.pages[pageIndex];
     if (!edit(page)) {
         onNotFound?.();
+        return false;
+    }
+
+    return writeEmbfProject(filePath, next);
+}
+
+async function persistProjectEdit(filePath: string, edit: (project: EmbfProject) => boolean): Promise<boolean> {
+    let project: EmbfProject;
+    try {
+        project = readEmbfProject(filePath);
+    } catch (e) {
+        vscode.window.showErrorMessage(`EmbeddedFlow: ${e instanceof Error ? e.message : String(e)}`);
+        return false;
+    }
+
+    const next = cloneEmbfProject(project);
+    if (!edit(next)) {
         return false;
     }
 
@@ -100,6 +118,32 @@ export async function updateWidgetInEmbfFile(
     );
     if (ok) {
         embeddedFlowLog("widgets", "info", `updated "${id}" (${path.basename(filePath)})`);
+    }
+    return ok;
+}
+
+/**
+ * Update page + theme fields from the page-level inspector (background, title, theme.dark).
+ */
+export async function updatePageInEmbfFile(
+    filePath: string,
+    pageIndex: number,
+    patch: Record<string, unknown>
+): Promise<boolean> {
+    if (
+        pageIndex < 0 ||
+        !patch ||
+        typeof patch !== "object" ||
+        Object.keys(patch).length === 0
+    ) {
+        return false;
+    }
+
+    const ok = await persistProjectEdit(filePath, project =>
+        applyPageInspectorPatch(project, pageIndex, patch)
+    );
+    if (ok) {
+        embeddedFlowLog("widgets", "info", `updated page idx ${pageIndex} (${path.basename(filePath)})`);
     }
     return ok;
 }

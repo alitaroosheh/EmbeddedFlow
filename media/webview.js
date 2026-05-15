@@ -6,7 +6,7 @@
  * EmbeddedFlow Webview — LVGL canvas renderer
  *
  * Communication protocol (host → webview):
- *   { type: "load",  payload: WebviewLoadPayload }
+ *   { type: "load",  payload: WebviewLoadPayload — optional suppressLoadingSpinner for soft JSON refresh }
  *   { type: "error", message: string }
  *
  * Communication protocol (webview → host):
@@ -15,6 +15,7 @@
  *   { type: "addWidget", pageIndex: number, widgetType: string }
  *   { type: "moveWidget", pageIndex: number, componentId: string, x: number, y: number }
  *   { type: "updateWidget", pageIndex: number, componentId: string, patch: object }
+ *   { type: "updatePage", pageIndex: number, patch: object }
  *   { type: "deleteWidget", pageIndex: number, componentId: string }
  */
 
@@ -95,6 +96,9 @@ let designMode = true;
 
 /** @type {string | null} */
 let selectedComponentId = null;
+
+/** When true, inspector edits the active page / project theme instead of a widget. */
+let inspectorShowingPage = false;
 
 /** @type {{ id: string, pointerX: number, pointerY: number, compX: number, compY: number, absX: number, absY: number, width: number, height: number, previewX: number, previewY: number } | null} */
 let dragState = null;
@@ -189,7 +193,17 @@ async function handleLoad(payload) {
     displayWidth = payload.displayWidth;
     displayHeight = payload.displayHeight;
 
-    showLoading(true);
+    /** Same WASM URI + running module → JSON-only rebalance (inspector debounced refresh): skip shimmer. */
+    const quietReload =
+        !!payload.suppressLoadingSpinner &&
+        wasmReady &&
+        WasmModule !== null &&
+        loadedWasmJsUri !== null &&
+        payload.wasmJsUri === loadedWasmJsUri;
+
+    if (!quietReload) {
+        showLoading(true);
+    }
     hideError();
 
     updatePreviewZoom();
@@ -236,6 +250,7 @@ async function handleLoad(payload) {
     resizeDesignOverlay();
     setDesignPointerMode();
     if (typeof payload.selectedComponentId === "string" && payload.selectedComponentId) {
+        inspectorShowingPage = false;
         const page = currentProject.pages[currentPageIndex];
         selectedComponentId =
             page && findComponentById(page.components, payload.selectedComponentId)
@@ -799,6 +814,7 @@ function dispatchAction(action, eventValue, currentPage) {
             }
             currentPageIndex = targetIdx;
             selectedComponentId = null;
+            inspectorShowingPage = false;
             dragState = null;
             pageSelectProgrammatic = true;
             try {
@@ -867,6 +883,7 @@ if (designModeCheck) {
         designMode = designModeCheck.checked;
         if (!designMode) {
             selectedComponentId = null;
+            inspectorShowingPage = false;
             dragState = null;
         }
         setDesignPointerMode();
@@ -960,6 +977,8 @@ function drawDesignOverlay() {
             width: dragState.width,
             height: dragState.height
         };
+    } else if (inspectorShowingPage) {
+        bounds = { x: 0, y: 0, width: displayWidth, height: displayHeight };
     } else if (selectedComponentId) {
         bounds = getAbsBounds(page, selectedComponentId);
     }
@@ -1002,11 +1021,45 @@ function findComponentById(components, id) {
     return null;
 }
 
+function clearInspectorSelection() {
+    selectedComponentId = null;
+    inspectorShowingPage = false;
+    dragState = null;
+    drawDesignOverlay();
+    renderInspector();
+}
+
+function selectPageInspector() {
+    inspectorShowingPage = true;
+    selectedComponentId = null;
+    dragState = null;
+    drawDesignOverlay();
+    renderInspector();
+}
+
 function setSelection(componentId) {
+    inspectorShowingPage = false;
     selectedComponentId = componentId;
     dragState = null;
     drawDesignOverlay();
     renderInspector();
+}
+
+/**
+ * Full HTML block for inspecting the active page (.embf pages[] entry + project.theme.dark).
+ * @param {object} page
+ * @param {object} project
+ */
+function renderPageInspectorHtml(page, project) {
+    let html =
+        `<div id="inspector-readonly"><strong>${esc(page.id)}</strong> · Page</div>` +
+        `<div class="inspector-group-title">Page</div>` +
+        fieldText("page_display_name", "Tab / page name", page.name ?? "") +
+        `<div class="field"><p style="font-size:11px;color:#888;margin:0 0 8px;line-height:1.35;">Leave background empty so the LVGL default theme (light/dark) sets the screen color.</p></div>` +
+        fieldColor("page_backgroundColor", "Screen background (#hex)", page.backgroundColor ?? "") +
+        `<div class="inspector-group-title">Project theme</div>` +
+        fieldCheck("proj_theme_dark", "Dark mode", !!(project.theme && project.theme.dark));
+    return html;
 }
 
 function esc(s) {
@@ -1263,6 +1316,25 @@ function renderInspector() {
         return;
     }
     const page = currentProject.pages[currentPageIndex];
+
+    if (inspectorShowingPage && page) {
+        inspectorEmpty.hidden = true;
+        inspectorForm.hidden = false;
+        inspectorDelete.disabled = true;
+
+        const inspectorFocusSnap = snapshotInspectorFocus();
+        inspectorSyncing = true;
+        inspectorForm.innerHTML = renderPageInspectorHtml(page, currentProject);
+        inspectorSyncing = false;
+
+        if (inspectorFocusSnap) {
+            requestAnimationFrame(() => {
+                queueMicrotask(() => restoreInspectorFocus(inspectorFocusSnap));
+            });
+        }
+        return;
+    }
+
     const comp =
         selectedComponentId && page
             ? findComponentById(page.components, selectedComponentId)
@@ -1672,13 +1744,61 @@ function readInspectorPatch() {
     return patch;
 }
 
+/** Build patch object for Page inspector (page name, bg, theme.dark). */
+function readPageInspectorPatch() {
+    if (!inspectorForm || !inspectorShowingPage || !currentProject) {
+        return {};
+    }
+
+    /** @type {Record<string, unknown>} */
+    const patch = {};
+
+    const pn = inspectorForm.elements.namedItem("page_display_name");
+    if (pn instanceof HTMLInputElement) {
+        const t = pn.value.trim();
+        if (t) {
+            patch.pageName = t;
+        }
+    }
+
+    const bgIn = inspectorForm.querySelector(`input[type="text"][name="page_backgroundColor"]`);
+    if (bgIn instanceof HTMLInputElement) {
+        const t = bgIn.value.trim();
+        patch.backgroundColor = t === "" ? null : t;
+    }
+
+    const d = inspectorForm.elements.namedItem("proj_theme_dark");
+    if (d instanceof HTMLInputElement) {
+        patch.themeDark = d.checked;
+    }
+
+    return patch;
+}
+
 function commitInspector() {
-    if (inspectorSyncing || !selectedComponentId || !currentProject) {
+    if (inspectorSyncing || !currentProject) {
         return;
     }
     if (inspectorDebounce) {
         clearTimeout(inspectorDebounce);
         inspectorDebounce = null;
+    }
+
+    if (inspectorShowingPage) {
+        const patch = readPageInspectorPatch();
+        if (Object.keys(patch).length === 0) {
+            return;
+        }
+        vscode.postMessage({
+            type: "updatePage",
+            pageIndex: currentPageIndex,
+            patch
+        });
+        return;
+    }
+
+    if (!selectedComponentId) {
+        return;
     }
     vscode.postMessage({
         type: "updateWidget",
@@ -1807,7 +1927,7 @@ document.addEventListener("keydown", e => {
         return;
     }
     if (e.key === "Escape") {
-        setSelection(null);
+        clearInspectorSelection();
         return;
     }
     if ((e.key === "Delete" || e.key === "Backspace") && selectedComponentId) {
@@ -1840,9 +1960,10 @@ function setupDesignOverlay() {
         const { x, y } = overlayCoords(e);
         const hit = hitTestAt(page, x, y);
         if (!hit) {
-            setSelection(null);
+            selectPageInspector();
             return;
         }
+        inspectorShowingPage = false;
         selectedComponentId = hit.comp.id;
         dragState = {
             id: hit.comp.id,
@@ -1858,6 +1979,7 @@ function setupDesignOverlay() {
             height: hit.comp.height
         };
         drawDesignOverlay();
+        renderInspector();
         e.preventDefault();
     });
 
@@ -2040,6 +2162,7 @@ if (pageSelect) {
         const idx = parseInt(pageSelect.value, 10) || 0;
         currentPageIndex = idx;
         selectedComponentId = null;
+        inspectorShowingPage = true;
         dragState = null;
         buildUiFromProject(currentProject, idx);
         drawDesignOverlay();

@@ -3,7 +3,7 @@ import * as path from "path";
 import { EmbfProject } from "./types/embf";
 import { buildWidgetPaletteHtml } from "./embfPaletteIcons";
 import { EmbfParseError, getEffectiveDisplaySize } from "./embfParser";
-import { deleteWidgetFromEmbfFile, moveWidgetInEmbfFile, updateWidgetInEmbfFile } from "./embfComponentEdit";
+import { deleteWidgetFromEmbfFile, moveWidgetInEmbfFile, updatePageInEmbfFile, updateWidgetInEmbfFile } from "./embfComponentEdit";
 import { readEmbfProject } from "./embfProjectWrite";
 import { undoEmbfEdit, redoEmbfEdit, getEmbfHistoryState } from "./embfUndoRedo";
 import { appendWidgetToEmbfFile } from "./embfWidgetInsert";
@@ -22,6 +22,7 @@ export type WebviewToHostMessage =
     | { type: "addWidget"; pageIndex: number; widgetType: string }
     | { type: "moveWidget"; pageIndex: number; componentId: string; x: number; y: number }
     | { type: "updateWidget"; pageIndex: number; componentId: string; patch: Record<string, unknown> }
+    | { type: "updatePage"; pageIndex: number; patch: Record<string, unknown> }
     | { type: "deleteWidget"; pageIndex: number; componentId: string }
     | { type: "undo"; pageIndex: number; selectedComponentId?: string }
     | { type: "redo"; pageIndex: number; selectedComponentId?: string };
@@ -36,6 +37,17 @@ export interface WebviewLoadPayload {
     pageIndex?: number;
     /** When set, re-select this component after reload. */
     selectedComponentId?: string;
+    /**
+     * When true and WASM is already loaded from the same URI, skip loading overlay flicker during JSON refresh.
+     * Only used after debounced inspector-driven reloads (same WASM build).
+     */
+    suppressLoadingSpinner?: boolean;
+}
+
+export interface SendProjectOptions {
+    pageIndex?: number;
+    selectedComponentId?: string;
+    suppressLoadingSpinner?: boolean;
 }
 
 export class EmbfPreviewPanel {
@@ -51,6 +63,12 @@ export class EmbfPreviewPanel {
     private _webviewReady = false;
     /** Last load/error held until the webview is ready (avoids lost `postMessage`). */
     private _pendingMessage: HostToWebviewMessage | null = null;
+    /** Coalesce inspector property writes → one preview refresh instead of hammering WASM rebuild per patch. */
+    private _inspectorReloadTimer: ReturnType<typeof setTimeout> | undefined;
+    private _inspectorReloadPageIndex = 0;
+    private _inspectorReloadSelectedId: string | undefined;
+
+    private static readonly _inspectorReloadDebounceMs = 280;
 
     static createOrShow(filePath: string, extensionUri: vscode.Uri): EmbfPreviewPanel {
         const existing = EmbfPreviewPanel._panels.get(filePath);
@@ -107,7 +125,10 @@ export class EmbfPreviewPanel {
         }
     }
 
-    sendProject(project: EmbfProject, pageIndex?: number, selectedComponentId?: string): void {
+    sendProject(project: EmbfProject, options?: SendProjectOptions): void {
+        /** Any externally pushed project supersedes a pending inspector debounced refresh. */
+        this.clearInspectorReloadDebounce();
+
         const { width, height } = getEffectiveDisplaySize(project);
 
         // Always use the custom embf_runtime (supports LVGL 9.5.0).
@@ -115,17 +136,30 @@ export class EmbfPreviewPanel {
         const wasmJsUri  = this._webviewUri("wasm", "embf_runtime.js").toString();
         const wasmBinUri = this._webviewUri("wasm", "embf_runtime.wasm").toString();
 
+        const pageIndex = options?.pageIndex;
+        const selectedComponentId = options?.selectedComponentId;
+        const suppressLoadingSpinner = options?.suppressLoadingSpinner;
+
+        const payload: WebviewLoadPayload = {
+            project,
+            displayWidth: width,
+            displayHeight: height,
+            wasmJsUri,
+            wasmBinUri
+        };
+        if (pageIndex !== undefined) {
+            payload.pageIndex = pageIndex;
+        }
+        if (selectedComponentId !== undefined) {
+            payload.selectedComponentId = selectedComponentId;
+        }
+        if (suppressLoadingSpinner) {
+            payload.suppressLoadingSpinner = true;
+        }
+
         this.postToWebview({
             type: "load",
-            payload: {
-                project,
-                displayWidth: width,
-                displayHeight: height,
-                wasmJsUri,
-                wasmBinUri,
-                pageIndex,
-                selectedComponentId
-            }
+            payload
         });
     }
 
@@ -171,7 +205,7 @@ export class EmbfPreviewPanel {
             }
             void appendWidgetToEmbfFile(this._filePath, pageIndex, widgetType).then(ok => {
                 if (ok) {
-                    this.reloadPreview(pageIndex);
+                    this.reloadPreviewNow(pageIndex);
                     this.sendHistoryState();
                 }
             });
@@ -185,7 +219,7 @@ export class EmbfPreviewPanel {
             }
             void moveWidgetInEmbfFile(this._filePath, pageIndex, componentId, x, y).then(ok => {
                 if (ok) {
-                    this.reloadPreview(pageIndex, componentId);
+                    this.reloadPreviewNow(pageIndex, componentId);
                     this.sendHistoryState();
                 }
             });
@@ -204,7 +238,19 @@ export class EmbfPreviewPanel {
             }
             void updateWidgetInEmbfFile(this._filePath, pageIndex, componentId, patch).then(ok => {
                 if (ok) {
-                    this.reloadPreview(pageIndex, componentId);
+                    this.scheduleReloadPreviewAfterInspectorEdit(pageIndex, componentId);
+                    this.sendHistoryState();
+                }
+            });
+        } else if (msg.type === "updatePage") {
+            const pageIndex = Number(msg.pageIndex);
+            const patch = msg.patch;
+            if (!Number.isInteger(pageIndex) || pageIndex < 0 || !patch || typeof patch !== "object") {
+                return;
+            }
+            void updatePageInEmbfFile(this._filePath, pageIndex, patch).then(ok => {
+                if (ok) {
+                    this.scheduleReloadPreviewAfterInspectorEdit(pageIndex);
                     this.sendHistoryState();
                 }
             });
@@ -216,7 +262,7 @@ export class EmbfPreviewPanel {
             }
             void deleteWidgetFromEmbfFile(this._filePath, pageIndex, componentId).then(ok => {
                 if (ok) {
-                    this.reloadPreview(pageIndex);
+                    this.reloadPreviewNow(pageIndex);
                     this.sendHistoryState();
                 }
             });
@@ -231,7 +277,7 @@ export class EmbfPreviewPanel {
     private async applyUndo(pageIndex: number, selectedComponentId?: string): Promise<void> {
         const ok = await undoEmbfEdit(this._filePath);
         if (ok) {
-            this.reloadPreview(pageIndex, selectedComponentId);
+            this.reloadPreviewNow(pageIndex, selectedComponentId);
             this.sendHistoryState();
         }
     }
@@ -239,19 +285,53 @@ export class EmbfPreviewPanel {
     private async applyRedo(pageIndex: number, selectedComponentId?: string): Promise<void> {
         const ok = await redoEmbfEdit(this._filePath);
         if (ok) {
-            this.reloadPreview(pageIndex, selectedComponentId);
+            this.reloadPreviewNow(pageIndex, selectedComponentId);
             this.sendHistoryState();
         }
     }
 
-    private reloadPreview(pageIndex: number, selectedComponentId?: string): void {
+    private clearInspectorReloadDebounce(): void {
+        if (this._inspectorReloadTimer !== undefined) {
+            clearTimeout(this._inspectorReloadTimer);
+            this._inspectorReloadTimer = undefined;
+        }
+    }
+
+    /** Immediate read-from-disk refresh; cancels any pending inspector debounce so we don't double-send. */
+    private reloadPreviewNow(
+        pageIndex: number,
+        selectedComponentId?: string,
+        /** Avoid loading shimmer when WASM + URI unchanged (inspector batch refresh). */
+        soft?: boolean
+    ): void {
+        this.clearInspectorReloadDebounce();
         try {
             const project = readEmbfProject(this._filePath);
-            this.sendProject(project, pageIndex, selectedComponentId);
+            this.sendProject(project, {
+                pageIndex,
+                selectedComponentId,
+                suppressLoadingSpinner: soft === true ? true : undefined
+            });
         } catch (e) {
             const m = e instanceof EmbfParseError ? e.message : String(e);
             embeddedFlowLog("preview", "warn", `refresh preview: ${m}`);
         }
+    }
+
+    /** After inspector-driven file patches; merges rapid commits into fewer WASM/UI rebuilds. */
+    private scheduleReloadPreviewAfterInspectorEdit(
+        pageIndex: number,
+        selectedComponentId?: string
+    ): void {
+        this._inspectorReloadPageIndex = pageIndex;
+        this._inspectorReloadSelectedId = selectedComponentId;
+        if (this._inspectorReloadTimer !== undefined) {
+            clearTimeout(this._inspectorReloadTimer);
+        }
+        this._inspectorReloadTimer = setTimeout(() => {
+            this._inspectorReloadTimer = undefined;
+            this.reloadPreviewNow(this._inspectorReloadPageIndex, this._inspectorReloadSelectedId, true);
+        }, EmbfPreviewPanel._inspectorReloadDebounceMs);
     }
 
     private _webviewUri(...segments: string[]): vscode.Uri {
@@ -656,7 +736,7 @@ export class EmbfPreviewPanel {
         <aside id="property-inspector" aria-label="Properties">
             <h2>Properties</h2>
             <div id="inspector-body">
-                <div id="inspector-empty">Select a widget on the canvas (Design mode).</div>
+                <div id="inspector-empty">Design mode: click the page background for page &amp; theme settings, or click a widget for its properties.</div>
                 <form id="inspector-form" hidden></form>
             </div>
             <button type="button" id="inspector-delete" disabled title="Delete selected widget">Delete widget</button>
@@ -668,6 +748,7 @@ export class EmbfPreviewPanel {
     }
 
     dispose(): void {
+        this.clearInspectorReloadDebounce();
         EmbfPreviewPanel._panels.delete(this._filePath);
         this._webviewReady = false;
         this._pendingMessage = null;

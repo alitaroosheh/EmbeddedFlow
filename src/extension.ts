@@ -481,7 +481,6 @@ async function createNewProject(extensionUri: vscode.Uri): Promise<void> {
             {
                 id: "page_main",
                 name: "Main",
-                backgroundColor: "#ffffff",
                 components: [
                     {
                         id: "lbl_hello",
@@ -490,11 +489,7 @@ async function createNewProject(extensionUri: vscode.Uri): Promise<void> {
                         y: 10,
                         width: 200,
                         height: 30,
-                        text: "Hello, EmbeddedFlow!",
-                        styles: {
-                            fontSize: 16,
-                            textColor: "#000000"
-                        }
+                        text: "Hello, EmbeddedFlow!"
                     }
                 ]
             }

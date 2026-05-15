@@ -1,4 +1,4 @@
-import type { Component, ContainerComponent, Page, StyleProps } from "./types/embf";
+import type { Component, ContainerComponent, EmbfProject, Page, StyleProps } from "./types/embf";
 
 function walkComponents(components: Component[], fn: (c: Component) => boolean): boolean {
     for (const c of components) {
@@ -355,6 +355,44 @@ export function applyComponentPatch(comp: Component, patch: Record<string, unkno
         default:
             break;
     }
+}
+
+/**
+ * Inspector edits for the current page and project theme (.embf root `theme`).
+ * `backgroundColor`: `null`/empty clears the property so LVGL theme sets screen bg (light/dark).
+ */
+export function applyPageInspectorPatch(
+    project: EmbfProject,
+    pageIndex: number,
+    patch: Record<string, unknown>
+): boolean {
+    if (pageIndex < 0 || pageIndex >= project.pages.length) {
+        return false;
+    }
+    const page = project.pages[pageIndex];
+
+    if (patch.pageName !== undefined && typeof patch.pageName === "string") {
+        const t = patch.pageName.trim();
+        if (t) {
+            page.name = t;
+        }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(patch, "backgroundColor")) {
+        const v = patch.backgroundColor;
+        if (v === null || v === "") {
+            delete page.backgroundColor;
+        } else if (typeof v === "string" && v.trim()) {
+            page.backgroundColor = v.trim();
+        }
+    }
+
+    if (patch.themeDark !== undefined && typeof patch.themeDark === "boolean") {
+        project.theme ??= { dark: false };
+        project.theme.dark = patch.themeDark;
+    }
+
+    return true;
 }
 
 export function patchComponentOnPage(

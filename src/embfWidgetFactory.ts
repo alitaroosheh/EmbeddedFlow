@@ -50,6 +50,11 @@ function allocateId(ids: Set<string>, prefix: string): string {
     return `${prefix}_${Date.now()}`;
 }
 
+/** Next unique id for a new widget (checks all pages). */
+export function allocateNewComponentId(project: EmbfProject, prefix: string): string {
+    return allocateId(collectAllComponentIds(project), prefix);
+}
+
 function layoutSlot(project: EmbfProject, page: Page): { x: number; y: number } {
     const n = page.components.length;
     const col = n % 4;

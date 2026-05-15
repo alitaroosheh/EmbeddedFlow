@@ -13,7 +13,7 @@
     "orientation": "landscape",
     "direction": "ltr",
     "dpi": 100,
-    "round": true
+    "round": false
   },
   "theme": {
     "dark": false,
@@ -69,24 +69,56 @@
           }
         },
         {
-          "id": "sw_dark",
-          "type": "switch",
-          "x": 43,
-          "y": 239,
-          "width": 60,
-          "height": 28,
-          "checked": false,
-          "events": [
+          "id": "box_1",
+          "type": "container",
+          "x": 49,
+          "y": 277,
+          "width": 244,
+          "height": 133,
+          "layout": "none",
+          "hidden": false,
+          "children": [
             {
-              "trigger": "value_changed",
-              "actions": [
+              "id": "sw_dark",
+              "type": "switch",
+              "x": 49,
+              "y": 34,
+              "width": 60,
+              "height": 28,
+              "checked": false,
+              "events": [
                 {
-                  "type": "set_theme"
+                  "trigger": "value_changed",
+                  "actions": [
+                    {
+                      "type": "set_theme"
+                    }
+                  ]
                 }
-              ]
+              ],
+              "hidden": false
+            },
+            {
+              "id": "btn_2",
+              "x": 156,
+              "y": 3,
+              "width": 88,
+              "height": 36,
+              "type": "button",
+              "label": "Button"
+            },
+            {
+              "id": "sld_2",
+              "x": 0,
+              "y": 109,
+              "width": 140,
+              "height": 24,
+              "type": "slider",
+              "min": 0,
+              "max": 100,
+              "value": 50
             }
-          ],
-          "hidden": false
+          ]
         },
         {
           "id": "bar_progress",
@@ -194,26 +226,6 @@
           "height": 36,
           "type": "button",
           "label": "Button"
-        },
-        {
-          "id": "btn_2",
-          "x": 175,
-          "y": 242,
-          "width": 88,
-          "height": 36,
-          "type": "button",
-          "label": "Button"
-        },
-        {
-          "id": "sld_2",
-          "x": 19,
-          "y": 348,
-          "width": 140,
-          "height": 24,
-          "type": "slider",
-          "min": 0,
-          "max": 100,
-          "value": 50
         },
         {
           "id": "ta_2",

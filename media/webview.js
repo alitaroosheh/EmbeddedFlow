@@ -24,11 +24,14 @@
  *   { type: "updatePage", pageIndex: number, patch: object }
  *   { type: "deleteWidget", pageIndex: number, componentId: string }
  *   { type: "bulkDeleteWidgets", pageIndex: number, componentIds: string[] }
+ *   { type: "combineWidgets", pageIndex: number, componentIds: string[] } — sibling widgets → one container
+ *   { type: "ungroupWidget", pageIndex: number, componentId: string } — container/panel → children lifted to parent
  *   { type: "undo", pageIndex: number, selectedComponentIds?: string[] }
  *   { type: "redo", pageIndex: number, selectedComponentIds?: string[] }
  *
  * Design overlay UX: rubber-band marquee on empty-canvas drag (replace selection; Shift = union;
  * Ctrl/Cmd = toggle hits vs selection). Movement below threshold: plain ⇒ page inspector; with modifiers ⇒ noop.
+ * Double-click a widget: select the deepest widget at that point (drill into groups).
  */
 
 // ── VSCode API ────────────────────────────────────────────────────────────────
@@ -1192,6 +1195,10 @@ function multiInspectorLayoutActsHtml() {
         layoutToolbarButton("grp-left", "To left") +
         layoutToolbarButton("grp-top", "To top") +
         layoutToolbarButton("grp-center", "Center in page") +
+        `</div>` +
+        `<div class="inspector-group-title">Group</div>` +
+        `<div class="inspector-layout-grid">` +
+        layoutToolbarButton("combine-widgets", "Combine into group") +
         `</div>`
     );
 }
@@ -1202,7 +1209,7 @@ function renderMultiInspectorHtml(ids) {
         `<div id="inspector-readonly"><strong>${ids.length}</strong> widgets selected</div>` +
         `<div class="inspector-group-title">Multi-select</div>` +
         `<p class="inspector-hint" style="font-size:11px;color:#888;line-height:1.35;margin:0 0 8px;">` +
-        `Ctrl+click: toggle · Shift+click: add · Drag empty: marquee (Shift: add · Ctrl: toggle hits) · Click selected to keep group.` +
+        `Ctrl+click: toggle · Shift+click: add · Drag empty: marquee (Shift: add · Ctrl: toggle hits) · Double-click: deepest widget under cursor · Combine: siblings only.` +
         `</p>` +
         `<div class="inspector-hint" style="font-size:11px;color:#aaa;margin:-4px 0 12px;line-height:1.3">${esc(list)}</div>` +
         multiInspectorLayoutActsHtml()
@@ -1226,7 +1233,7 @@ function renderHomogeneousMultiInspectorHtml(ids, comps) {
         `<div id="inspector-readonly"><strong>${ids.length}</strong> × <strong>${esc(t)}</strong></div>` +
         `<div class="inspector-group-title">Multi-select (same type)</div>` +
         `<p class="inspector-hint" style="font-size:11px;color:#888;line-height:1.35;margin:0 0 8px;">` +
-        `Edits apply to every selected widget. Fields marked (mixed) differ — leave blank to keep each widget’s value, or set a new shared value.` +
+        `Edits apply to every selected widget. Fields marked (mixed) differ — leave blank to keep each widget’s value, or set a new shared value. Double-click on the canvas selects the deepest widget under the cursor. Combine requires siblings (same parent).` +
         `</p>` +
         `<div class="inspector-hint" style="font-size:11px;color:#aaa;margin:-4px 0 12px;line-height:1.3">${esc(list)}</div>` +
         multiInspectorLayoutActsHtml() +
@@ -1241,6 +1248,30 @@ function applyLayoutAct(act) {
     const page = currentProject?.pages[currentPageIndex];
     const ids = [...selectedComponentOrder];
     if (!page || ids.length === 0 || !act) {
+        return;
+    }
+    if (act === "combine-widgets") {
+        if (ids.length < 2) {
+            log("warn", "Select at least two widgets to combine.");
+            return;
+        }
+        vscode.postMessage({
+            type: "combineWidgets",
+            pageIndex: currentPageIndex,
+            componentIds: [...ids]
+        });
+        return;
+    }
+    if (act === "ungroup-widget") {
+        if (ids.length !== 1) {
+            log("warn", "Select a single container or panel to ungroup.");
+            return;
+        }
+        vscode.postMessage({
+            type: "ungroupWidget",
+            pageIndex: currentPageIndex,
+            componentId: ids[0]
+        });
         return;
     }
     const boxes = /** @type {{ id: string; x: number; y: number; width: number; height: number }[]} */ (
@@ -2310,6 +2341,20 @@ function renderInspector() {
         height: comp.height,
         hidden: !!comp.hidden
     });
+    {
+        const ch = comp.children;
+        if (
+            (comp.type === "container" || comp.type === "panel") &&
+            Array.isArray(ch) &&
+            ch.length > 0
+        ) {
+            html +=
+                `<div class="inspector-group-title">Group</div>` +
+                `<div class="inspector-layout-grid">` +
+                layoutToolbarButton("ungroup-widget", "Ungroup") +
+                `</div>`;
+        }
+    }
     html += `<div class="inspector-group-title">${esc(comp.type)}</div>`;
     html += widgetTypeSpecificFieldsHtml(comp.type, typeModelFromComp(comp));
     html += inspectorAppearancesSection(comp);
@@ -2920,6 +2965,21 @@ function setupDesignOverlay() {
             } catch {
                 /* ignore */
             }
+        }
+
+        // Second click of a double-click: jump selection to the deepest widget at this point.
+        if (e.detail >= 2) {
+            if (hit) {
+                selectedComponentOrder = [hit.comp.id];
+                inspectorShowingPage = false;
+                dragState = null;
+                marqueeState = null;
+                drawDesignOverlay();
+                renderInspector();
+            }
+            releaseCap();
+            e.preventDefault();
+            return;
         }
 
         if (!hit) {

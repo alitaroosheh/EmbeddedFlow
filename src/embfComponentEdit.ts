@@ -2,13 +2,15 @@ import * as path from "path";
 import * as vscode from "vscode";
 import type { EmbfProject, Page } from "./types/embf";
 import {
+    combineWidgetsOnPage,
     deleteComponentOnPage,
     patchComponentOnPage,
     setComponentPositionOnPage,
     applyPageInspectorPatch,
     bulkSetAbsolutePositionsOnPage,
     bulkPatchComponentsOnPage,
-    bulkDeleteComponentsOnPage
+    bulkDeleteComponentsOnPage,
+    ungroupContainerOnPage
 } from "./embfComponentModel";
 import { cloneEmbfProject } from "./embfWidgetFactory";
 import { embeddedFlowLog } from "./outputLog";
@@ -25,7 +27,7 @@ export {
 async function persistPageEdit(
     filePath: string,
     pageIndex: number,
-    edit: (page: Page) => boolean,
+    edit: (page: Page, project: EmbfProject) => boolean,
     onNotFound?: () => void
 ): Promise<boolean> {
     let project: EmbfProject;
@@ -43,7 +45,7 @@ async function persistPageEdit(
 
     const next = cloneEmbfProject(project);
     const page = next.pages[pageIndex];
-    if (!edit(page)) {
+    if (!edit(page, next)) {
         onNotFound?.();
         return false;
     }
@@ -226,4 +228,72 @@ export async function deleteWidgetFromEmbfFile(
         embeddedFlowLog("widgets", "info", `deleted "${id}" (${path.basename(filePath)})`);
     }
     return ok;
+}
+
+/** Wrap selected sibling widgets into a new container (group); caller should refresh preview with returned id. */
+export async function combineWidgetsInEmbfFile(
+    filePath: string,
+    pageIndex: number,
+    orderedComponentIds: string[]
+): Promise<{ ok: true; containerId: string } | { ok: false }> {
+    const idsRaw = [...new Set(orderedComponentIds.map(id => String(id ?? "").trim()).filter(Boolean))];
+    if (idsRaw.length < 2) {
+        await vscode.window.showErrorMessage(`EmbeddedFlow: Select at least two widgets to combine.`);
+        return { ok: false };
+    }
+
+    let result: { containerId: string } | undefined;
+    let reason = "";
+
+    const ok = await persistPageEdit(filePath, pageIndex, (page, proj) => {
+        const r = combineWidgetsOnPage(proj, page, idsRaw);
+        if (r.ok) {
+            result = { containerId: r.containerId };
+            return true;
+        }
+        reason = r.reason;
+        return false;
+    });
+
+    if (!ok || !result) {
+        if (reason) {
+            await vscode.window.showErrorMessage(`EmbeddedFlow: ${reason}`);
+        }
+        return { ok: false };
+    }
+    embeddedFlowLog("widgets", "info", `combined → ${result.containerId} (${path.basename(filePath)})`);
+    return { ok: true, containerId: result.containerId };
+}
+
+/** Lift container/panel children back to its parent sibling list (ungroup). */
+export async function ungroupWidgetInEmbfFile(filePath: string, pageIndex: number, componentId: string): Promise<
+    | { ok: true; liftedIds: string[] }
+    | { ok: false }
+> {
+    const id = String(componentId ?? "").trim();
+    if (!id) {
+        return { ok: false };
+    }
+
+    let lifted: string[] = [];
+    let reason = "";
+
+    const ok = await persistPageEdit(filePath, pageIndex, page => {
+        const r = ungroupContainerOnPage(page, id);
+        if (r.ok) {
+            lifted = r.liftedIds;
+            return true;
+        }
+        reason = r.reason;
+        return false;
+    });
+
+    if (!ok || !lifted.length) {
+        if (reason) {
+            await vscode.window.showErrorMessage(`EmbeddedFlow: ${reason}`);
+        }
+        return { ok: false };
+    }
+    embeddedFlowLog("widgets", "info", `ungrouped "${id}" → ${lifted.length} widgets (${path.basename(filePath)})`);
+    return { ok: true, liftedIds: lifted };
 }

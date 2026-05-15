@@ -1,4 +1,5 @@
 import type { Component, ContainerComponent, EmbfProject, Page, StyleProps } from "./types/embf";
+import { allocateNewComponentId } from "./embfWidgetFactory";
 
 function walkComponents(components: Component[], fn: (c: Component) => boolean): boolean {
     for (const c of components) {
@@ -503,4 +504,186 @@ export function patchComponentOnPage(
     }
     applyComponentPatch(comp, patch);
     return true;
+}
+
+export type CombineWidgetsPageResult =
+    | { ok: true; containerId: string }
+    | { ok: false; reason: string };
+
+export type UngroupContainerPageResult =
+    | { ok: true; liftedIds: string[] }
+    | { ok: false; reason: string };
+
+/**
+ * Find where a component sits in the tree: its siblings array and index.
+ */
+function findSiblingPlacement(
+    components: Component[],
+    componentId: string,
+    parent: Component | null
+): { siblings: Component[]; index: number; parent: Component | null } | null {
+    for (let i = 0; i < components.length; i++) {
+        const c = components[i];
+        if (c.id === componentId) {
+            return { siblings: components, index: i, parent };
+        }
+        const ch = getChildrenArray(c);
+        if (ch?.length) {
+            const inner = findSiblingPlacement(ch, componentId, c);
+            if (inner) {
+                return inner;
+            }
+        }
+    }
+    return null;
+}
+
+/** Same parent (same sibling list) widgets → one `container` wrapping them. Child order follows ascending z-index in that list. */
+export function combineWidgetsOnPage(
+    project: EmbfProject,
+    page: Page,
+    componentIds: string[]
+): CombineWidgetsPageResult {
+    const uniq = [...new Set(componentIds.map(id => id.trim()).filter(Boolean))];
+    if (uniq.length < 2) {
+        return { ok: false, reason: "Select at least two widgets to combine." };
+    }
+
+    type Pla = { siblings: Component[]; index: number; parent: Component | null };
+    const placements = uniq.map(id => {
+        const pla = findSiblingPlacement(page.components, id, null);
+        return { id, pla };
+    });
+
+    if (placements.some(p => !p.pla)) {
+        return { ok: false, reason: "One or more widgets were not found on this page." };
+    }
+
+    const sibRef = placements[0]!.pla!.siblings;
+    if (!placements.every(p => p.pla!.siblings === sibRef)) {
+        return { ok: false, reason: "Widgets must share the same parent (siblings)." };
+    }
+
+    const sorted = [...placements].sort((a, b) => a.pla!.index - b.pla!.index);
+
+    type AbsSnap = { clone: Component; ax: number; ay: number; w: number; h: number };
+    const snaps: AbsSnap[] = [];
+    for (const { id } of sorted) {
+        const loc = locateWithParentOrigin(page.components, id, 0, 0);
+        if (!loc) {
+            return { ok: false, reason: "Could not resolve widget geometry." };
+        }
+        snaps.push({
+            clone: JSON.parse(JSON.stringify(loc.comp)) as Component,
+            ax: loc.parentAbsX + loc.comp.x,
+            ay: loc.parentAbsY + loc.comp.y,
+            w: loc.comp.width,
+            h: loc.comp.height
+        });
+    }
+
+    const parentLoc = locateWithParentOrigin(page.components, sorted[0]!.id, 0, 0);
+    if (!parentLoc) {
+        return { ok: false, reason: "Could not resolve parent origin." };
+    }
+    const pax = parentLoc.parentAbsX;
+    const pay = parentLoc.parentAbsY;
+
+    const minAx = Math.min(...snaps.map(s => s.ax));
+    const minAy = Math.min(...snaps.map(s => s.ay));
+    const maxRx = Math.max(...snaps.map(s => s.ax + s.w));
+    const maxBy = Math.max(...snaps.map(s => s.ay + s.h));
+
+    const idSet = new Set(uniq);
+    const insertOriginalIndex = Math.min(...sorted.map(p => p.pla!.index));
+    const siblings = sibRef;
+
+    const newId = allocateNewComponentId(project, "box");
+    const group: ContainerComponent = {
+        id: newId,
+        type: "container",
+        x: Math.round(minAx - pax),
+        y: Math.round(minAy - pay),
+        width: Math.max(1, Math.round(maxRx - minAx)),
+        height: Math.max(1, Math.round(maxBy - minAy)),
+        layout: "none",
+        hidden: false,
+        children: snaps.map(s => {
+            const ch = s.clone;
+            ch.x = Math.round(s.ax - minAx);
+            ch.y = Math.round(s.ay - minAy);
+            return ch;
+        })
+    };
+
+    const rebuilt: Component[] = [];
+    let inserted = false;
+    for (let i = 0; i < siblings.length; i++) {
+        const c = siblings[i];
+        if (idSet.has(c.id)) {
+            if (i === insertOriginalIndex) {
+                rebuilt.push(group);
+                inserted = true;
+            }
+            continue;
+        }
+        rebuilt.push(c);
+    }
+
+    if (!inserted) {
+        return { ok: false, reason: "Could not insert group (internal error)." };
+    }
+
+    siblings.splice(0, siblings.length, ...rebuilt);
+    return { ok: true, containerId: newId };
+}
+
+/** Move `container` / `panel` children to the parent list at the group’s index; remove the group. */
+export function ungroupContainerOnPage(page: Page, containerId: string): UngroupContainerPageResult {
+    const id = containerId.trim();
+    if (!id) {
+        return { ok: false, reason: "Invalid widget id." };
+    }
+
+    const ctx = findSiblingPlacement(page.components, id, null);
+    if (!ctx) {
+        return { ok: false, reason: "Widget not found on this page." };
+    }
+
+    const comp = ctx.siblings[ctx.index];
+    if (comp.type !== "container" && comp.type !== "panel") {
+        return { ok: false, reason: "Only a container or panel can be ungrouped." };
+    }
+
+    const children = getChildrenArray(comp);
+    if (!children?.length) {
+        return { ok: false, reason: "This group has no children to ungroup." };
+    }
+
+    const loc = locateWithParentOrigin(page.components, id, 0, 0);
+    if (!loc) {
+        return { ok: false, reason: "Could not resolve group geometry." };
+    }
+
+    const absGx = loc.parentAbsX + comp.x;
+    const absGy = loc.parentAbsY + comp.y;
+    const pax = loc.parentAbsX;
+    const pay = loc.parentAbsY;
+
+    const lifted: Component[] = children.map(ch => {
+        const copy = JSON.parse(JSON.stringify(ch)) as Component;
+        const absCx = absGx + copy.x;
+        const absCy = absGy + copy.y;
+        copy.x = Math.round(absCx - pax);
+        copy.y = Math.round(absCy - pay);
+        return copy;
+    });
+
+    const at = ctx.index;
+    ctx.siblings.splice(at, 1);
+    for (let i = 0; i < lifted.length; i++) {
+        ctx.siblings.splice(at + i, 0, lifted[i]!);
+    }
+
+    return { ok: true, liftedIds: lifted.map(c => c.id) };
 }

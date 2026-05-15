@@ -317,6 +317,12 @@ lv_obj_t *embf_create_container(lv_obj_t *parent, int x, int y, int w, int h)
 {
     lv_obj_t *obj = lv_obj_create(parent);
     set_pos_size(obj, x, y, w, h);
+    /* Defaults on `lv_obj` are padded + scrollable; EmbeddedFlow `.embf` coords are measured
+     * as full-box positions (matching the design overlay). Without this, grouped widgets sit
+     * offset inside the content area and scrollbars appear when union height/width fills the box. */
+    lv_obj_set_style_pad_all(obj, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_width(obj, 0, LV_PART_MAIN);
+    lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
     return obj;
 }
 

@@ -7,8 +7,10 @@ import {
     bulkDeleteWidgetsInEmbfFile,
     bulkMoveWidgetsInEmbfFile,
     bulkPatchWidgetsInEmbfFile,
+    combineWidgetsInEmbfFile,
     deleteWidgetFromEmbfFile,
     moveWidgetInEmbfFile,
+    ungroupWidgetInEmbfFile,
     updatePageInEmbfFile,
     updateWidgetInEmbfFile
 } from "./embfComponentEdit";
@@ -43,6 +45,12 @@ export type WebviewToHostMessage =
     | { type: "updatePage"; pageIndex: number; patch: Record<string, unknown> }
     | { type: "deleteWidget"; pageIndex: number; componentId: string }
     | { type: "bulkDeleteWidgets"; pageIndex: number; componentIds: string[] }
+    | {
+          type: "combineWidgets";
+          pageIndex: number;
+          componentIds: string[];
+      }
+    | { type: "ungroupWidget"; pageIndex: number; componentId: string }
     | { type: "undo"; pageIndex: number; selectedComponentId?: string; selectedComponentIds?: string[] }
     | { type: "redo"; pageIndex: number; selectedComponentId?: string; selectedComponentIds?: string[] };
 
@@ -371,6 +379,34 @@ export class EmbfPreviewPanel {
             void bulkDeleteWidgetsInEmbfFile(this._filePath, pageIndex, ids).then(ok => {
                 if (ok) {
                     this.reloadPreviewNow(pageIndex);
+                    this.sendHistoryState();
+                }
+            });
+        } else if (msg.type === "combineWidgets") {
+            const pageIndex = Number(msg.pageIndex);
+            const rawIds = msg.componentIds;
+            if (!Number.isInteger(pageIndex) || pageIndex < 0 || !Array.isArray(rawIds) || rawIds.length < 2) {
+                return;
+            }
+            const ids = [...new Set(rawIds.map(id => String(id ?? "").trim()).filter(Boolean))];
+            if (ids.length < 2) {
+                return;
+            }
+            void combineWidgetsInEmbfFile(this._filePath, pageIndex, ids).then(res => {
+                if (res.ok) {
+                    this.reloadPreviewNow(pageIndex, { selectedComponentIds: [res.containerId] });
+                    this.sendHistoryState();
+                }
+            });
+        } else if (msg.type === "ungroupWidget") {
+            const pageIndex = Number(msg.pageIndex);
+            const componentId = String(msg.componentId ?? "").trim();
+            if (!Number.isInteger(pageIndex) || pageIndex < 0 || !componentId) {
+                return;
+            }
+            void ungroupWidgetInEmbfFile(this._filePath, pageIndex, componentId).then(res => {
+                if (res.ok) {
+                    this.reloadPreviewNow(pageIndex, { selectedComponentIds: res.liftedIds });
                     this.sendHistoryState();
                 }
             });

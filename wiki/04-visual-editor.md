@@ -25,18 +25,20 @@ without manually editing JSON. It is the primary design surface of EmbeddedFlow.
 - [ ] Single-click selects a widget (highlights it with selection handles)
 - [ ] Drag a selected widget to reposition it
 - [ ] Drag resize handles to change width/height
-- [ ] Multi-select: Shift+click or rubber-band drag
-- [ ] Multi-select allows bulk move and bulk delete
+- [~] **Preview design overlay** — Ctrl/Cmd+click toggles selection; Shift+click adds; click empty canvas clears widget selection (page inspector); dragging moves all selected widgets together; **`selectedComponentIds` round-trips through host reload after edits**
+- [ ] Rubber-band (marquee) multi-select on canvas
+- [~] Bulk move and bulk delete (**preview overlay** sends `bulkMoveWidgets` / `bulkDeleteWidgets` to host)
 - [ ] Alt+drag duplicates a widget
-- [ ] Escape deselects
+- [~] **Escape** clears widget selection in preview design mode (page inspector)
 
 ## 4.4 Snapping & Alignment
 
 - [ ] Snap to grid (toggle, configurable grid size)
 - [ ] Snap to other widget edges (smart guides)
 - [ ] Snap to parent edges and center lines
-- [ ] Alignment toolbar: align left/right/top/bottom/center horizontally/vertically
-- [ ] Distribute evenly (horizontal / vertical spacing)
+- [~] **Preview multi-inspector** — align selection bounding box edges (left/right/top/bottom), center horizontally/relative to bbox, distribute along X/Y, match max width/height, quick “group” placement to page left/top/center (implemented as property patches via `bulkPatchWidgets`; no snapping yet)
+- [ ] Alignment toolbar (global): align left/right/top/bottom/center horizontally/vertically
+- [ ] Distribute evenly (horizontal / vertical spacing) with full snapping integration
 - [ ] Visible guide lines while dragging
 
 ## 4.5 Widget Tree (Hierarchy Panel)

@@ -62,6 +62,103 @@ export function deleteComponentOnPage(page: Page, componentId: string): boolean 
     return deleteFromList(page.components, componentId);
 }
 
+function getChildrenArray(c: Component): Component[] | null {
+    if ("children" in c && Array.isArray((c as { children?: Component[] }).children)) {
+        return (c as { children: Component[] }).children;
+    }
+    return null;
+}
+
+/**
+ * Find a component on the page tree and the absolute origin of its parent
+ * (parent top-left in screen coordinates; page root uses 0,0).
+ */
+function locateWithParentOrigin(
+    components: Component[],
+    componentId: string,
+    parentAbsX: number,
+    parentAbsY: number
+): { comp: Component; parentAbsX: number; parentAbsY: number } | null {
+    for (const c of components) {
+        if (c.id === componentId) {
+            return { comp: c, parentAbsX, parentAbsY };
+        }
+        const children = getChildrenArray(c);
+        if (children?.length) {
+            const ax = parentAbsX + c.x;
+            const ay = parentAbsY + c.y;
+            const found = locateWithParentOrigin(children, componentId, ax, ay);
+            if (found) {
+                return found;
+            }
+        }
+    }
+    return null;
+}
+
+/** Set component top-left in absolute (screen) coordinates. */
+export function setAbsolutePositionOnPage(
+    page: Page,
+    componentId: string,
+    absX: number,
+    absY: number
+): boolean {
+    const id = componentId.trim();
+    if (!id) {
+        return false;
+    }
+    const loc = locateWithParentOrigin(page.components, id, 0, 0);
+    if (!loc) {
+        return false;
+    }
+    loc.comp.x = Math.round(absX - loc.parentAbsX);
+    loc.comp.y = Math.round(absY - loc.parentAbsY);
+    return true;
+}
+
+export function bulkSetAbsolutePositionsOnPage(
+    page: Page,
+    moves: { componentId: string; absX: number; absY: number }[]
+): boolean {
+    if (!moves.length) {
+        return false;
+    }
+    for (const m of moves) {
+        if (!setAbsolutePositionOnPage(page, m.componentId, m.absX, m.absY)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+export function bulkPatchComponentsOnPage(
+    page: Page,
+    updates: { componentId: string; patch: Record<string, unknown> }[]
+): boolean {
+    if (!updates.length) {
+        return false;
+    }
+    for (const u of updates) {
+        if (!patchComponentOnPage(page, u.componentId.trim(), u.patch)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+export function bulkDeleteComponentsOnPage(page: Page, componentIds: string[]): boolean {
+    const ids = [...new Set(componentIds.map(id => id.trim()).filter(Boolean))];
+    if (!ids.length) {
+        return false;
+    }
+    for (const id of ids) {
+        if (!deleteComponentOnPage(page, id)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 function setFiniteInt(comp: Record<string, unknown>, key: string, value: unknown): void {
     if (typeof value === "number" && Number.isFinite(value)) {
         comp[key] = Math.round(value);

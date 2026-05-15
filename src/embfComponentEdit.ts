@@ -5,7 +5,10 @@ import {
     deleteComponentOnPage,
     patchComponentOnPage,
     setComponentPositionOnPage,
-    applyPageInspectorPatch
+    applyPageInspectorPatch,
+    bulkSetAbsolutePositionsOnPage,
+    bulkPatchComponentsOnPage,
+    bulkDeleteComponentsOnPage
 } from "./embfComponentModel";
 import { cloneEmbfProject } from "./embfWidgetFactory";
 import { embeddedFlowLog } from "./outputLog";
@@ -144,6 +147,58 @@ export async function updatePageInEmbfFile(
     );
     if (ok) {
         embeddedFlowLog("widgets", "info", `updated page idx ${pageIndex} (${path.basename(filePath)})`);
+    }
+    return ok;
+}
+
+export async function bulkMoveWidgetsInEmbfFile(
+    filePath: string,
+    pageIndex: number,
+    moves: { componentId: string; absX: number; absY: number }[]
+): Promise<boolean> {
+    if (!moves?.length) {
+        return false;
+    }
+
+    const ok = await persistPageEdit(filePath, pageIndex, page =>
+        bulkSetAbsolutePositionsOnPage(page, moves)
+    );
+    if (ok) {
+        embeddedFlowLog("widgets", "info", `bulk move ${moves.length} (${path.basename(filePath)})`);
+    }
+    return ok;
+}
+
+export async function bulkPatchWidgetsInEmbfFile(
+    filePath: string,
+    pageIndex: number,
+    updates: { componentId: string; patch: Record<string, unknown> }[]
+): Promise<boolean> {
+    if (!updates?.length) {
+        return false;
+    }
+
+    const ok = await persistPageEdit(filePath, pageIndex, page => bulkPatchComponentsOnPage(page, updates));
+    if (ok) {
+        embeddedFlowLog("widgets", "info", `bulk patch ${updates.length} (${path.basename(filePath)})`);
+    }
+    return ok;
+}
+
+export async function bulkDeleteWidgetsInEmbfFile(
+    filePath: string,
+    pageIndex: number,
+    componentIds: string[]
+): Promise<boolean> {
+    if (!componentIds?.length) {
+        return false;
+    }
+
+    const ok = await persistPageEdit(filePath, pageIndex, page =>
+        bulkDeleteComponentsOnPage(page, componentIds)
+    );
+    if (ok) {
+        embeddedFlowLog("widgets", "info", `bulk delete ${componentIds.length} (${path.basename(filePath)})`);
     }
     return ok;
 }

@@ -27,9 +27,9 @@
 
 ## 13.4 Zoom & Scaling
 
-- [ ] Zoom slider or +/- buttons in preview toolbar (50%, 75%, 100%, 150%, 200%)
-- [ ] Canvas CSS-scaled to fit the panel when zoom = "Fit"
-- [ ] Pixel-accurate at 100% zoom (1 LVGL pixel = 1 screen pixel)
+- [~] Zoom selector in toolbar (fit + fixed integer scale 1×–4×); panel fits container when zoom = Fit
+- [ ] Zoom slider or +/- arbitrary percentages (50%, 75%, …)
+- [ ] Pixel-accurate at 100% zoom in all layouts (CSS vs backing buffer parity)
 - [ ] Image rendering set to `pixelated` (no blurring on zoom in)
 
 ## 13.5 Theme Toggle
@@ -74,3 +74,48 @@
 - [ ] "Take screenshot" button — saves the current canvas as PNG
 - [ ] "Copy screenshot to clipboard" button
 - [ ] Snapshot saved alongside the `.embf` file or in a configurable output folder
+
+## 13.12 Design mode overlay — multi-select & layout tooling
+
+Requirements for the WASM preview’s **interactive design overlay** (toggle in toolbar). Behaviour is mirrored in [`media/webview.js`](../media/webview.js) and the host preview panel [`src/previewPanel.ts`](../src/previewPanel.ts).
+
+### 13.12.1 Selection model
+
+- [x] Maintain an ordered list `selectedComponentIds` (persisted ordering for stable UI); host `load` payload restores `selectedComponentIds` or legacy `selectedComponentId`.
+- [x] Plain click on unselected widget: selection becomes exactly that widget.
+- [x] Plain click on an already-selected widget (with others selected): keeps the multi-selection (start drag).
+- [x] Ctrl/Cmd+click: toggle widget in/out of selection.
+- [x] Shift+click: add widget to selection (union).
+- [x] Click empty canvas with no modifiers: clear widget selection; show **page** inspector instead of closing inspector.
+- [x] Overlay draws rectangles for **all** selected widgets.
+- [x] Escape clears widget selection (shows page inspector when design mode stays on).
+- [ ] Rubber-band marquee selection.
+
+### 13.12.2 Move & delete
+
+- [x] Dragging any selected widget moves **all** selected siblings **by the same delta** in absolute page coordinates (nested parents handled via bounding-box math).
+- [x] Webview emits `bulkMoveWidgets` with `{ componentId, absX, absY }` per item; host converts to parent-relative `.embf` `x`/`y` and writes once per operation.
+- [x] Delete key or inspector **Delete**: `bulkDeleteWidgets` when `|selection| ≥ 2`, otherwise `deleteWidget`.
+- [x] Undo/redo (`undo` / `redo`) may include `selectedComponentIds` so history restores sensible selection focus.
+
+### 13.12.3 Multi-inspector & alignment
+
+- When `|selection| ≥ 2` and design mode on, inspector shows **multi** panel only (no per-field property spreadsheet yet).
+- [x] Section **Align** — align edges of all widgets to the axis-aligned bounding box of the selection: left, right, top, bottom; center horizontal / vertical relative to bbox.
+- [x] Section **Space** — distribute centers evenly along X and along Y (`distribute-h` / `distribute-v`); require ≥2 widgets.
+- [x] Section **Match** — resize all widgets to the **maximum** width and **maximum** height within the selection (`match-width`, `match-height`).
+- [x] Section **Move group** — move the whole bbox so its **left/top** aligns to parent page `0`; **center bbox** horizontally on the page canvas.
+- [x] All layout actions persist through `bulkPatchWidgets` with a single file read/write on the host.
+- [ ] Extend multi-inspector with shared fields (bulk edit identical properties) when all selected widgets share a type.
+
+### 13.12.4 Host/extension API summary
+
+Messages from webview handled by [`previewPanel.ts`](../src/previewPanel.ts) (delegating to `.embf` helpers):
+
+| Message | Purpose |
+|---------|---------|
+| `bulkMoveWidgets` | Reposition multiple components after overlay drag |
+| `bulkPatchWidgets` | Batch style/geometry patches (layout buttons) |
+| `bulkDeleteWidgets` | Remove many components |
+
+Load payload extras: **`selectedComponentIds?: string[]`**, **`selectedComponentId?`** (deprecated single).

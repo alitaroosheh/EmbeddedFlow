@@ -6,17 +6,26 @@
  * EmbeddedFlow Webview — LVGL canvas renderer
  *
  * Communication protocol (host → webview):
- *   { type: "load",  payload: WebviewLoadPayload — optional suppressLoadingSpinner for soft JSON refresh }
+ *   { type: "load",  payload: WebviewLoadPayload }
+ *       — includes project, layout, WASM URIs;
+ *       — optional suppressLoadingSpinner (soft JSON-only refresh),
+ *       — optional selectedComponentIds: string[] (or legacy selectedComponentId) to restore overlay selection after reload
  *   { type: "error", message: string }
+ *   { type: "historyState", canUndo: boolean, canRedo: boolean }
  *
  * Communication protocol (webview → host):
  *   { type: "ready" }
  *   { type: "log", level: "info"|"warn"|"error", text: string }
  *   { type: "addWidget", pageIndex: number, widgetType: string }
- *   { type: "moveWidget", pageIndex: number, componentId: string, x: number, y: number }
+ *   { type: "moveWidget", pageIndex: number, componentId: string, x: number, y: number } — single widget (parent-relative)
+ *   { type: "bulkMoveWidgets", pageIndex: number, moves: [{ componentId, absX, absY }, ...] } — design overlay absolute canvas coords
  *   { type: "updateWidget", pageIndex: number, componentId: string, patch: object }
+ *   { type: "bulkPatchWidgets", pageIndex: number, updates: [{ componentId, patch }, ...] }
  *   { type: "updatePage", pageIndex: number, patch: object }
  *   { type: "deleteWidget", pageIndex: number, componentId: string }
+ *   { type: "bulkDeleteWidgets", pageIndex: number, componentIds: string[] }
+ *   { type: "undo", pageIndex: number, selectedComponentIds?: string[] }
+ *   { type: "redo", pageIndex: number, selectedComponentIds?: string[] }
  */
 
 // ── VSCode API ────────────────────────────────────────────────────────────────
@@ -94,13 +103,17 @@ let currentPageIndex = 0;
 /** Design mode: select and drag widgets (updates .embf); off = LVGL interaction. */
 let designMode = true;
 
-/** @type {string | null} */
-let selectedComponentId = null;
+/** Multi-select order (last clicked is “primary” for single-widget inspector). */
+/** @type {string[]} */
+let selectedComponentOrder = [];
 
 /** When true, inspector edits the active page / project theme instead of a widget. */
 let inspectorShowingPage = false;
 
-/** @type {{ id: string, pointerX: number, pointerY: number, compX: number, compY: number, absX: number, absY: number, width: number, height: number, previewX: number, previewY: number } | null} */
+/**
+ * Group drag: screen-space delta applied to every selected widget’s absolute origin.
+ * @type {{ pointerX: number; pointerY: number; dx: number; dy: number; items: { id: string; startAbsX: number; startAbsY: number; width: number; height: number }[] } | null}
+ */
 let dragState = null;
 
 /**
@@ -157,7 +170,7 @@ function postUndo() {
     vscode.postMessage({
         type: "undo",
         pageIndex: currentPageIndex,
-        selectedComponentId: selectedComponentId ?? undefined
+        selectedComponentIds: selectedComponentOrder.length ? [...selectedComponentOrder] : undefined
     });
 }
 
@@ -165,7 +178,7 @@ function postRedo() {
     vscode.postMessage({
         type: "redo",
         pageIndex: currentPageIndex,
-        selectedComponentId: selectedComponentId ?? undefined
+        selectedComponentIds: selectedComponentOrder.length ? [...selectedComponentOrder] : undefined
     });
 }
 
@@ -249,13 +262,18 @@ async function handleLoad(payload) {
 
     resizeDesignOverlay();
     setDesignPointerMode();
-    if (typeof payload.selectedComponentId === "string" && payload.selectedComponentId) {
+    if (Array.isArray(payload.selectedComponentIds) && payload.selectedComponentIds.length > 0) {
         inspectorShowingPage = false;
         const page = currentProject.pages[currentPageIndex];
-        selectedComponentId =
-            page && findComponentById(page.components, payload.selectedComponentId)
-                ? payload.selectedComponentId
-                : null;
+        selectedComponentOrder = payload.selectedComponentIds.filter(
+            id => typeof id === "string" && page && findComponentById(page.components, id)
+        );
+    } else if (typeof payload.selectedComponentId === "string" && payload.selectedComponentId) {
+        inspectorShowingPage = false;
+        const page = currentProject.pages[currentPageIndex];
+        const sid = payload.selectedComponentId;
+        selectedComponentOrder =
+            page && findComponentById(page.components, sid) ? [sid] : [];
     }
     drawDesignOverlay();
     renderInspector();
@@ -813,7 +831,7 @@ function dispatchAction(action, eventValue, currentPage) {
                 return;
             }
             currentPageIndex = targetIdx;
-            selectedComponentId = null;
+            selectedComponentOrder = [];
             inspectorShowingPage = false;
             dragState = null;
             pageSelectProgrammatic = true;
@@ -882,7 +900,7 @@ if (designModeCheck) {
     designModeCheck.addEventListener("change", () => {
         designMode = designModeCheck.checked;
         if (!designMode) {
-            selectedComponentId = null;
+            selectedComponentOrder = [];
             inspectorShowingPage = false;
             dragState = null;
         }
@@ -969,26 +987,37 @@ function drawDesignOverlay() {
     if (!page) {
         return;
     }
-    let bounds = null;
-    if (dragState) {
-        bounds = {
-            x: dragState.previewX,
-            y: dragState.previewY,
-            width: dragState.width,
-            height: dragState.height
-        };
-    } else if (inspectorShowingPage) {
-        bounds = { x: 0, y: 0, width: displayWidth, height: displayHeight };
-    } else if (selectedComponentId) {
-        bounds = getAbsBounds(page, selectedComponentId);
-    }
-    if (!bounds) {
-        return;
-    }
     designCtx.strokeStyle = "#007acc";
     designCtx.lineWidth = 2;
     designCtx.setLineDash([4, 3]);
-    designCtx.strokeRect(bounds.x + 0.5, bounds.y + 0.5, bounds.width, bounds.height);
+
+    if (dragState) {
+        const dx = dragState.dx;
+        const dy = dragState.dy;
+        for (const item of dragState.items) {
+            designCtx.strokeRect(
+                Math.max(0, Math.round(item.startAbsX + dx)) + 0.5,
+                Math.max(0, Math.round(item.startAbsY + dy)) + 0.5,
+                item.width,
+                item.height
+            );
+        }
+        designCtx.setLineDash([]);
+        return;
+    }
+
+    if (inspectorShowingPage) {
+        designCtx.strokeRect(0.5, 0.5, displayWidth, displayHeight);
+        designCtx.setLineDash([]);
+        return;
+    }
+
+    for (const id of selectedComponentOrder) {
+        const b = getAbsBounds(page, id);
+        if (b) {
+            designCtx.strokeRect(b.x + 0.5, b.y + 0.5, b.width, b.height);
+        }
+    }
     designCtx.setLineDash([]);
 }
 
@@ -1021,8 +1050,209 @@ function findComponentById(components, id) {
     return null;
 }
 
+/** Absolute boxes for all selected widgets (skips stale ids). */
+function getMultiSelectionBoxes(page, ids) {
+    return ids.map(id => {
+        const b = getAbsBounds(page, id);
+        if (!b) {
+            return null;
+        }
+        return { id, x: b.x, y: b.y, width: b.width, height: b.height };
+    }).filter(Boolean);
+}
+
+function postBulkMoveAbsolute(moves) {
+    if (!moves?.length) {
+        return;
+    }
+    vscode.postMessage({
+        type: "bulkMoveWidgets",
+        pageIndex: currentPageIndex,
+        moves: moves.map(m => ({
+            componentId: m.componentId,
+            absX: Math.max(0, Math.round(Number(m.absX))),
+            absY: Math.max(0, Math.round(Number(m.absY)))
+        }))
+    });
+}
+
+function layoutToolbarButton(act, label) {
+    return `<button type="button" class="layout-act-btn tb-btn-small" data-layout-act="${esc(act)}">${esc(label)}</button>`;
+}
+
+function renderMultiInspectorHtml(ids) {
+    const list = ids.map(esc).join(", ");
+    return (
+        `<div id="inspector-readonly"><strong>${ids.length}</strong> widgets selected</div>` +
+        `<div class="inspector-group-title">Multi-select</div>` +
+        `<p class="inspector-hint" style="font-size:11px;color:#888;line-height:1.35;margin:0 0 8px;">` +
+        `Ctrl+click: toggle · Shift+click: add · Click an already-selected widget to keep the group.` +
+        `</p>` +
+        `<div class="inspector-hint" style="font-size:11px;color:#aaa;margin:-4px 0 12px;line-height:1.3">${esc(list)}</div>` +
+        `<div class="inspector-group-title">Align together</div>` +
+        `<div class="inspector-layout-grid">` +
+        layoutToolbarButton("align-left", "Left") +
+        layoutToolbarButton("align-right", "Right") +
+        layoutToolbarButton("align-top", "Top") +
+        layoutToolbarButton("align-bottom", "Bottom") +
+        layoutToolbarButton("align-center-h", "Center H") +
+        layoutToolbarButton("align-center-v", "Center V") +
+        layoutToolbarButton("distribute-h", "Spread X") +
+        layoutToolbarButton("distribute-v", "Spread Y") +
+        `</div>` +
+        `<div class="inspector-group-title">Match size</div>` +
+        `<div class="inspector-layout-grid">` +
+        layoutToolbarButton("match-width", "= max width") +
+        layoutToolbarButton("match-height", "= max height") +
+        `</div>` +
+        `<div class="inspector-group-title">On page canvas</div>` +
+        `<div class="inspector-layout-grid">` +
+        layoutToolbarButton("grp-left", "To left") +
+        layoutToolbarButton("grp-top", "To top") +
+        layoutToolbarButton("grp-center", "Center in page") +
+        `</div>`
+    );
+}
+
+function applyLayoutAct(act) {
+    const page = currentProject?.pages[currentPageIndex];
+    const ids = [...selectedComponentOrder];
+    if (!page || ids.length === 0 || !act) {
+        return;
+    }
+    const boxes = /** @type {{ id: string; x: number; y: number; width: number; height: number }[]} */ (
+        getMultiSelectionBoxes(page, ids)
+    );
+    if (!boxes.length) {
+        return;
+    }
+
+    const minX = Math.min(...boxes.map(b => b.x));
+    const minY = Math.min(...boxes.map(b => b.y));
+    const maxR = Math.max(...boxes.map(b => b.x + b.width));
+    const maxB = Math.max(...boxes.map(b => b.y + b.height));
+    const bboxCx = (minX + maxR) / 2;
+    const bboxCy = (minY + maxB) / 2;
+
+    const needsPair = ["distribute-h", "distribute-v", "match-width", "match-height"].includes(act);
+    if (needsPair && boxes.length < 2) {
+        log("warn", "Select at least two widgets for distribute / match size.");
+        return;
+    }
+
+    switch (act) {
+        case "align-left":
+            postBulkMoveAbsolute(boxes.map(b => ({ componentId: b.id, absX: minX, absY: b.y })));
+            break;
+        case "align-right":
+            postBulkMoveAbsolute(boxes.map(b => ({ componentId: b.id, absX: maxR - b.width, absY: b.y })));
+            break;
+        case "align-top":
+            postBulkMoveAbsolute(boxes.map(b => ({ componentId: b.id, absX: b.x, absY: minY })));
+            break;
+        case "align-bottom":
+            postBulkMoveAbsolute(boxes.map(b => ({ componentId: b.id, absX: b.x, absY: maxB - b.height })));
+            break;
+        case "align-center-h": {
+            postBulkMoveAbsolute(
+                boxes.map(b => ({
+                    componentId: b.id,
+                    absX: Math.round(bboxCx - b.width / 2),
+                    absY: b.y
+                }))
+            );
+            break;
+        }
+        case "align-center-v":
+            postBulkMoveAbsolute(
+                boxes.map(b => ({
+                    componentId: b.id,
+                    absX: b.x,
+                    absY: Math.round(bboxCy - b.height / 2)
+                }))
+            );
+            break;
+        case "distribute-h": {
+            const sorted = [...boxes].sort((a, b) => a.x - b.x);
+            const left0 = sorted[0].x;
+            const span = sorted[sorted.length - 1].x + sorted[sorted.length - 1].width - left0;
+            const innerW = sorted.reduce((s, b) => s + b.width, 0);
+            const gaps = sorted.length - 1;
+            const gap = gaps > 0 ? (span - innerW) / gaps : 0;
+            let cursor = left0;
+            const moves = sorted.map(b => {
+                const nx = cursor;
+                cursor += b.width + gap;
+                return { componentId: b.id, absX: nx, absY: b.y };
+            });
+            postBulkMoveAbsolute(moves);
+            break;
+        }
+        case "distribute-v": {
+            const sorted = [...boxes].sort((a, b) => a.y - b.y);
+            const top0 = sorted[0].y;
+            const span = sorted[sorted.length - 1].y + sorted[sorted.length - 1].height - top0;
+            const innerH = sorted.reduce((s, b) => s + b.height, 0);
+            const gaps = sorted.length - 1;
+            const gap = gaps > 0 ? (span - innerH) / gaps : 0;
+            let cursor = top0;
+            const moves = sorted.map(b => {
+                const ny = cursor;
+                cursor += b.height + gap;
+                return { componentId: b.id, absX: b.x, absY: ny };
+            });
+            postBulkMoveAbsolute(moves);
+            break;
+        }
+        case "match-width": {
+            const wMax = Math.max(...boxes.map(b => b.width));
+            vscode.postMessage({
+                type: "bulkPatchWidgets",
+                pageIndex: currentPageIndex,
+                updates: boxes.map(b => ({
+                    componentId: b.id,
+                    patch: { width: Math.round(wMax) }
+                }))
+            });
+            break;
+        }
+        case "match-height": {
+            const hMax = Math.max(...boxes.map(b => b.height));
+            vscode.postMessage({
+                type: "bulkPatchWidgets",
+                pageIndex: currentPageIndex,
+                updates: boxes.map(b => ({
+                    componentId: b.id,
+                    patch: { height: Math.round(hMax) }
+                }))
+            });
+            break;
+        }
+        case "grp-left": {
+            const dx = -minX;
+            postBulkMoveAbsolute(boxes.map(b => ({ componentId: b.id, absX: b.x + dx, absY: b.y })));
+            break;
+        }
+        case "grp-top": {
+            const dy = -minY;
+            postBulkMoveAbsolute(boxes.map(b => ({ componentId: b.id, absX: b.x, absY: b.y + dy })));
+            break;
+        }
+        case "grp-center": {
+            const bw = maxR - minX;
+            const bh = maxB - minY;
+            const dx = Math.round((displayWidth - bw) / 2 - minX);
+            const dy = Math.round((displayHeight - bh) / 2 - minY);
+            postBulkMoveAbsolute(boxes.map(b => ({ componentId: b.id, absX: b.x + dx, absY: b.y + dy })));
+            break;
+        }
+        default:
+            break;
+    }
+}
+
 function clearInspectorSelection() {
-    selectedComponentId = null;
+    selectedComponentOrder = [];
     inspectorShowingPage = false;
     dragState = null;
     drawDesignOverlay();
@@ -1031,7 +1261,7 @@ function clearInspectorSelection() {
 
 function selectPageInspector() {
     inspectorShowingPage = true;
-    selectedComponentId = null;
+    selectedComponentOrder = [];
     dragState = null;
     drawDesignOverlay();
     renderInspector();
@@ -1039,7 +1269,7 @@ function selectPageInspector() {
 
 function setSelection(componentId) {
     inspectorShowingPage = false;
-    selectedComponentId = componentId;
+    selectedComponentOrder = componentId ? [componentId] : [];
     dragState = null;
     drawDesignOverlay();
     renderInspector();
@@ -1335,11 +1565,28 @@ function renderInspector() {
         return;
     }
 
+    if (selectedComponentOrder.length >= 2 && page) {
+        inspectorEmpty.hidden = true;
+        inspectorForm.hidden = false;
+        inspectorDelete.disabled = false;
+
+        const inspectorFocusSnap = snapshotInspectorFocus();
+        inspectorSyncing = true;
+        inspectorForm.innerHTML = renderMultiInspectorHtml([...selectedComponentOrder]);
+        inspectorSyncing = false;
+
+        if (inspectorFocusSnap) {
+            requestAnimationFrame(() => {
+                queueMicrotask(() => restoreInspectorFocus(inspectorFocusSnap));
+            });
+        }
+        return;
+    }
+
+    const soloId = selectedComponentOrder.length === 1 ? selectedComponentOrder[0] : null;
     const comp =
-        selectedComponentId && page
-            ? findComponentById(page.components, selectedComponentId)
-            : null;
-    if (!comp) {
+        soloId && page ? findComponentById(page.components, soloId) : null;
+    if (!soloId || !comp) {
         inspectorEmpty.hidden = false;
         inspectorForm.hidden = true;
         inspectorForm.innerHTML = "";
@@ -1797,9 +2044,10 @@ function commitInspector() {
         return;
     }
 
-    if (!selectedComponentId) {
+    if (selectedComponentOrder.length !== 1) {
         return;
     }
+    const selectedComponentId = selectedComponentOrder[0];
     vscode.postMessage({
         type: "updateWidget",
         pageIndex: currentPageIndex,
@@ -1886,17 +2134,36 @@ if (inspectorForm) {
         }
         commitInspector();
     });
+    inspectorForm.addEventListener("click", e => {
+        const btn = e.target instanceof Element ? e.target.closest("[data-layout-act]") : null;
+        if (!btn || inspectorSyncing) {
+            return;
+        }
+        const act = btn.getAttribute("data-layout-act");
+        if (act) {
+            e.preventDefault();
+            applyLayoutAct(act);
+        }
+    });
 }
 
 if (inspectorDelete) {
     inspectorDelete.addEventListener("click", () => {
-        if (!selectedComponentId) {
+        if (!selectedComponentOrder.length) {
+            return;
+        }
+        if (selectedComponentOrder.length > 1) {
+            vscode.postMessage({
+                type: "bulkDeleteWidgets",
+                pageIndex: currentPageIndex,
+                componentIds: [...selectedComponentOrder]
+            });
             return;
         }
         vscode.postMessage({
             type: "deleteWidget",
             pageIndex: currentPageIndex,
-            componentId: selectedComponentId
+            componentId: selectedComponentOrder[0]
         });
     });
 }
@@ -1930,17 +2197,25 @@ document.addEventListener("keydown", e => {
         clearInspectorSelection();
         return;
     }
-    if ((e.key === "Delete" || e.key === "Backspace") && selectedComponentId) {
+    if ((e.key === "Delete" || e.key === "Backspace") && selectedComponentOrder.length) {
         const t = e.target;
         if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement) {
             return;
         }
         e.preventDefault();
-        vscode.postMessage({
-            type: "deleteWidget",
-            pageIndex: currentPageIndex,
-            componentId: selectedComponentId
-        });
+        if (selectedComponentOrder.length > 1) {
+            vscode.postMessage({
+                type: "bulkDeleteWidgets",
+                pageIndex: currentPageIndex,
+                componentIds: [...selectedComponentOrder]
+            });
+        } else {
+            vscode.postMessage({
+                type: "deleteWidget",
+                pageIndex: currentPageIndex,
+                componentId: selectedComponentOrder[0]
+            });
+        }
     }
 });
 
@@ -1959,24 +2234,75 @@ function setupDesignOverlay() {
         designOverlay.setPointerCapture(e.pointerId);
         const { x, y } = overlayCoords(e);
         const hit = hitTestAt(page, x, y);
+        const additive = e.ctrlKey || e.metaKey;
+        const extend = e.shiftKey;
+
+        function releaseCap() {
+            try {
+                designOverlay.releasePointerCapture(e.pointerId);
+            } catch {
+                /* ignore */
+            }
+        }
+
         if (!hit) {
-            selectPageInspector();
+            if (!additive && !extend) {
+                selectPageInspector();
+            }
+            releaseCap();
             return;
         }
-        inspectorShowingPage = false;
-        selectedComponentId = hit.comp.id;
+
+        const hid = hit.comp.id;
+
+        if (additive) {
+            const ix = selectedComponentOrder.indexOf(hid);
+            if (ix >= 0) {
+                selectedComponentOrder.splice(ix, 1);
+            } else {
+                selectedComponentOrder.push(hid);
+            }
+            inspectorShowingPage = false;
+            dragState = null;
+            drawDesignOverlay();
+            renderInspector();
+            releaseCap();
+            return;
+        }
+
+        if (extend) {
+            if (!selectedComponentOrder.includes(hid)) {
+                selectedComponentOrder.push(hid);
+            }
+            inspectorShowingPage = false;
+        } else {
+            if (!selectedComponentOrder.includes(hid)) {
+                selectedComponentOrder = [hid];
+            }
+            inspectorShowingPage = false;
+        }
+
+        const dragItems = selectedComponentOrder.map(id => {
+            const b = getAbsBounds(page, id);
+            if (!b) {
+                return null;
+            }
+            return { id, startAbsX: b.x, startAbsY: b.y, width: b.width, height: b.height };
+        }).filter(Boolean);
+
+        if (dragItems.length === 0) {
+            releaseCap();
+            return;
+        }
+
         dragState = {
-            id: hit.comp.id,
             pointerX: x,
             pointerY: y,
-            compX: hit.comp.x,
-            compY: hit.comp.y,
-            absX: hit.absX,
-            absY: hit.absY,
-            previewX: hit.absX,
-            previewY: hit.absY,
-            width: hit.comp.width,
-            height: hit.comp.height
+            dx: 0,
+            dy: 0,
+            items: /** @type {{ id: string; startAbsX: number; startAbsY: number; width: number; height: number }[]} */ (
+                dragItems
+            )
         };
         drawDesignOverlay();
         renderInspector();
@@ -1988,10 +2314,8 @@ function setupDesignOverlay() {
             return;
         }
         const { x, y } = overlayCoords(e);
-        const dx = x - dragState.pointerX;
-        const dy = y - dragState.pointerY;
-        dragState.previewX = dragState.absX + dx;
-        dragState.previewY = dragState.absY + dy;
+        dragState.dx = x - dragState.pointerX;
+        dragState.dy = y - dragState.pointerY;
         drawDesignOverlay();
         e.preventDefault();
     });
@@ -2010,14 +2334,15 @@ function setupDesignOverlay() {
         const dy = y - dragState.pointerY;
         const moved = Math.abs(dx) > 2 || Math.abs(dy) > 2;
         if (moved) {
-            const newX = Math.max(0, Math.round(dragState.compX + dx));
-            const newY = Math.max(0, Math.round(dragState.compY + dy));
+            const moves = dragState.items.map(it => ({
+                componentId: it.id,
+                absX: Math.max(0, Math.round(it.startAbsX + dx)),
+                absY: Math.max(0, Math.round(it.startAbsY + dy))
+            }));
             vscode.postMessage({
-                type: "moveWidget",
+                type: "bulkMoveWidgets",
                 pageIndex: currentPageIndex,
-                componentId: dragState.id,
-                x: newX,
-                y: newY
+                moves
             });
         }
         dragState = null;
@@ -2161,7 +2486,7 @@ if (pageSelect) {
         if (!currentProject || pageSelectProgrammatic) return;
         const idx = parseInt(pageSelect.value, 10) || 0;
         currentPageIndex = idx;
-        selectedComponentId = null;
+        selectedComponentOrder = [];
         inspectorShowingPage = true;
         dragState = null;
         buildUiFromProject(currentProject, idx);

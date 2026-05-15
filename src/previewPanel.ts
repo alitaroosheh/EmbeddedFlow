@@ -3,7 +3,15 @@ import * as path from "path";
 import { EmbfProject } from "./types/embf";
 import { buildWidgetPaletteHtml } from "./embfPaletteIcons";
 import { EmbfParseError, getEffectiveDisplaySize } from "./embfParser";
-import { deleteWidgetFromEmbfFile, moveWidgetInEmbfFile, updatePageInEmbfFile, updateWidgetInEmbfFile } from "./embfComponentEdit";
+import {
+    bulkDeleteWidgetsInEmbfFile,
+    bulkMoveWidgetsInEmbfFile,
+    bulkPatchWidgetsInEmbfFile,
+    deleteWidgetFromEmbfFile,
+    moveWidgetInEmbfFile,
+    updatePageInEmbfFile,
+    updateWidgetInEmbfFile
+} from "./embfComponentEdit";
 import { readEmbfProject } from "./embfProjectWrite";
 import { undoEmbfEdit, redoEmbfEdit, getEmbfHistoryState } from "./embfUndoRedo";
 import { appendWidgetToEmbfFile } from "./embfWidgetInsert";
@@ -21,11 +29,22 @@ export type WebviewToHostMessage =
     | { type: "log"; level: "info" | "warn" | "error"; text: string }
     | { type: "addWidget"; pageIndex: number; widgetType: string }
     | { type: "moveWidget"; pageIndex: number; componentId: string; x: number; y: number }
+    | {
+          type: "bulkMoveWidgets";
+          pageIndex: number;
+          moves: { componentId: string; absX: number; absY: number }[];
+      }
     | { type: "updateWidget"; pageIndex: number; componentId: string; patch: Record<string, unknown> }
+    | {
+          type: "bulkPatchWidgets";
+          pageIndex: number;
+          updates: { componentId: string; patch: Record<string, unknown> }[];
+      }
     | { type: "updatePage"; pageIndex: number; patch: Record<string, unknown> }
     | { type: "deleteWidget"; pageIndex: number; componentId: string }
-    | { type: "undo"; pageIndex: number; selectedComponentId?: string }
-    | { type: "redo"; pageIndex: number; selectedComponentId?: string };
+    | { type: "bulkDeleteWidgets"; pageIndex: number; componentIds: string[] }
+    | { type: "undo"; pageIndex: number; selectedComponentId?: string; selectedComponentIds?: string[] }
+    | { type: "redo"; pageIndex: number; selectedComponentId?: string; selectedComponentIds?: string[] };
 
 export interface WebviewLoadPayload {
     project: EmbfProject;
@@ -37,6 +56,8 @@ export interface WebviewLoadPayload {
     pageIndex?: number;
     /** When set, re-select this component after reload. */
     selectedComponentId?: string;
+    /** When set, re-select these components after reload (design multi-select). */
+    selectedComponentIds?: string[];
     /**
      * When true and WASM is already loaded from the same URI, skip loading overlay flicker during JSON refresh.
      * Only used after debounced inspector-driven reloads (same WASM build).
@@ -47,6 +68,7 @@ export interface WebviewLoadPayload {
 export interface SendProjectOptions {
     pageIndex?: number;
     selectedComponentId?: string;
+    selectedComponentIds?: string[];
     suppressLoadingSpinner?: boolean;
 }
 
@@ -66,7 +88,7 @@ export class EmbfPreviewPanel {
     /** Coalesce inspector property writes → one preview refresh instead of hammering WASM rebuild per patch. */
     private _inspectorReloadTimer: ReturnType<typeof setTimeout> | undefined;
     private _inspectorReloadPageIndex = 0;
-    private _inspectorReloadSelectedId: string | undefined;
+    private _inspectorReloadSelectionIds: string[] | undefined;
 
     private static readonly _inspectorReloadDebounceMs = 280;
 
@@ -138,6 +160,7 @@ export class EmbfPreviewPanel {
 
         const pageIndex = options?.pageIndex;
         const selectedComponentId = options?.selectedComponentId;
+        const selectedComponentIds = options?.selectedComponentIds;
         const suppressLoadingSpinner = options?.suppressLoadingSpinner;
 
         const payload: WebviewLoadPayload = {
@@ -150,7 +173,9 @@ export class EmbfPreviewPanel {
         if (pageIndex !== undefined) {
             payload.pageIndex = pageIndex;
         }
-        if (selectedComponentId !== undefined) {
+        if (selectedComponentIds?.length) {
+            payload.selectedComponentIds = [...selectedComponentIds];
+        } else if (selectedComponentId !== undefined) {
             payload.selectedComponentId = selectedComponentId;
         }
         if (suppressLoadingSpinner) {
@@ -185,18 +210,28 @@ export class EmbfPreviewPanel {
             this.sendHistoryState();
         } else if (msg.type === "undo") {
             const pageIndex = Number(msg.pageIndex);
-            const selected = typeof msg.selectedComponentId === "string" ? msg.selectedComponentId : undefined;
             if (!Number.isInteger(pageIndex) || pageIndex < 0) {
                 return;
             }
-            void this.applyUndo(pageIndex, selected);
+            const ids =
+                Array.isArray(msg.selectedComponentIds) && msg.selectedComponentIds.length > 0
+                    ? msg.selectedComponentIds
+                    : typeof msg.selectedComponentId === "string"
+                      ? [msg.selectedComponentId]
+                      : undefined;
+            void this.applyUndo(pageIndex, ids);
         } else if (msg.type === "redo") {
             const pageIndex = Number(msg.pageIndex);
-            const selected = typeof msg.selectedComponentId === "string" ? msg.selectedComponentId : undefined;
             if (!Number.isInteger(pageIndex) || pageIndex < 0) {
                 return;
             }
-            void this.applyRedo(pageIndex, selected);
+            const ids =
+                Array.isArray(msg.selectedComponentIds) && msg.selectedComponentIds.length > 0
+                    ? msg.selectedComponentIds
+                    : typeof msg.selectedComponentId === "string"
+                      ? [msg.selectedComponentId]
+                      : undefined;
+            void this.applyRedo(pageIndex, ids);
         } else if (msg.type === "addWidget") {
             const pageIndex = Number(msg.pageIndex);
             const widgetType = String(msg.widgetType ?? "").trim();
@@ -219,7 +254,36 @@ export class EmbfPreviewPanel {
             }
             void moveWidgetInEmbfFile(this._filePath, pageIndex, componentId, x, y).then(ok => {
                 if (ok) {
-                    this.reloadPreviewNow(pageIndex, componentId);
+                    this.reloadPreviewNow(pageIndex, { selectedComponentIds: [componentId] });
+                    this.sendHistoryState();
+                }
+            });
+        } else if (msg.type === "bulkMoveWidgets") {
+            const pageIndex = Number(msg.pageIndex);
+            const moves = msg.moves;
+            if (
+                !Number.isInteger(pageIndex) ||
+                pageIndex < 0 ||
+                !Array.isArray(moves) ||
+                moves.length === 0
+            ) {
+                return;
+            }
+            const normalized = moves
+                .map(m => ({
+                    componentId: String((m as { componentId?: string }).componentId ?? "").trim(),
+                    absX: Number((m as { absX?: unknown }).absX),
+                    absY: Number((m as { absY?: unknown }).absY)
+                }))
+                .filter(m => m.componentId && Number.isFinite(m.absX) && Number.isFinite(m.absY));
+            if (normalized.length === 0) {
+                return;
+            }
+            void bulkMoveWidgetsInEmbfFile(this._filePath, pageIndex, normalized).then(ok => {
+                if (ok) {
+                    this.reloadPreviewNow(pageIndex, {
+                        selectedComponentIds: normalized.map(m => m.componentId)
+                    });
                     this.sendHistoryState();
                 }
             });
@@ -238,7 +302,35 @@ export class EmbfPreviewPanel {
             }
             void updateWidgetInEmbfFile(this._filePath, pageIndex, componentId, patch).then(ok => {
                 if (ok) {
-                    this.scheduleReloadPreviewAfterInspectorEdit(pageIndex, componentId);
+                    this.scheduleReloadPreviewAfterInspectorEdit(pageIndex, [componentId]);
+                    this.sendHistoryState();
+                }
+            });
+        } else if (msg.type === "bulkPatchWidgets") {
+            const pageIndex = Number(msg.pageIndex);
+            const updates = msg.updates;
+            if (
+                !Number.isInteger(pageIndex) ||
+                pageIndex < 0 ||
+                !Array.isArray(updates) ||
+                updates.length === 0
+            ) {
+                return;
+            }
+            const norm = updates
+                .map(u => ({
+                    componentId: String((u as { componentId?: string }).componentId ?? "").trim(),
+                    patch: (u as { patch?: Record<string, unknown> }).patch as Record<string, unknown>
+                }))
+                .filter(u => u.componentId && u.patch && typeof u.patch === "object");
+            if (norm.length === 0) {
+                return;
+            }
+            void bulkPatchWidgetsInEmbfFile(this._filePath, pageIndex, norm).then(ok => {
+                if (ok) {
+                    this.reloadPreviewNow(pageIndex, {
+                        selectedComponentIds: norm.map(u => u.componentId)
+                    });
                     this.sendHistoryState();
                 }
             });
@@ -266,6 +358,22 @@ export class EmbfPreviewPanel {
                     this.sendHistoryState();
                 }
             });
+        } else if (msg.type === "bulkDeleteWidgets") {
+            const pageIndex = Number(msg.pageIndex);
+            const rawIds = msg.componentIds;
+            if (!Number.isInteger(pageIndex) || pageIndex < 0 || !Array.isArray(rawIds) || rawIds.length === 0) {
+                return;
+            }
+            const ids = [...new Set(rawIds.map(id => String(id ?? "").trim()).filter(Boolean))];
+            if (!ids.length) {
+                return;
+            }
+            void bulkDeleteWidgetsInEmbfFile(this._filePath, pageIndex, ids).then(ok => {
+                if (ok) {
+                    this.reloadPreviewNow(pageIndex);
+                    this.sendHistoryState();
+                }
+            });
         }
     }
 
@@ -274,18 +382,24 @@ export class EmbfPreviewPanel {
         this.postToWebview({ type: "historyState", canUndo, canRedo });
     }
 
-    private async applyUndo(pageIndex: number, selectedComponentId?: string): Promise<void> {
+    private async applyUndo(pageIndex: number, selectedComponentIds?: string[]): Promise<void> {
         const ok = await undoEmbfEdit(this._filePath);
         if (ok) {
-            this.reloadPreviewNow(pageIndex, selectedComponentId);
+            this.reloadPreviewNow(
+                pageIndex,
+                selectedComponentIds?.length ? { selectedComponentIds } : undefined
+            );
             this.sendHistoryState();
         }
     }
 
-    private async applyRedo(pageIndex: number, selectedComponentId?: string): Promise<void> {
+    private async applyRedo(pageIndex: number, selectedComponentIds?: string[]): Promise<void> {
         const ok = await redoEmbfEdit(this._filePath);
         if (ok) {
-            this.reloadPreviewNow(pageIndex, selectedComponentId);
+            this.reloadPreviewNow(
+                pageIndex,
+                selectedComponentIds?.length ? { selectedComponentIds } : undefined
+            );
             this.sendHistoryState();
         }
     }
@@ -300,17 +414,19 @@ export class EmbfPreviewPanel {
     /** Immediate read-from-disk refresh; cancels any pending inspector debounce so we don't double-send. */
     private reloadPreviewNow(
         pageIndex: number,
-        selectedComponentId?: string,
-        /** Avoid loading shimmer when WASM + URI unchanged (inspector batch refresh). */
-        soft?: boolean
+        opts?: Pick<SendProjectOptions, "selectedComponentId" | "selectedComponentIds" | "suppressLoadingSpinner">
     ): void {
         this.clearInspectorReloadDebounce();
         try {
             const project = readEmbfProject(this._filePath);
             this.sendProject(project, {
                 pageIndex,
-                selectedComponentId,
-                suppressLoadingSpinner: soft === true ? true : undefined
+                ...(opts?.selectedComponentIds?.length
+                    ? { selectedComponentIds: opts.selectedComponentIds }
+                    : opts?.selectedComponentId !== undefined
+                      ? { selectedComponentId: opts.selectedComponentId }
+                      : {}),
+                suppressLoadingSpinner: opts?.suppressLoadingSpinner === true ? true : undefined
             });
         } catch (e) {
             const m = e instanceof EmbfParseError ? e.message : String(e);
@@ -321,16 +437,19 @@ export class EmbfPreviewPanel {
     /** After inspector-driven file patches; merges rapid commits into fewer WASM/UI rebuilds. */
     private scheduleReloadPreviewAfterInspectorEdit(
         pageIndex: number,
-        selectedComponentId?: string
+        selectedComponentIds?: string[]
     ): void {
         this._inspectorReloadPageIndex = pageIndex;
-        this._inspectorReloadSelectedId = selectedComponentId;
+        this._inspectorReloadSelectionIds = selectedComponentIds?.length ? [...selectedComponentIds] : undefined;
         if (this._inspectorReloadTimer !== undefined) {
             clearTimeout(this._inspectorReloadTimer);
         }
         this._inspectorReloadTimer = setTimeout(() => {
             this._inspectorReloadTimer = undefined;
-            this.reloadPreviewNow(this._inspectorReloadPageIndex, this._inspectorReloadSelectedId, true);
+            this.reloadPreviewNow(this._inspectorReloadPageIndex, {
+                selectedComponentIds: this._inspectorReloadSelectionIds,
+                suppressLoadingSpinner: true
+            });
         }, EmbfPreviewPanel._inspectorReloadDebounceMs);
     }
 
@@ -550,6 +669,31 @@ export class EmbfPreviewPanel {
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 6px;
+        }
+        #inspector-form .inspector-layout-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-bottom: 10px;
+        }
+        #inspector-form .tb-btn-small {
+            font-size: 11px;
+            padding: 4px 8px;
+            margin: 0;
+            background: #3c3c3c;
+            color: #ccc;
+            border: 1px solid #555;
+            border-radius: 3px;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        #inspector-form .tb-btn-small:hover:not(:disabled) {
+            background: #4a4a4a;
+            color: #fff;
+        }
+        #inspector-form .tb-btn-small:disabled {
+            opacity: 0.35;
+            cursor: default;
         }
         #inspector-form .check-row {
             display: flex;

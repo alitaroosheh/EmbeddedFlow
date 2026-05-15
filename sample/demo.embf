@@ -23,7 +23,7 @@
     {
       "id": "page_main",
       "name": "Main",
-      "backgroundColor": "#0b0a0a",
+      "backgroundColor": "#ffffff",
       "components": [
         {
           "id": "lbl_title",
@@ -120,7 +120,7 @@
         {
           "id": "arc_gauge",
           "type": "arc",
-          "x": 0,
+          "x": 125,
           "y": 110,
           "width": 80,
           "height": 80,
@@ -145,8 +145,8 @@
         {
           "id": "spinner_loading",
           "type": "spinner",
-          "x": 170,
-          "y": 152,
+          "x": 400,
+          "y": 135,
           "width": 50,
           "height": 50,
           "speed": 1000,
@@ -163,8 +163,8 @@
         {
           "id": "lbl_footer",
           "type": "label",
-          "x": 10,
-          "y": 210,
+          "x": 15,
+          "y": 226,
           "width": 300,
           "height": 20,
           "text": "LVGL 9.5.0 preview",
@@ -178,8 +178,8 @@
         },
         {
           "id": "sw_1",
-          "x": 108,
-          "y": 144,
+          "x": 472,
+          "y": 147,
           "width": 52,
           "height": 28,
           "type": "switch",

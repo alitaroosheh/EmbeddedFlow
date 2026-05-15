@@ -41,8 +41,8 @@
         {
           "id": "btn_ok",
           "type": "button",
-          "x": 363,
-          "y": 227,
+          "x": 418,
+          "y": 96,
           "width": 100,
           "height": 36,
           "label": "Settings",
@@ -107,17 +107,6 @@
           }
         },
         {
-          "id": "slider_val",
-          "type": "slider",
-          "x": 53,
-          "y": 291,
-          "width": 200,
-          "height": 20,
-          "min": 0,
-          "max": 100,
-          "value": 40
-        },
-        {
           "id": "arc_gauge",
           "type": "arc",
           "x": 0,
@@ -166,17 +155,6 @@
           }
         },
         {
-          "id": "sld_1",
-          "x": 306,
-          "y": 260,
-          "width": 140,
-          "height": 24,
-          "type": "slider",
-          "min": 0,
-          "max": 100,
-          "value": 50
-        },
-        {
           "id": "sw_1",
           "x": 108,
           "y": 144,
@@ -187,8 +165,8 @@
         },
         {
           "id": "btn_1",
-          "x": 188,
-          "y": 241,
+          "x": 428,
+          "y": 187,
           "width": 88,
           "height": 36,
           "type": "button",
@@ -213,15 +191,6 @@
           "min": 0,
           "max": 100,
           "value": 50
-        },
-        {
-          "id": "sw_2",
-          "x": 108,
-          "y": 283,
-          "width": 52,
-          "height": 28,
-          "type": "switch",
-          "checked": false
         },
         {
           "id": "ta_2",
@@ -251,42 +220,26 @@
           ]
         },
         {
-          "id": "img_1",
-          "x": 12,
-          "y": 232,
-          "width": 64,
-          "height": 64,
-          "type": "image",
-          "src": "placeholder.png"
-        },
-        {
-          "id": "box_1",
-          "x": 108,
-          "y": 232,
-          "width": 160,
-          "height": 120,
-          "type": "container",
-          "layout": "none",
-          "children": []
-        },
-        {
-          "id": "pnl_1",
-          "x": 204,
-          "y": 232,
-          "width": 160,
-          "height": 120,
-          "type": "panel",
-          "children": []
-        },
-        {
           "id": "spin_1",
-          "x": 300,
-          "y": 232,
+          "x": 312,
+          "y": 48,
           "width": 48,
           "height": 48,
           "type": "spinner",
           "speed": 1000,
           "arcLength": 60
+        },
+        {
+          "id": "bar_1",
+          "x": 268,
+          "y": 110,
+          "width": 140,
+          "height": 20,
+          "type": "bar",
+          "min": 0,
+          "max": 100,
+          "value": 99,
+          "hidden": false
         }
       ]
     },

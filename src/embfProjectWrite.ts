@@ -1,8 +1,16 @@
 import * as fs from "fs";
 import * as vscode from "vscode";
 import type { EmbfProject } from "./types/embf";
-import { EmbfParseError, parseEmbf, parseEmbfSource } from "./embfParser";
+import { recordSnapshotBeforeEdit, readEmbfText } from "./embfHistory";
+import { EmbfParseError, parseEmbfSource } from "./embfParser";
 import { embeddedFlowLog } from "./outputLog";
+
+export { readEmbfText } from "./embfHistory";
+
+export interface WriteEmbfOptions {
+    /** Do not push the pre-write state onto the undo stack (used by undo/redo). */
+    skipHistory?: boolean;
+}
 
 function findEmbfDocument(filePath: string): vscode.TextDocument | undefined {
     return vscode.workspace.textDocuments.find(
@@ -12,19 +20,17 @@ function findEmbfDocument(filePath: string): vscode.TextDocument | undefined {
 
 /** Read project from the open buffer when available, otherwise from disk. */
 export function readEmbfProject(filePath: string): EmbfProject {
-    const doc = findEmbfDocument(filePath);
-    if (doc) {
-        return parseEmbfSource(doc.getText());
-    }
-    return parseEmbf(filePath);
+    return parseEmbfSource(readEmbfText(filePath));
 }
 
 /**
- * Validate and write project JSON to the open buffer or disk.
- * @returns true on success.
+ * Validate and write raw `.embf` JSON text to the open buffer or disk.
  */
-export async function writeEmbfProject(filePath: string, project: EmbfProject): Promise<boolean> {
-    const json = JSON.stringify(project, null, 2);
+export async function writeEmbfText(
+    filePath: string,
+    json: string,
+    options?: WriteEmbfOptions
+): Promise<boolean> {
     try {
         parseEmbfSource(json);
     } catch (e) {
@@ -54,4 +60,20 @@ export async function writeEmbfProject(filePath: string, project: EmbfProject): 
         vscode.window.showErrorMessage(`EmbeddedFlow: failed to write file: ${e.message}`);
         return false;
     }
+}
+
+/**
+ * Validate and write project JSON to the open buffer or disk.
+ * Records undo history unless `skipHistory` is set.
+ */
+export async function writeEmbfProject(
+    filePath: string,
+    project: EmbfProject,
+    options?: WriteEmbfOptions
+): Promise<boolean> {
+    if (!options?.skipHistory) {
+        recordSnapshotBeforeEdit(filePath);
+    }
+    const json = JSON.stringify(project, null, 2);
+    return writeEmbfText(filePath, json, options);
 }

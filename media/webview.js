@@ -40,6 +40,12 @@ const statusEl = document.getElementById("status");
 const inspectorEmpty = document.getElementById("inspector-empty");
 const inspectorForm = document.getElementById("inspector-form");
 const inspectorDelete = document.getElementById("inspector-delete");
+const btnUndo = document.getElementById("btn-undo");
+const btnRedo = document.getElementById("btn-redo");
+const previewZoomSelect = /** @type {HTMLSelectElement | null} */ (
+    document.getElementById("preview-zoom")
+);
+const displayWrapper = document.getElementById("display-wrapper");
 /** @type {ReturnType<typeof setTimeout> | null} */
 let inspectorDebounce = null;
 let inspectorSyncing = false;
@@ -55,6 +61,21 @@ let wasmReady = false;
 let displayWidth = 0;
 /** @type {number} */
 let displayHeight = 0;
+
+/**
+ * Preview-only rendering (WASM stays at logical panel size).
+ * Device bit depth / color format from JSON apply to generated firmware, not here.
+ */
+/** @type {HTMLCanvasElement | null} 1:1 LVGL framebuffer */
+let frameCanvas = null;
+/** @type {CanvasRenderingContext2D | null} */
+let frameCtx = null;
+/** Integer CSS pixels per logical LVGL pixel (1–4). */
+let previewZoom = 1;
+/** @type {"auto" | 1 | 2 | 3 | 4} */
+let previewZoomMode = "auto";
+/** @type {ResizeObserver | null} */
+let previewLayoutObserver = null;
 /** @type {import("../src/types/embf").EmbfProject | null} */
 let currentProject = null;
 /** @type {string | null} last loaded wasm js uri */
@@ -114,8 +135,42 @@ window.addEventListener("message", event => {
         handleLoad(msg.payload);
     } else if (msg.type === "error") {
         showError(msg.message);
+    } else if (msg.type === "historyState") {
+        updateHistoryButtons(!!msg.canUndo, !!msg.canRedo);
     }
 });
+
+function updateHistoryButtons(canUndo, canRedo) {
+    if (btnUndo) {
+        btnUndo.disabled = !canUndo;
+    }
+    if (btnRedo) {
+        btnRedo.disabled = !canRedo;
+    }
+}
+
+function postUndo() {
+    vscode.postMessage({
+        type: "undo",
+        pageIndex: currentPageIndex,
+        selectedComponentId: selectedComponentId ?? undefined
+    });
+}
+
+function postRedo() {
+    vscode.postMessage({
+        type: "redo",
+        pageIndex: currentPageIndex,
+        selectedComponentId: selectedComponentId ?? undefined
+    });
+}
+
+if (btnUndo) {
+    btnUndo.addEventListener("click", () => postUndo());
+}
+if (btnRedo) {
+    btnRedo.addEventListener("click", () => postRedo());
+}
 
 function applyEmbfThemeFromProject(project) {
     if (!wasmReady || !WasmModule) return;
@@ -137,9 +192,8 @@ async function handleLoad(payload) {
     showLoading(true);
     hideError();
 
-    // Resize canvas
-    canvas.width = displayWidth;
-    canvas.height = displayHeight;
+    updatePreviewZoom();
+    applyPreviewLayout();
 
     // Populate page selector and stay on the current page when possible
     const pages = payload.project.pages;
@@ -192,9 +246,125 @@ async function handleLoad(payload) {
     renderInspector();
 
     showLoading(false);
-    setStatus(`${currentProject.project.name} · LVGL ${currentProject.project.lvglVersion} · ${displayWidth}×${displayHeight}`);
+    const disp = currentProject.display;
+    const depthHint =
+        disp?.bitDepth && disp?.colorFormat
+            ? ` · ${disp.bitDepth}-bit ${disp.colorFormat} (device)`
+            : "";
+    setStatus(
+        `${currentProject.project.name} · LVGL ${currentProject.project.lvglVersion} · ${displayWidth}×${displayHeight} · ${previewZoom * 100}%${depthHint}`
+    );
     startLoop();
 }
+
+// ── Preview display quality (HiDPI + integer zoom; WASM unchanged) ───────────
+
+function getPreviewDpr() {
+    return Math.min(Math.max(1, Math.round(window.devicePixelRatio || 1)), 3);
+}
+
+function computeAutoZoom() {
+    if (!canvasContainer || !displayWidth || !displayHeight) {
+        return 1;
+    }
+    const pad = 24;
+    const cw = canvasContainer.clientWidth - pad;
+    const ch = canvasContainer.clientHeight - pad;
+    if (cw <= 0 || ch <= 0) {
+        return 1;
+    }
+    const zoomX = Math.floor(cw / displayWidth);
+    const zoomY = Math.floor(ch / displayHeight);
+    return Math.max(1, Math.min(zoomX, zoomY, 4));
+}
+
+function updatePreviewZoom() {
+    if (previewZoomMode === "auto") {
+        previewZoom = computeAutoZoom();
+        return;
+    }
+    previewZoom = /** @type {number} */ (previewZoomMode);
+}
+
+function applyPreviewLayout() {
+    if (!canvas || !displayWidth || !displayHeight) {
+        return;
+    }
+
+    if (!frameCanvas) {
+        frameCanvas = document.createElement("canvas");
+        frameCtx = frameCanvas.getContext("2d");
+    }
+    frameCanvas.width = displayWidth;
+    frameCanvas.height = displayHeight;
+
+    const dpr = getPreviewDpr();
+    const cssW = displayWidth * previewZoom;
+    const cssH = displayHeight * previewZoom;
+    const backingW = cssW * dpr;
+    const backingH = cssH * dpr;
+
+    canvas.width = backingW;
+    canvas.height = backingH;
+    canvas.style.width = `${cssW}px`;
+    canvas.style.height = `${cssH}px`;
+
+    if (designOverlay) {
+        designOverlay.width = displayWidth;
+        designOverlay.height = displayHeight;
+        designOverlay.style.width = `${cssW}px`;
+        designOverlay.style.height = `${cssH}px`;
+    }
+
+    if (displayWrapper) {
+        displayWrapper.style.width = `${cssW}px`;
+        displayWrapper.style.height = `${cssH}px`;
+    }
+}
+
+function initPreviewLayoutObserver() {
+    if (!canvasContainer || previewLayoutObserver) {
+        return;
+    }
+    previewLayoutObserver = new ResizeObserver(() => {
+        if (previewZoomMode === "auto") {
+            const next = computeAutoZoom();
+            if (next !== previewZoom) {
+                previewZoom = next;
+                applyPreviewLayout();
+                drawDesignOverlay();
+            }
+        }
+    });
+    previewLayoutObserver.observe(canvasContainer);
+}
+
+if (previewZoomSelect) {
+    previewZoomSelect.addEventListener("change", () => {
+        const raw = previewZoomSelect.value;
+        if (raw === "auto") {
+            previewZoomMode = "auto";
+        } else {
+            const n = parseInt(raw, 10);
+            previewZoomMode = n >= 1 && n <= 4 ? /** @type {1|2|3|4} */ (n) : 1;
+        }
+        updatePreviewZoom();
+        applyPreviewLayout();
+        drawDesignOverlay();
+        if (currentProject) {
+            const disp = currentProject.display;
+            const depthHint =
+                disp?.bitDepth && disp?.colorFormat
+                    ? ` · ${disp.bitDepth}-bit ${disp.colorFormat} (device)`
+                    : "";
+            setStatus(
+                `${currentProject.project.name} · LVGL ${currentProject.project.lvglVersion} · ${displayWidth}×${displayHeight} · ${previewZoom * 100}%${depthHint}`
+            );
+        }
+    });
+}
+
+initPreviewLayoutObserver();
 
 // ── WASM loading ───────────────────────────────────────────────────────────────
 /**
@@ -542,14 +712,32 @@ function loop() {
             bufAddr = WasmModule._getSyncedBuffer();
         }
 
-        if (bufAddr !== 0) {
+        if (bufAddr !== 0 && frameCtx && frameCanvas && ctx) {
             const pixels = new Uint8ClampedArray(
                 WasmModule.HEAPU8.buffer,
                 bufAddr,
                 displayWidth * displayHeight * 4
             );
             const imageData = new ImageData(pixels, displayWidth, displayHeight);
-            ctx?.putImageData(imageData, 0, 0);
+            frameCtx.putImageData(imageData, 0, 0);
+
+            const dpr = getPreviewDpr();
+            const cssW = displayWidth * previewZoom;
+            const cssH = displayHeight * previewZoom;
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.imageSmoothingEnabled = false;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(
+                frameCanvas,
+                0,
+                0,
+                displayWidth,
+                displayHeight,
+                0,
+                0,
+                cssW * dpr,
+                cssH * dpr
+            );
         }
     } catch (e) {
         showError(`Runtime error: ${e.message ?? e}`);
@@ -701,14 +889,7 @@ function setDesignPointerMode() {
 }
 
 function resizeDesignOverlay() {
-    if (!designOverlay || !canvas) {
-        return;
-    }
-    designOverlay.width = displayWidth;
-    designOverlay.height = displayHeight;
-    const rect = canvas.getBoundingClientRect();
-    designOverlay.style.width = `${rect.width}px`;
-    designOverlay.style.height = `${rect.height}px`;
+    applyPreviewLayout();
 }
 
 /**
@@ -1055,6 +1236,27 @@ if (inspectorDelete) {
 }
 
 document.addEventListener("keydown", e => {
+    if (e.ctrlKey || e.metaKey) {
+        const t = e.target;
+        const inInspectorField =
+            t instanceof Element && !!t.closest("#inspector-form");
+        if (!inInspectorField) {
+            if (e.key === "z" || e.key === "Z") {
+                e.preventDefault();
+                if (e.shiftKey) {
+                    postRedo();
+                } else {
+                    postUndo();
+                }
+                return;
+            }
+            if (e.key === "y" || e.key === "Y") {
+                e.preventDefault();
+                postRedo();
+                return;
+            }
+        }
+    }
     if (!designMode) {
         return;
     }

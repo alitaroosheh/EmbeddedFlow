@@ -254,7 +254,7 @@ export function generateLvConf(project: EmbfProject): string {
         ``,
         `#include <stdint.h>`,
         ``,
-        `/* Color depth — matches project display.bitDepth */`,
+        `/* Color depth — matches project display.bitDepth (${colorFormat}) */`,
         `#define LV_COLOR_DEPTH ${colorDepth}`,
         ``,
         `/* Memory */`,

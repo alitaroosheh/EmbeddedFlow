@@ -5,13 +5,15 @@ import { buildWidgetPaletteHtml } from "./embfPaletteIcons";
 import { EmbfParseError, getEffectiveDisplaySize } from "./embfParser";
 import { deleteWidgetFromEmbfFile, moveWidgetInEmbfFile, updateWidgetInEmbfFile } from "./embfComponentEdit";
 import { readEmbfProject } from "./embfProjectWrite";
+import { undoEmbfEdit, redoEmbfEdit, getEmbfHistoryState } from "./embfUndoRedo";
 import { appendWidgetToEmbfFile } from "./embfWidgetInsert";
 import { embeddedFlowLog } from "./outputLog";
 
 // Messages sent from extension host → webview
 export type HostToWebviewMessage =
     | { type: "load"; payload: WebviewLoadPayload }
-    | { type: "error"; message: string };
+    | { type: "error"; message: string }
+    | { type: "historyState"; canUndo: boolean; canRedo: boolean };
 
 // Messages sent from webview → extension host
 export type WebviewToHostMessage =
@@ -20,7 +22,9 @@ export type WebviewToHostMessage =
     | { type: "addWidget"; pageIndex: number; widgetType: string }
     | { type: "moveWidget"; pageIndex: number; componentId: string; x: number; y: number }
     | { type: "updateWidget"; pageIndex: number; componentId: string; patch: Record<string, unknown> }
-    | { type: "deleteWidget"; pageIndex: number; componentId: string };
+    | { type: "deleteWidget"; pageIndex: number; componentId: string }
+    | { type: "undo"; pageIndex: number; selectedComponentId?: string }
+    | { type: "redo"; pageIndex: number; selectedComponentId?: string };
 
 export interface WebviewLoadPayload {
     project: EmbfProject;
@@ -144,6 +148,21 @@ export class EmbfPreviewPanel {
                 this._pendingMessage = null;
                 void this._panel.webview.postMessage(pending);
             }
+            this.sendHistoryState();
+        } else if (msg.type === "undo") {
+            const pageIndex = Number(msg.pageIndex);
+            const selected = typeof msg.selectedComponentId === "string" ? msg.selectedComponentId : undefined;
+            if (!Number.isInteger(pageIndex) || pageIndex < 0) {
+                return;
+            }
+            void this.applyUndo(pageIndex, selected);
+        } else if (msg.type === "redo") {
+            const pageIndex = Number(msg.pageIndex);
+            const selected = typeof msg.selectedComponentId === "string" ? msg.selectedComponentId : undefined;
+            if (!Number.isInteger(pageIndex) || pageIndex < 0) {
+                return;
+            }
+            void this.applyRedo(pageIndex, selected);
         } else if (msg.type === "addWidget") {
             const pageIndex = Number(msg.pageIndex);
             const widgetType = String(msg.widgetType ?? "").trim();
@@ -153,6 +172,7 @@ export class EmbfPreviewPanel {
             void appendWidgetToEmbfFile(this._filePath, pageIndex, widgetType).then(ok => {
                 if (ok) {
                     this.reloadPreview(pageIndex);
+                    this.sendHistoryState();
                 }
             });
         } else if (msg.type === "moveWidget") {
@@ -166,6 +186,7 @@ export class EmbfPreviewPanel {
             void moveWidgetInEmbfFile(this._filePath, pageIndex, componentId, x, y).then(ok => {
                 if (ok) {
                     this.reloadPreview(pageIndex, componentId);
+                    this.sendHistoryState();
                 }
             });
         } else if (msg.type === "updateWidget") {
@@ -184,6 +205,7 @@ export class EmbfPreviewPanel {
             void updateWidgetInEmbfFile(this._filePath, pageIndex, componentId, patch).then(ok => {
                 if (ok) {
                     this.reloadPreview(pageIndex, componentId);
+                    this.sendHistoryState();
                 }
             });
         } else if (msg.type === "deleteWidget") {
@@ -195,8 +217,30 @@ export class EmbfPreviewPanel {
             void deleteWidgetFromEmbfFile(this._filePath, pageIndex, componentId).then(ok => {
                 if (ok) {
                     this.reloadPreview(pageIndex);
+                    this.sendHistoryState();
                 }
             });
+        }
+    }
+
+    private sendHistoryState(): void {
+        const { canUndo, canRedo } = getEmbfHistoryState(this._filePath);
+        this.postToWebview({ type: "historyState", canUndo, canRedo });
+    }
+
+    private async applyUndo(pageIndex: number, selectedComponentId?: string): Promise<void> {
+        const ok = await undoEmbfEdit(this._filePath);
+        if (ok) {
+            this.reloadPreview(pageIndex, selectedComponentId);
+            this.sendHistoryState();
+        }
+    }
+
+    private async applyRedo(pageIndex: number, selectedComponentId?: string): Promise<void> {
+        const ok = await redoEmbfEdit(this._filePath);
+        if (ok) {
+            this.reloadPreview(pageIndex, selectedComponentId);
+            this.sendHistoryState();
         }
     }
 
@@ -269,6 +313,23 @@ export class EmbfPreviewPanel {
             border-radius: 3px;
         }
         #toolbar label { font-size: 12px; color: #999; }
+        #toolbar .tb-btn {
+            background: #3c3c3c;
+            color: #ccc;
+            border: 1px solid #555;
+            padding: 2px 10px;
+            font-size: 12px;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        #toolbar .tb-btn:hover:not(:disabled) {
+            background: #4a4a4a;
+            color: #fff;
+        }
+        #toolbar .tb-btn:disabled {
+            opacity: 0.35;
+            cursor: default;
+        }
         #status {
             margin-left: auto;
             font-size: 11px;
@@ -437,18 +498,17 @@ export class EmbfPreviewPanel {
         }
         #display-wrapper {
             position: relative;
+            flex-shrink: 0;
             box-shadow: 0 0 0 1px #555, 0 4px 20px rgba(0,0,0,0.5);
         }
         #lvgl-canvas {
             display: block;
-            image-rendering: pixelated;
         }
         #design-overlay {
             position: absolute;
             top: 0;
             left: 0;
             display: block;
-            image-rendering: pixelated;
             cursor: default;
         }
         #toolbar input[type="checkbox"] {
@@ -492,10 +552,20 @@ export class EmbfPreviewPanel {
     <div id="toolbar">
         <label>Page:</label>
         <select id="page-select"></select>
+        <button type="button" class="tb-btn" id="btn-undo" disabled title="Undo (Ctrl+Z)">Undo</button>
+        <button type="button" class="tb-btn" id="btn-redo" disabled title="Redo (Ctrl+Y)">Redo</button>
         <label title="Select and drag widgets; updates .embf position">
             <input type="checkbox" id="design-mode" checked />
             Design
         </label>
+        <label for="preview-zoom">Zoom:</label>
+        <select id="preview-zoom" title="Preview scale only — device resolution stays in .embf">
+            <option value="auto" selected>Auto</option>
+            <option value="1">100%</option>
+            <option value="2">200%</option>
+            <option value="3">300%</option>
+            <option value="4">400%</option>
+        </select>
         <span id="status">Waiting for project…</span>
     </div>
     <div id="main">

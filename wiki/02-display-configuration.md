@@ -8,6 +8,7 @@
 - [x] `display.orientation` — `portrait`, `landscape`, `portrait_flipped`, `landscape_flipped`
 - [x] `display.direction` — `ltr`, `rtl`
 - [x] `display.dpi` — dots per inch (integer)
+- [x] `display.round` — optional boolean; when true the preview clips to a circular panel (§2.6)
 - [x] Effective display size computed automatically when orientation causes a width/height swap
 
 ## 2.2 Hardware Presets
@@ -44,3 +45,9 @@
 - [ ] LVGL software rotation enabled via `lv_display_set_rotation()` (LVGL 9+)
 - [ ] Preview panel physically rotates the canvas to match orientation
 - [ ] Code generator emits the correct rotation call
+
+## 2.6 Round display (circular panels)
+
+- [x] `display.round` — optional boolean; when **`true`**, EmbeddedFlow preview clips the framebuffer to an **inscribed circle** centered on the panel with diameter **`min(display.width, display.height)`** (square panels → full circle). Hardware drivers for round LCDs remain outside `.embf` generation.
+- [ ] Code generator emits comments or LVGL helpers for round masks / full-screen objects on targets that need them
+- [ ] Preset list (§2.2) auto-sets `round: true` for known round modules (e.g. 240×240 GC9A01)

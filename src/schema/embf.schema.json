@@ -42,7 +42,11 @@
           "enum": ["portrait", "landscape", "portrait_flipped", "landscape_flipped"]
         },
         "direction": { "type": "string", "enum": ["ltr", "rtl"] },
-        "dpi": { "type": "integer", "minimum": 1 }
+        "dpi": { "type": "integer", "minimum": 1 },
+        "round": {
+          "type": "boolean",
+          "description": "When true, EmbeddedFlow preview clips the panel to a circle (diameter = min(width, height)). Firmware must still drive a round display in native code."
+        }
       }
     },
     "theme": {

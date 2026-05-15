@@ -7,7 +7,7 @@
  *
  * Communication protocol (host → webview):
  *   { type: "load",  payload: WebviewLoadPayload }
- *       — includes project, layout, WASM URIs;
+ *       — includes project (see `EmbfProject`; `display.round` enables circular preview clip), layout, WASM URIs;
  *       — optional suppressLoadingSpinner (soft JSON-only refresh),
  *       — optional selectedComponentIds: string[] (or legacy selectedComponentId) to restore overlay selection after reload
  *   { type: "error", message: string }
@@ -74,6 +74,8 @@ let wasmReady = false;
 let displayWidth = 0;
 /** @type {number} */
 let displayHeight = 0;
+/** Circular panel clip when `project.display.round` is true — preview `#display-wrapper` only. */
+let displayRound = false;
 
 /**
  * Preview-only rendering (WASM stays at logical panel size).
@@ -214,6 +216,7 @@ function applyEmbfThemeFromProject(project) {
 // ── Load handler ───────────────────────────────────────────────────────────────
 async function handleLoad(payload) {
     currentProject = payload.project;
+    displayRound = !!(currentProject?.display && currentProject.display.round === true);
     previewDarkOverride = null;
     displayWidth = payload.displayWidth;
     displayHeight = payload.displayHeight;
@@ -298,8 +301,9 @@ async function handleLoad(payload) {
         disp?.bitDepth && disp?.colorFormat
             ? ` · ${disp.bitDepth}-bit ${disp.colorFormat} (device)`
             : "";
+    const roundHint = disp?.round ? " · round clip" : "";
     setStatus(
-        `${currentProject.project.name} · LVGL ${currentProject.project.lvglVersion} · ${displayWidth}×${displayHeight} · ${previewZoom * 100}%${depthHint}`
+        `${currentProject.project.name} · LVGL ${currentProject.project.lvglVersion} · ${displayWidth}×${displayHeight} · ${previewZoom * 100}%${depthHint}${roundHint}`
     );
     startLoop();
 }
@@ -366,6 +370,15 @@ function applyPreviewLayout() {
     if (displayWrapper) {
         displayWrapper.style.width = `${cssW}px`;
         displayWrapper.style.height = `${cssH}px`;
+        if (displayRound && cssW > 0 && cssH > 0) {
+            const r = Math.min(cssW, cssH) / 2;
+            const cp = `circle(${r}px at ${cssW / 2}px ${cssH / 2}px)`;
+            displayWrapper.style.clipPath = cp;
+            displayWrapper.style.webkitClipPath = cp;
+        } else {
+            displayWrapper.style.clipPath = "";
+            displayWrapper.style.webkitClipPath = "";
+        }
     }
 }
 
@@ -404,8 +417,9 @@ if (previewZoomSelect) {
                 disp?.bitDepth && disp?.colorFormat
                     ? ` · ${disp.bitDepth}-bit ${disp.colorFormat} (device)`
                     : "";
+            const roundHint = disp?.round ? " · round clip" : "";
             setStatus(
-                `${currentProject.project.name} · LVGL ${currentProject.project.lvglVersion} · ${displayWidth}×${displayHeight} · ${previewZoom * 100}%${depthHint}`
+                `${currentProject.project.name} · LVGL ${currentProject.project.lvglVersion} · ${displayWidth}×${displayHeight} · ${previewZoom * 100}%${depthHint}${roundHint}`
             );
         }
     });

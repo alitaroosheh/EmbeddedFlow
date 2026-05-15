@@ -6,7 +6,8 @@
 - [x] Emscripten WASM module loaded inside the webview
 - [x] `requestAnimationFrame` loop ticks LVGL and reads RGBA buffer
 - [x] `putImageData` blits RGBA pixels to HTML `<canvas>`
-- [x] Display width and height read from `.embf` `display` section
+- [x] Display width and height read from `.embf` `display` section (effective size respects orientation — see [`embfParser.getEffectiveDisplaySize`](../src/embfParser.ts))
+- [x] When `display.round` is true, preview clips `#display-wrapper` to an inscribed circle (diameter = min(width, height) in CSS pixels); see §13.13
 - [x] Loading overlay shown while WASM initialises
 - [x] Error overlay shown on parse/runtime errors
 - [x] Preview updates live on every `.embf` file save
@@ -121,3 +122,9 @@ Messages from webview handled by [`previewPanel.ts`](../src/previewPanel.ts) (de
 | `bulkDeleteWidgets` | Remove many components |
 
 Load payload extras: **`selectedComponentIds?: string[]`**, **`selectedComponentId?`** (deprecated single).
+
+## 13.13 Round display preview
+
+- [x] `display.round` in project JSON toggles circular **visual** clipping of the preview stack (`#lvgl-canvas` + `#design-overlay` inside `#display-wrapper`) via CSS `clip-path` / `-webkit-clip-path`, recomputed whenever zoom or logical size changes.
+- [ ] Optional export / screenshot honours the same clip (today: full rectangular buffer)
+- [x] LVGL WASM still renders a full width×height framebuffer; round hardware mapping remains a firmware concern.

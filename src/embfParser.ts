@@ -129,6 +129,9 @@ function validateEmbf(data: unknown): EmbfProject {
             throw new EmbfParseError("display.dpi must be a positive number when set");
         }
     }
+    if (dispObj["round"] !== undefined && typeof dispObj["round"] !== "boolean") {
+        throw new EmbfParseError("display.round must be a boolean when set");
+    }
 
     const theme = obj["theme"];
     if (theme !== undefined) {

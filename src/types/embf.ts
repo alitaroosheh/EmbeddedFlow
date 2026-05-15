@@ -27,6 +27,11 @@ export interface DisplayConfig {
     orientation: Orientation;
     direction: TextDirection;
     dpi?: number;
+    /**
+     * Circular panel (preview only): clips the framebuffer to an inscribed circle
+     * (diameter = min(width, height)), centered — matches round LCDs (e.g. GC9A01).
+     */
+    round?: boolean;
 }
 
 export interface ThemeConfig {

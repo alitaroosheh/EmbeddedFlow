@@ -1143,7 +1143,15 @@ function inspectorAppearancesSection(comp) {
 
 /**
  * Keeps caret/cursor alive when redraw replaces innerHTML (e.g. after preview reload).
- * @typedef {{ tag: string, name: string, inputType: string | null, selStart: number | null, selEnd: number | null }} InspectorFocusSnap
+ * @typedef {{
+ *   tag: string,
+ *   name: string,
+ *   inputType: string | null,
+ *   selStart: number | null,
+ *   selEnd: number | null,
+ *   scrollTop: number | null,
+ *   scrollLeft: number | null
+ * }} InspectorFocusSnap
  */
 
 /** @returns {InspectorFocusSnap | null} */
@@ -1179,7 +1187,15 @@ function snapshotInspectorFocus() {
             selStart = ae.selectionStart;
             selEnd = ae.selectionEnd;
         }
-        return { tag, name, inputType, selStart, selEnd };
+        /** @type {number | null} */
+        let scrollTop = null;
+        /** @type {number | null} */
+        let scrollLeft = null;
+        if (ae instanceof HTMLTextAreaElement) {
+            scrollTop = ae.scrollTop;
+            scrollLeft = ae.scrollLeft;
+        }
+        return { tag, name, inputType, selStart, selEnd, scrollTop, scrollLeft };
     }
     return null;
 }
@@ -1223,6 +1239,15 @@ function restoreInspectorFocus(snap) {
         } catch {
             /* e.g. some number/date inputs disallow selection APIs */
         }
+    }
+
+    if (item instanceof HTMLTextAreaElement && snap.scrollTop != null && snap.scrollLeft != null) {
+        const top = snap.scrollTop;
+        const left = snap.scrollLeft;
+        queueMicrotask(() => {
+            item.scrollTop = top;
+            item.scrollLeft = left;
+        });
     }
 }
 
@@ -1372,8 +1397,8 @@ function renderInspector() {
     inspectorSyncing = false;
 
     if (inspectorFocusSnap) {
-        queueMicrotask(() => {
-            restoreInspectorFocus(inspectorFocusSnap);
+        requestAnimationFrame(() => {
+            queueMicrotask(() => restoreInspectorFocus(inspectorFocusSnap));
         });
     }
 }

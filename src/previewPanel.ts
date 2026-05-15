@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as path from "path";
 import { EmbfProject } from "./types/embf";
-import { WIDGET_PALETTE_ORDER } from "./embfPalette";
+import { buildWidgetPaletteHtml } from "./embfPaletteIcons";
 import { EmbfParseError, getEffectiveDisplaySize } from "./embfParser";
 import { moveWidgetInEmbfFile } from "./embfComponentEdit";
 import { readEmbfProject } from "./embfProjectWrite";
@@ -235,19 +235,57 @@ export class EmbfPreviewPanel {
             border-radius: 3px;
         }
         #toolbar label { font-size: 12px; color: #999; }
-        #widget-add-select {
-            background: #3c3c3c;
-            color: #ccc;
-            border: 1px solid #555;
-            padding: 2px 6px;
-            font-size: 12px;
-            border-radius: 3px;
-            max-width: 160px;
-        }
         #status {
             margin-left: auto;
             font-size: 11px;
             color: #888;
+        }
+        #main {
+            flex: 1;
+            display: flex;
+            min-height: 0;
+            overflow: hidden;
+        }
+        #widget-palette {
+            flex-shrink: 0;
+            width: 52px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            padding: 8px 6px;
+            background: #252526;
+            border-right: 1px solid #3c3c3c;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+        #widget-palette .palette-item {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 36px;
+            height: 36px;
+            padding: 0;
+            border: 1px solid transparent;
+            border-radius: 6px;
+            background: transparent;
+            color: #bbb;
+            cursor: pointer;
+        }
+        #widget-palette .palette-item:hover {
+            background: #3c3c3c;
+            color: #fff;
+            border-color: #555;
+        }
+        #widget-palette .palette-item:active {
+            background: #094771;
+            border-color: #007acc;
+            color: #fff;
+        }
+        #widget-palette .palette-item svg {
+            width: 20px;
+            height: 20px;
+            pointer-events: none;
         }
         #canvas-container {
             flex: 1;
@@ -256,6 +294,7 @@ export class EmbfPreviewPanel {
             justify-content: center;
             overflow: auto;
             background: #2d2d2d;
+            min-width: 0;
         }
         #display-wrapper {
             position: relative;
@@ -314,18 +353,17 @@ export class EmbfPreviewPanel {
     <div id="toolbar">
         <label>Page:</label>
         <select id="page-select"></select>
-        <label>Add widget:</label>
-        <select id="widget-add-select" title="Insert into current page (.embf is updated)">
-            <option value="">— type —</option>
-            ${WIDGET_PALETTE_ORDER.map(w => `<option value="${w}">${w}</option>`).join("")}
-        </select>
         <label title="Select and drag widgets; updates .embf position">
             <input type="checkbox" id="design-mode" checked />
             Design
         </label>
         <span id="status">Waiting for project…</span>
     </div>
-    <div id="canvas-container">
+    <div id="main">
+        <aside id="widget-palette" aria-label="Widgets">
+            ${buildWidgetPaletteHtml()}
+        </aside>
+        <div id="canvas-container">
         <div id="display-wrapper">
             <canvas id="lvgl-canvas"></canvas>
             <canvas id="design-overlay"></canvas>
@@ -334,6 +372,7 @@ export class EmbfPreviewPanel {
                 <div class="spinner"></div>
                 <span>Loading WASM…</span>
             </div>
+        </div>
         </div>
     </div>
     <script nonce="${nonce}" src="${webviewJsUri}"></script>

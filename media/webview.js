@@ -32,7 +32,7 @@ const designModeCheck = /** @type {HTMLInputElement | null} */ (document.getElem
 const errorOverlay = document.getElementById("error-overlay");
 const loadingOverlay = document.getElementById("loading-overlay");
 const pageSelect = document.getElementById("page-select");
-const widgetAddSelect = document.getElementById("widget-add-select");
+const widgetPalette = document.getElementById("widget-palette");
 const statusEl = document.getElementById("status");
 
 // ── Runtime state ─────────────────────────────────────────────────────────────
@@ -971,15 +971,21 @@ if (pageSelect) {
     });
 }
 
-if (widgetAddSelect) {
-    widgetAddSelect.addEventListener("change", () => {
-        const widgetType = widgetAddSelect.value;
-        if (!widgetType || !currentProject) {
+if (widgetPalette) {
+    widgetPalette.addEventListener("click", e => {
+        const t = e.target;
+        if (!(t instanceof Element)) {
             return;
         }
-        const pageIndex = currentPageIndex;
-        vscode.postMessage({ type: "addWidget", pageIndex, widgetType });
-        widgetAddSelect.value = "";
+        const btn = t.closest("[data-widget]");
+        if (!btn || !currentProject) {
+            return;
+        }
+        const widgetType = btn.getAttribute("data-widget");
+        if (!widgetType) {
+            return;
+        }
+        vscode.postMessage({ type: "addWidget", pageIndex: currentPageIndex, widgetType });
     });
 }
 

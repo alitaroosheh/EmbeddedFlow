@@ -269,6 +269,8 @@ function validateComponentDeep(comp: unknown, path: string): void {
         throw new EmbfParseError(`${path}.hidden must be a boolean when set`);
     }
 
+    validateOptionalStyles(o, path);
+
     const t = o["type"] as string;
     switch (t) {
         case "label": {
@@ -422,6 +424,128 @@ function validateComponentDeep(comp: unknown, path: string): void {
         }
         default:
             break;
+    }
+}
+
+const ALIGN_VALUES = new Set<string>(["left", "center", "right"]);
+
+function validateOptionalStyles(o: Record<string, unknown>, path: string): void {
+    if (o["styles"] === undefined) {
+        return;
+    }
+    const raw = o["styles"];
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+        throw new EmbfParseError(`${path}.styles must be an object`);
+    }
+    const st = raw as Record<string, unknown>;
+
+    function needStr(prop: string, v: unknown): string {
+        if (typeof v !== "string") {
+            throw new EmbfParseError(`${path}.styles.${prop} must be a string`);
+        }
+        return v;
+    }
+
+    function needFinNum(prop: string, v: unknown): number {
+        if (!isFiniteNumber(v)) {
+            throw new EmbfParseError(`${path}.styles.${prop} must be a finite number`);
+        }
+        return v as number;
+    }
+
+    function needUint(prop: string, v: unknown): number {
+        const n = needFinNum(prop, v);
+        if (n < 0 || Math.floor(n) !== n) {
+            throw new EmbfParseError(`${path}.styles.${prop} must be a non-negative integer`);
+        }
+        return n;
+    }
+
+    const allowedKeys = new Set([
+        "bgColor",
+        "indicatorColor",
+        "bgOpacity",
+        "textColor",
+        "borderColor",
+        "borderWidth",
+        "borderRadius",
+        "padding",
+        "fontSize",
+        "fontFamily",
+        "align"
+    ]);
+    for (const key of Object.keys(st)) {
+        if (!allowedKeys.has(key)) {
+            throw new EmbfParseError(
+                `${path}.styles has unknown property "${key}" (allowed: ${[...allowedKeys].join(", ")})`
+            );
+        }
+    }
+
+    if (st["bgColor"] !== undefined) {
+        void needStr("bgColor", st["bgColor"]);
+    }
+    if (st["indicatorColor"] !== undefined) {
+        void needStr("indicatorColor", st["indicatorColor"]);
+    }
+    if (st["bgOpacity"] !== undefined) {
+        const a = needFinNum("bgOpacity", st["bgOpacity"]);
+        if (a < 0 || a > 255) {
+            throw new EmbfParseError(`${path}.styles.bgOpacity must be between 0 and 255`);
+        }
+    }
+    if (st["textColor"] !== undefined) {
+        void needStr("textColor", st["textColor"]);
+    }
+    if (st["borderColor"] !== undefined) {
+        void needStr("borderColor", st["borderColor"]);
+    }
+    if (st["borderWidth"] !== undefined) {
+        void needUint("borderWidth", st["borderWidth"]);
+    }
+    if (st["borderRadius"] !== undefined) {
+        void needUint("borderRadius", st["borderRadius"]);
+    }
+    if (st["padding"] !== undefined) {
+        const pd = st["padding"];
+        if (typeof pd === "number") {
+            if (!Number.isInteger(pd) || pd < 0) {
+                throw new EmbfParseError(`${path}.styles.padding integer must be >= 0`);
+            }
+        } else if (Array.isArray(pd)) {
+            const arr = pd as unknown[];
+            if (arr.length < 2 || arr.length > 4) {
+                throw new EmbfParseError(
+                    `${path}.styles.padding array must have 2, 3, or 4 elements`
+                );
+            }
+            for (let i = 0; i < arr.length; i++) {
+                if (!Number.isInteger(arr[i]) || (arr[i] as number) < 0) {
+                    throw new EmbfParseError(
+                        `${path}.styles.padding[${i}] must be a non-negative integer`
+                    );
+                }
+            }
+        } else {
+            throw new EmbfParseError(
+                `${path}.styles.padding must be a non-negative integer or integer array`
+            );
+        }
+    }
+    if (st["fontSize"] !== undefined) {
+        const fs = needUint("fontSize", st["fontSize"]);
+        if (fs < 4) {
+            throw new EmbfParseError(`${path}.styles.fontSize must be >= 4`);
+        }
+    }
+    if (st["fontFamily"] !== undefined) {
+        void needStr("fontFamily", st["fontFamily"]);
+    }
+    if (st["align"] !== undefined) {
+        const al = st["align"];
+        if (typeof al !== "string" || !ALIGN_VALUES.has(al)) {
+            throw new EmbfParseError(`${path}.styles.align must be left, center, or right`);
+        }
     }
 }
 

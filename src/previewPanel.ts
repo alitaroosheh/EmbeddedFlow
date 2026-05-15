@@ -427,6 +427,22 @@ export class EmbfPreviewPanel {
         #inspector-form .field {
             margin-bottom: 10px;
         }
+        #inspector-form .inspector-group-title {
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #666;
+            margin: 14px 0 6px;
+            border-top: 1px solid #3c3c3c;
+            padding-top: 10px;
+        }
+        #inspector-form .inspector-group-title:first-child,
+        #inspector-readonly + .inspector-group-title {
+            margin-top: 0;
+            border-top: none;
+            padding-top: 0;
+        }
         #inspector-form label {
             display: block;
             font-size: 11px;
@@ -462,6 +478,60 @@ export class EmbfPreviewPanel {
         }
         #inspector-form .check-row input {
             width: auto;
+        }
+        #inspector-form .inspector-color-row {
+            position: relative;
+            display: flex;
+            align-items: stretch;
+            gap: 6px;
+        }
+        #inspector-form .inspector-color-row input[type="text"] {
+            flex: 1;
+            min-width: 0;
+            width: auto;
+        }
+        #inspector-form .inspector-color-swatch-wrap {
+            position: relative;
+            flex-shrink: 0;
+            width: 30px;
+            height: 26px;
+            align-self: stretch;
+            min-height: 26px;
+        }
+        #inspector-form .inspector-color-face {
+            position: absolute;
+            inset: 0;
+            border-radius: 3px;
+            border: 1px solid #555;
+            box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+            pointer-events: none;
+        }
+        #inspector-form .inspector-color-swatch-wrap:hover .inspector-color-face {
+            border-color: #007acc;
+        }
+        #inspector-form .inspector-color-picker-native {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            min-width: 0;
+            padding: 0;
+            margin: 0;
+            border: none;
+            opacity: 0.01;
+            cursor: pointer;
+            box-sizing: border-box;
+        }
+        #inspector-form .inspector-color-picker-native::-webkit-color-swatch-wrapper {
+            padding: 0;
+        }
+        #inspector-form .inspector-color-picker-native::-webkit-color-swatch {
+            border: none;
+            border-radius: 2px;
+        }
+        #inspector-form .inspector-color-picker-native::-moz-color-swatch {
+            border: none;
+            border-radius: 2px;
         }
         #inspector-delete {
             flex-shrink: 0;

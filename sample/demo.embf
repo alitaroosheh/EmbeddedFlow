@@ -35,8 +35,10 @@
           "text": "EmbeddedFlow Demo",
           "styles": {
             "fontSize": 10,
-            "textColor": "#FF78d4"
-          }
+            "textColor": "#1220e2"
+          },
+          "hidden": false,
+          "events": []
         },
         {
           "id": "btn_ok",
@@ -56,7 +58,14 @@
                 }
               ]
             }
-          ]
+          ],
+          "hidden": false,
+          "styles": {
+            "textColor": "#e8eeee",
+            "bgColor": "#f20752",
+            "indicatorColor": "#262626",
+            "borderColor": "#715b5d"
+          }
         },
         {
           "id": "sw_dark",
@@ -87,12 +96,14 @@
           "height": 16,
           "min": 0,
           "max": 100,
-          "value": 50,
+          "value": 93,
           "styles": {
-            "bgColor": "#D4D4D4",
-            "indicatorColor": "#FE7D32"
+            "bgColor": "#f4fbfb",
+            "indicatorColor": "#ea5906"
           },
-          "hidden": false
+          "hidden": false,
+          "events": [],
+          "mode": "range"
         },
         {
           "id": "lbl_progress",
@@ -139,7 +150,15 @@
           "width": 50,
           "height": 50,
           "speed": 1000,
-          "arcLength": 60
+          "arcLength": 60,
+          "hidden": false,
+          "styles": {
+            "bgColor": "#715b65",
+            "indicatorColor": "#715b64",
+            "textColor": "#715b63",
+            "borderColor": "#715b68"
+          },
+          "events": []
         },
         {
           "id": "lbl_footer",
@@ -150,9 +169,12 @@
           "height": 20,
           "text": "EmbeddedFlow - LVGL 9.5.0 preview",
           "styles": {
-            "fontSize": 11,
-            "textColor": "#888888"
-          }
+            "fontSize": 19,
+            "textColor": "#88888",
+            "align": "center"
+          },
+          "hidden": false,
+          "events": []
         },
         {
           "id": "sw_1",
@@ -310,8 +332,8 @@
         {
           "id": "sw_wifi",
           "type": "switch",
-          "x": 10,
-          "y": 170,
+          "x": 284,
+          "y": 25,
           "width": 60,
           "height": 28,
           "checked": true
@@ -350,8 +372,8 @@
         },
         {
           "id": "ta_1",
-          "x": 12,
-          "y": 100,
+          "x": 254,
+          "y": 81,
           "width": 160,
           "height": 72,
           "type": "textarea",

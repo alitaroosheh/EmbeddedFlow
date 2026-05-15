@@ -1016,12 +1016,44 @@ function esc(s) {
         .replace(/"/g, "&quot;");
 }
 
+/** Parses #rgb / #rrggbb / #rrggbbaa into #rrggbb for &lt;input type="color"&gt;; null if unrecognized. */
+function tryParseCssHex(text) {
+    const t = String(text ?? "").trim();
+    if (!t) return null;
+    const hex = t.startsWith("#") ? t.slice(1) : t;
+    if (/^[0-9a-fA-F]{8}$/.test(hex)) {
+        return `#${hex.slice(0, 6).toLowerCase()}`;
+    }
+    if (/^[0-9a-fA-F]{6}$/.test(hex)) {
+        return `#${hex.toLowerCase()}`;
+    }
+    if (/^[0-9a-fA-F]{3}$/.test(hex)) {
+        const [a, b, c] = hex.split("");
+        return `#${a}${a}${b}${b}${c}${c}`.toLowerCase();
+    }
+    return null;
+}
+
+const INSPECTOR_COLOR_PICKER_FALLBACK = "#5a6570";
+
 function fieldNum(name, label, value) {
     return `<div class="field"><label>${esc(label)}</label><input type="number" name="${esc(name)}" value="${Number(value)}" step="1" /></div>`;
 }
 
 function fieldText(name, label, value) {
     return `<div class="field"><label>${esc(label)}</label><input type="text" name="${esc(name)}" value="${esc(value ?? "")}" /></div>`;
+}
+
+function fieldColor(name, label, value) {
+    const pickerVal = tryParseCssHex(value) ?? INSPECTOR_COLOR_PICKER_FALLBACK;
+    const safeBg = esc(pickerVal);
+    return `<div class="field"><label>${esc(label)}</label><div class="inspector-color-row">
+<input type="text" name="${esc(name)}" value="${esc(value ?? "")}" autocomplete="off" spellcheck="false" placeholder="#hex" />
+<div class="inspector-color-swatch-wrap" title="Pick color">
+<span class="inspector-color-face" style="background-color:${safeBg}" aria-hidden="true"></span>
+<input type="color" class="inspector-color-picker-native" value="${safeBg}" title="Pick color" aria-label="Pick ${esc(label)}" />
+</div>
+</div></div>`;
 }
 
 function fieldCheck(name, label, checked) {
@@ -1031,6 +1063,82 @@ function fieldCheck(name, label, checked) {
 
 function fieldTextarea(name, label, value) {
     return `<div class="field"><label>${esc(label)}</label><textarea name="${esc(name)}">${esc(value ?? "")}</textarea></div>`;
+}
+
+function fieldNumFloat(name, label, value, step = "any") {
+    const v = value !== undefined && value !== null ? Number(value) : 0;
+    const shown = Number.isFinite(v) ? String(v) : "0";
+    return `<div class="field"><label>${esc(label)}</label><input type="number" name="${esc(name)}" value="${shown}" step="${step}" /></div>`;
+}
+
+function fieldFloat(name, label, value) {
+    return fieldNumFloat(name, label, value, "any");
+}
+
+function stylePaddingToLabel(padding) {
+    if (padding === undefined || padding === null) return "";
+    if (typeof padding === "number") return String(padding);
+    if (Array.isArray(padding)) return padding.join(", ");
+    return "";
+}
+
+/** @param {{value: string, label: string}[]} options */
+function fieldSelect(name, label, options, current) {
+    const cur = current ?? "";
+    const opts = options
+        .map(
+            o =>
+                `<option value="${esc(o.value)}"${o.value === cur ? " selected" : ""}>${esc(o.label)}</option>`
+        )
+        .join("");
+    return `<div class="field"><label>${esc(label)}</label><select name="${esc(name)}">${opts}</select></div>`;
+}
+
+function fieldNumOpt(name, label, value) {
+    let shown = "";
+    if (value !== undefined && value !== null && value !== "") {
+        const n = Math.round(Number(value));
+        shown = Number.isFinite(n) ? String(n) : "";
+    }
+    return `<div class="field"><label>${esc(label)}</label><input type="number" name="${esc(name)}" value="${esc(shown)}" step="1" /></div>`;
+}
+
+function fieldNumFloatOpt(name, label, value, step = "any") {
+    let shown = "";
+    if (value !== undefined && value !== null && value !== "") {
+        const n = Number(value);
+        shown = Number.isFinite(n) ? String(n) : "";
+    }
+    return `<div class="field"><label>${esc(label)}</label><input type="number" name="${esc(name)}" value="${esc(shown)}" step="${step}" /></div>`;
+}
+
+function inspectorAppearancesSection(comp) {
+    const st = comp.styles ?? {};
+    const align = typeof st.align === "string" ? st.align : "";
+    const padHint = "(number or top,left or top,right,bottom,left)";
+    let html =
+        `<div class="inspector-group-title">Appearance</div>` +
+        fieldColor("style_bgColor", "Bg color (#hex)", st.bgColor ?? "") +
+        fieldColor("style_indicatorColor", "Indicator color", st.indicatorColor ?? "") +
+        fieldNumFloatOpt("style_bgOpacity", "Bg opacity (0–255)", st.bgOpacity, "1") +
+        fieldColor("style_textColor", "Text color", st.textColor ?? "") +
+        fieldColor("style_borderColor", "Border color", st.borderColor ?? "") +
+        `<div class="row2">${fieldNumOpt("style_borderWidth", "Border width", st.borderWidth)}${fieldNumOpt("style_borderRadius", "Corner radius", st.borderRadius)}</div>` +
+        `<div class="field"><label>Padding ${esc(padHint)}</label>` +
+        `<input type="text" name="style_padding" value="${esc(stylePaddingToLabel(st.padding))}" placeholder="e.g. 8 or 8, 16"></div>` +
+        fieldNumOpt("style_fontSize", "Font size (px)", st.fontSize) +
+        fieldText("style_fontFamily", "Font family", st.fontFamily ?? "") +
+        fieldSelect("style_align", "Text align", [
+            { value: "", label: "(default)" },
+            { value: "left", label: "Left" },
+            { value: "center", label: "Center" },
+            { value: "right", label: "Right" }
+        ], align);
+
+    html += `<div class="inspector-group-title">Events (JSON)</div>`;
+    const evPretty = JSON.stringify(comp.events ?? [], null, 2);
+    html += `<div class="field"><label title='JSON array: [{ "trigger", "actions" }]'>Handlers</label><textarea id="inspector-events-json" name="eventsJson" rows="5" spellcheck="false">${esc(evPretty)}</textarea></div>`;
+    return html;
 }
 
 function renderInspector() {
@@ -1063,64 +1171,229 @@ function renderInspector() {
 
     inspectorSyncing = true;
     let html = `<div id="inspector-readonly"><strong>${esc(comp.id)}</strong> · ${esc(comp.type)}</div>`;
+    html += `<div class="inspector-group-title">Layout</div>`;
     html += `<div class="row2">${fieldNum("x", "X", comp.x)}${fieldNum("y", "Y", comp.y)}</div>`;
     html += `<div class="row2">${fieldNum("width", "Width", comp.width)}${fieldNum("height", "Height", comp.height)}</div>`;
     html += fieldCheck("hidden", "Hidden", !!comp.hidden);
 
+    html += `<div class="inspector-group-title">${esc(comp.type)}</div>`;
+
     switch (comp.type) {
         case "label":
             html += fieldText("text", "Text", comp.text);
+            html += fieldSelect("longMode", "Long mode", [
+                { value: "", label: "(default)" },
+                { value: "wrap", label: "wrap" },
+                { value: "dot", label: "dot" },
+                { value: "scroll", label: "scroll" },
+                { value: "clip", label: "clip" }
+            ], comp.longMode ?? "");
             break;
         case "button":
-            html += fieldText("label", "Label", comp.label);
+            html += fieldText("label", "Label text", comp.label);
             break;
         case "image":
-            html += fieldText("src", "Source", comp.src);
+            html += fieldText("src", "Source / path", comp.src);
             break;
         case "slider":
+            html += `<div class="row2">${fieldFloat("min", "Min", comp.min)}${fieldFloat("max", "Max", comp.max)}</div>`;
+            html += fieldFloat("value", "Value", comp.value);
+            break;
         case "bar":
+            html += `<div class="row2">${fieldFloat("min", "Min", comp.min)}${fieldFloat("max", "Max", comp.max)}</div>`;
+            html += fieldFloat("value", "Value", comp.value);
+            html += fieldSelect("bar_mode", "Mode", [
+                { value: "", label: "(default)" },
+                { value: "normal", label: "normal" },
+                { value: "symmetrical", label: "symmetrical" },
+                { value: "range", label: "range" }
+            ], comp.mode ?? "");
+            break;
         case "arc":
-            html += fieldNum("min", "Min", comp.min);
-            html += fieldNum("max", "Max", comp.max);
-            html += fieldNum("value", "Value", comp.value);
+            html += `<div class="row2">${fieldFloat("min", "Min", comp.min)}${fieldFloat("max", "Max", comp.max)}</div>`;
+            html += fieldFloat("value", "Value", comp.value);
+            html += `<div class="row2">${fieldFloat("startAngle", "Start °", comp.startAngle)}${fieldFloat("endAngle", "End °", comp.endAngle)}</div>`;
+            html += fieldSelect("arc_mode", "Mode", [
+                { value: "", label: "(default)" },
+                { value: "normal", label: "normal" },
+                { value: "reverse", label: "reverse" },
+                { value: "symmetrical", label: "symmetrical" }
+            ], comp.mode ?? "");
             break;
         case "switch":
             html += fieldCheck("checked", "Checked", !!comp.checked);
             break;
         case "checkbox":
-            html += fieldText("text", "Text", comp.text);
+            html += fieldText("text", "Label text", comp.text);
             html += fieldCheck("checked", "Checked", !!comp.checked);
             break;
         case "dropdown":
-        case "roller":
-            html += fieldTextarea(
-                "options",
-                "Options (one per line)",
-                (comp.options ?? []).join("\n")
-            );
+            html += fieldTextarea("options", "Options (one per line)", (comp.options ?? []).join("\n"));
             html += fieldNum("selectedIndex", "Selected index", comp.selectedIndex ?? 0);
             break;
+        case "roller":
+            html += fieldTextarea("options", "Options (one per line)", (comp.options ?? []).join("\n"));
+            html += fieldNum("selectedIndex", "Selected index", comp.selectedIndex ?? 0);
+            html += fieldSelect("roller_mode", "Mode", [
+                { value: "", label: "(default)" },
+                { value: "normal", label: "normal" },
+                { value: "infinite", label: "infinite" }
+            ], comp.mode ?? "");
+            break;
         case "textarea":
-            html += fieldText("text", "Text", comp.text);
+            html += fieldTextarea("textareaText", "Text", comp.text ?? "");
             html += fieldText("placeholder", "Placeholder", comp.placeholder);
+            html += fieldCheck("oneLine", "Single line", !!comp.oneLine);
             break;
         case "spinner":
-            html += fieldNum("speed", "Speed", comp.speed ?? 1000);
-            html += fieldNum("arcLength", "Arc length", comp.arcLength ?? 60);
+            html += fieldNumFloat("speed", "Speed (ms)", comp.speed ?? 1000, "1");
+            html += fieldNumFloat("arcLength", "Arc length (°)", comp.arcLength ?? 60, "1");
             break;
+        case "line": {
+            const pts = (comp.points ?? [])
+                .map(p => `${p.x}, ${p.y}`)
+                .join("\n");
+            html += fieldTextarea("linePoints", "Points (x,y per line)", pts);
+            html += fieldCheck("rounded", "Rounded corners", !!comp.rounded);
+            break;
+        }
         case "container":
-            html += `<div class="field"><label>Layout</label><select name="layout">
-                <option value="none"${comp.layout === "none" || !comp.layout ? " selected" : ""}>none</option>
-                <option value="flex"${comp.layout === "flex" ? " selected" : ""}>flex</option>
-                <option value="grid"${comp.layout === "grid" ? " selected" : ""}>grid</option>
-            </select></div>`;
+            html += fieldSelect("layout", "Layout", [
+                { value: "none", label: "none" },
+                { value: "flex", label: "flex" },
+                { value: "grid", label: "grid" }
+            ], comp.layout ?? "none");
+            html += fieldSelect("flexFlow", "Flex flow (flex)", [
+                { value: "", label: "(default)" },
+                { value: "row", label: "row" },
+                { value: "column", label: "column" },
+                { value: "row_wrap", label: "row_wrap" },
+                { value: "column_wrap", label: "column_wrap" }
+            ], comp.flexFlow ?? "");
+            html += `<div class="field"><p style="font-size:11px;color:#888;line-height:1.35;margin:0;">Nested widgets: edit JSON or attach from tooling; not listed here.</p></div>`;
+            break;
+        case "panel":
+            html += `<div class="field"><p style="font-size:11px;color:#888;line-height:1.35;margin:0;">Panel holds child widgets. Edit children in the .embf file.</p></div>`;
             break;
         default:
             break;
     }
 
+    html += inspectorAppearancesSection(comp);
+
     inspectorForm.innerHTML = html;
     inspectorSyncing = false;
+}
+
+function parsePaddingInput(raw) {
+    const t = raw.trim();
+    if (!t) return undefined;
+    if (/^\d+$/.test(t)) {
+        const n = parseInt(t, 10);
+        return Number.isFinite(n) && n >= 0 ? n : undefined;
+    }
+    const parts = t
+        .split(/[, ]+/)
+        .map(s => s.trim())
+        .filter(Boolean)
+        .map(Number);
+    if (
+        parts.length >= 2 &&
+        parts.length <= 4 &&
+        parts.every(n => Number.isFinite(n) && Number.isInteger(n) && n >= 0)
+    ) {
+        return parts;
+    }
+    return undefined;
+}
+
+function buildStyleSnapshotFromInspector() {
+    if (!inspectorForm) {
+        return {};
+    }
+    /** @returns {HTMLInputElement | null} Hex fields use duplicate-prone ids; prefer querySelector. */
+    const textInputNamed = id =>
+        /** @type {HTMLInputElement | null} */ (
+            inspectorForm.querySelector(`input[type="text"][name="${id}"]`)
+        );
+
+    /** @type {Record<string, unknown>} */
+    const s = {};
+
+    const setStr = (id, key) => {
+        const el = textInputNamed(id);
+        if (!(el instanceof HTMLInputElement)) return;
+        const t = el.value.trim();
+        s[key] = t === "" ? null : t;
+    };
+
+    setStr("style_bgColor", "bgColor");
+    setStr("style_indicatorColor", "indicatorColor");
+    setStr("style_textColor", "textColor");
+    setStr("style_borderColor", "borderColor");
+    setStr("style_fontFamily", "fontFamily");
+
+    const sop = inspectorForm.elements.namedItem("style_bgOpacity");
+    if (sop instanceof HTMLInputElement) {
+        if (sop.value.trim() === "") {
+            s.bgOpacity = null;
+        } else {
+            const v = Number(sop.value);
+            s.bgOpacity = Number.isFinite(v) ? Math.min(255, Math.max(0, Math.round(v))) : null;
+        }
+    }
+
+    const sbw = inspectorForm.elements.namedItem("style_borderWidth");
+    if (sbw instanceof HTMLInputElement) {
+        if (sbw.value.trim() === "") {
+            s.borderWidth = null;
+        } else {
+            const v = Number(sbw.value);
+            s.borderWidth = Number.isFinite(v) ? Math.round(Math.max(0, v)) : null;
+        }
+    }
+
+    const sbr = inspectorForm.elements.namedItem("style_borderRadius");
+    if (sbr instanceof HTMLInputElement) {
+        if (sbr.value.trim() === "") {
+            s.borderRadius = null;
+        } else {
+            const v = Number(sbr.value);
+            s.borderRadius = Number.isFinite(v) ? Math.round(Math.max(0, v)) : null;
+        }
+    }
+
+    const sfz = inspectorForm.elements.namedItem("style_fontSize");
+    if (sfz instanceof HTMLInputElement) {
+        if (sfz.value.trim() === "") {
+            s.fontSize = null;
+        } else {
+            const v = Number(sfz.value);
+            const n = Number.isFinite(v) ? Math.round(v) : NaN;
+            s.fontSize = n >= 4 ? n : null;
+        }
+    }
+
+    const spd = inspectorForm.elements.namedItem("style_padding");
+    if (spd instanceof HTMLInputElement) {
+        const raw = spd.value.trim();
+        if (raw === "") {
+            s.padding = null;
+        } else {
+            const p = parsePaddingInput(spd.value);
+            if (p !== undefined) {
+                s.padding = p;
+            }
+        }
+    }
+
+    const alignEl = inspectorForm.elements.namedItem("style_align");
+    if (alignEl instanceof HTMLSelectElement) {
+        const t = alignEl.value.trim();
+        s.align = t === "" ? null : t;
+    }
+
+    return s;
 }
 
 function readInspectorPatch() {
@@ -1129,7 +1402,7 @@ function readInspectorPatch() {
     }
     /** @type {Record<string, unknown>} */
     const patch = {};
-    const num = (name) => {
+    const num = name => {
         const el = inspectorForm.elements.namedItem(name);
         if (el instanceof HTMLInputElement && el.type === "number") {
             const v = Number(el.value);
@@ -1138,15 +1411,19 @@ function readInspectorPatch() {
             }
         }
     };
-    const txt = (name) => {
+    const floatOrOmit = name => {
         const el = inspectorForm.elements.namedItem(name);
-        if (el instanceof HTMLInputElement) {
-            patch[name] = el.value;
-        } else if (el instanceof HTMLTextAreaElement) {
-            patch[name] = el.value;
+        if (el instanceof HTMLInputElement && el.type === "number") {
+            if (el.value.trim() === "") {
+                return;
+            }
+            const v = Number(el.value);
+            if (Number.isFinite(v)) {
+                patch[name] = v;
+            }
         }
     };
-    const chk = (name) => {
+    const chk = name => {
         const el = inspectorForm.elements.namedItem(name);
         if (el instanceof HTMLInputElement && el.type === "checkbox") {
             patch[name] = el.checked;
@@ -1164,6 +1441,31 @@ function readInspectorPatch() {
         patch.layout = layoutEl.value;
     }
 
+    const flexFlowEl = inspectorForm.elements.namedItem("flexFlow");
+    if (flexFlowEl instanceof HTMLSelectElement) {
+        patch.flexFlow = flexFlowEl.value;
+    }
+
+    const longModeEl = inspectorForm.elements.namedItem("longMode");
+    if (longModeEl instanceof HTMLSelectElement) {
+        patch.longMode = longModeEl.value;
+    }
+
+    const barModeEl = inspectorForm.elements.namedItem("bar_mode");
+    if (barModeEl instanceof HTMLSelectElement && barModeEl.value !== undefined) {
+        patch.mode = barModeEl.value;
+    }
+
+    const arcModeEl = inspectorForm.elements.namedItem("arc_mode");
+    if (arcModeEl instanceof HTMLSelectElement && arcModeEl.value !== undefined) {
+        patch.mode = arcModeEl.value;
+    }
+
+    const rollerModeEl = inspectorForm.elements.namedItem("roller_mode");
+    if (rollerModeEl instanceof HTMLSelectElement && rollerModeEl.value !== undefined) {
+        patch.mode = rollerModeEl.value;
+    }
+
     const optionsEl = inspectorForm.elements.namedItem("options");
     if (optionsEl instanceof HTMLTextAreaElement) {
         patch.options = optionsEl.value
@@ -1172,27 +1474,93 @@ function readInspectorPatch() {
             .filter(Boolean);
     }
 
-    for (const k of [
-        "text", "label", "src", "min", "max", "value", "selectedIndex", "placeholder", "speed", "arcLength"
-    ]) {
-        const el = inspectorForm.elements.namedItem(k);
-        if (el instanceof HTMLInputElement) {
-            if (el.type === "checkbox") {
-                patch[k] = el.checked;
-            } else if (el.type === "number") {
-                num(k);
-            } else {
-                txt(k);
+    const linePtsEl = inspectorForm.elements.namedItem("linePoints");
+    if (linePtsEl instanceof HTMLTextAreaElement) {
+        const lines = linePtsEl.value.split(/[\r\n]+/).map(s => s.trim()).filter(Boolean);
+        const pts = [];
+        for (const ln of lines) {
+            const m = ln.split(/[, ]+/).map(p => Number(p.trim()));
+            if (m.length >= 2 && Number.isFinite(m[0]) && Number.isFinite(m[1])) {
+                pts.push({ x: Math.round(m[0]), y: Math.round(m[1]) });
             }
         }
+        if (pts.length >= 2) {
+            patch.points = pts;
+        }
     }
+
+    chk("rounded");
+
+    const taTextEl = inspectorForm.elements.namedItem("textareaText");
+    if (taTextEl instanceof HTMLTextAreaElement) {
+        patch.text = taTextEl.value;
+    } else {
+        const textEl = inspectorForm.elements.namedItem("text");
+        if (textEl instanceof HTMLInputElement) {
+            patch.text = textEl.value;
+        }
+    }
+
+    chk("oneLine");
+
+    const phEl = inspectorForm.elements.namedItem("placeholder");
+    if (phEl instanceof HTMLInputElement) {
+        patch.placeholder = phEl.value;
+    }
+
+    const labelEl = inspectorForm.elements.namedItem("label");
+    if (labelEl instanceof HTMLInputElement) {
+        patch.label = labelEl.value;
+    }
+
+    const srcEl = inspectorForm.elements.namedItem("src");
+    if (srcEl instanceof HTMLInputElement) {
+        patch.src = srcEl.value;
+    }
+
+    floatOrOmit("min");
+    floatOrOmit("max");
+    floatOrOmit("value");
+    floatOrOmit("startAngle");
+    floatOrOmit("endAngle");
+
+    floatOrOmit("speed");
+    floatOrOmit("arcLength");
+
+    const selIdx = inspectorForm.elements.namedItem("selectedIndex");
+    if (selIdx instanceof HTMLInputElement && selIdx.type === "number" && selIdx.value.trim() !== "") {
+        const v = Number(selIdx.value);
+        if (Number.isFinite(v)) {
+            patch.selectedIndex = Math.round(v);
+        }
+    }
+
     chk("checked");
+
+    patch.styles = buildStyleSnapshotFromInspector();
+
+    const evEl = inspectorForm.elements.namedItem("eventsJson");
+    if (evEl instanceof HTMLTextAreaElement) {
+        try {
+            const parsed = JSON.parse(evEl.value);
+            if (Array.isArray(parsed)) {
+                patch.events = parsed;
+            }
+        } catch {
+            /* invalid JSON: omit — write will keep prior file if host blocks */
+        }
+    }
+
     return patch;
 }
 
 function commitInspector() {
     if (inspectorSyncing || !selectedComponentId || !currentProject) {
         return;
+    }
+    if (inspectorDebounce) {
+        clearTimeout(inspectorDebounce);
+        inspectorDebounce = null;
     }
     vscode.postMessage({
         type: "updateWidget",
@@ -1202,9 +1570,59 @@ function commitInspector() {
     });
 }
 
+/** Coalesce picker input+change in one animation frame before commit */
+let inspectorColorCommitRaf = null;
+function scheduleCommitAfterColorPick() {
+    if (inspectorColorCommitRaf !== null) {
+        return;
+    }
+    inspectorColorCommitRaf = requestAnimationFrame(() => {
+        inspectorColorCommitRaf = null;
+        queueMicrotask(() => commitInspector());
+    });
+}
+
+function syncInspectorColorRowFromPicker(pickerEl) {
+    const row = pickerEl.closest(".inspector-color-row");
+    const textIn = row?.querySelector('input[type="text"]');
+    const face = row?.querySelector(".inspector-color-face");
+    const v = pickerEl.value.toLowerCase();
+    if (textIn instanceof HTMLInputElement) {
+        textIn.value = v;
+    }
+    if (face instanceof HTMLElement) {
+        face.style.backgroundColor = v;
+    }
+}
+
 if (inspectorForm) {
-    inspectorForm.addEventListener("input", () => {
+    inspectorForm.addEventListener("input", e => {
         if (inspectorSyncing) {
+            return;
+        }
+        if (
+            e.target instanceof HTMLInputElement &&
+            e.target.type === "text" &&
+            e.target.closest(".inspector-color-row")
+        ) {
+            const row = e.target.closest(".inspector-color-row");
+            const nat = row?.querySelector(".inspector-color-picker-native");
+            const face = row?.querySelector(".inspector-color-face");
+            const h = tryParseCssHex(e.target.value);
+            if (h && nat instanceof HTMLInputElement) {
+                nat.value = h;
+                if (face instanceof HTMLElement) {
+                    face.style.backgroundColor = h;
+                }
+            }
+        }
+        if (
+            e.target instanceof HTMLInputElement &&
+            e.target.type === "color" &&
+            e.target.classList.contains("inspector-color-picker-native")
+        ) {
+            syncInspectorColorRowFromPicker(e.target);
+            scheduleCommitAfterColorPick();
             return;
         }
         if (inspectorDebounce) {
@@ -1215,10 +1633,20 @@ if (inspectorForm) {
             commitInspector();
         }, 450);
     });
-    inspectorForm.addEventListener("change", () => {
-        if (!inspectorSyncing) {
-            commitInspector();
+    inspectorForm.addEventListener("change", e => {
+        if (inspectorSyncing) {
+            return;
         }
+        if (
+            e.target instanceof HTMLInputElement &&
+            e.target.type === "color" &&
+            e.target.classList.contains("inspector-color-picker-native")
+        ) {
+            syncInspectorColorRowFromPicker(e.target);
+            scheduleCommitAfterColorPick();
+            return;
+        }
+        commitInspector();
     });
 }
 

@@ -30,6 +30,28 @@ describe("parseEmbfSource", () => {
         expect(() => parseEmbfSource(JSON.stringify(bad))).toThrow(EmbfParseError);
         expect(() => parseEmbfSource(JSON.stringify(bad))).toThrow(/target/);
     });
+
+    it("accepts component styles when valid", () => {
+        const proj = minimalProject();
+        const root = proj as {
+            pages: Array<{ components: Array<Record<string, unknown>> }>;
+        };
+        root.pages[0].components[0].styles = {
+            bgColor: "#ff0000",
+            borderWidth: 2,
+            padding: [4, 8]
+        };
+        expect(() => parseEmbfSource(JSON.stringify(proj))).not.toThrow();
+    });
+
+    it("rejects unknown style property", () => {
+        const proj = minimalProject();
+        const root = proj as {
+            pages: Array<{ components: Array<Record<string, unknown>> }>;
+        };
+        root.pages[0].components[0].styles = { unknownKey: 1 };
+        expect(() => parseEmbfSource(JSON.stringify(proj))).toThrow(EmbfParseError);
+    });
 });
 
 describe("lintEmbfProject", () => {

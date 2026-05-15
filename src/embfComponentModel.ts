@@ -1,4 +1,4 @@
-import type { Component, ContainerComponent, Page } from "./types/embf";
+import type { Component, ContainerComponent, Page, StyleProps } from "./types/embf";
 
 function walkComponents(components: Component[], fn: (c: Component) => boolean): boolean {
     for (const c of components) {
@@ -62,9 +62,15 @@ export function deleteComponentOnPage(page: Page, componentId: string): boolean 
     return deleteFromList(page.components, componentId);
 }
 
-function setNum(comp: Record<string, unknown>, key: string, value: unknown): void {
+function setFiniteInt(comp: Record<string, unknown>, key: string, value: unknown): void {
     if (typeof value === "number" && Number.isFinite(value)) {
         comp[key] = Math.round(value);
+    }
+}
+
+function setFiniteNum(comp: Record<string, unknown>, key: string, value: unknown): void {
+    if (typeof value === "number" && Number.isFinite(value)) {
+        comp[key] = value;
     }
 }
 
@@ -81,20 +87,189 @@ function setBool(comp: Record<string, unknown>, key: string, value: unknown): vo
 }
 
 /**
+ * Merge style keys from an inspector snapshot.
+ * Each key may be `null`/`""` to remove; keys absent from `incoming` leave the previous value unchanged.
+ */
+function mergeInspectorStyles(comp: Component, incoming: Record<string, unknown>): void {
+    const cur = { ...((comp as { styles?: StyleProps }).styles ?? {}) } as Record<string, unknown>;
+    const alignAllowed = new Set(["left", "center", "right"]);
+
+    const strKeys = [
+        "bgColor",
+        "indicatorColor",
+        "textColor",
+        "borderColor",
+        "fontFamily"
+    ] as const;
+    for (const k of strKeys) {
+        if (!Object.prototype.hasOwnProperty.call(incoming, k)) continue;
+        const raw = incoming[k];
+        if (raw === null || raw === "") {
+            delete cur[k];
+            continue;
+        }
+        if (typeof raw === "string") {
+            const t = raw.trim();
+            if (t) {
+                cur[k] = t;
+            } else {
+                delete cur[k];
+            }
+        }
+    }
+
+    function numOrClear(key: "bgOpacity" | "borderWidth" | "borderRadius" | "fontSize"): void {
+        if (!Object.prototype.hasOwnProperty.call(incoming, key)) return;
+        const raw = incoming[key];
+        if (raw === null) {
+            delete cur[key];
+            return;
+        }
+        if (typeof raw === "number" && Number.isFinite(raw)) {
+            if (key === "bgOpacity") {
+                cur.bgOpacity = Math.min(255, Math.max(0, Math.round(raw)));
+            } else if (key === "fontSize") {
+                const n = Math.round(raw);
+                if (n >= 4) cur.fontSize = n;
+                else delete cur.fontSize;
+            } else {
+                cur[key] = Math.round(Math.max(0, raw));
+            }
+        }
+    }
+
+    numOrClear("bgOpacity");
+    numOrClear("borderWidth");
+    numOrClear("borderRadius");
+    numOrClear("fontSize");
+
+    if (Object.prototype.hasOwnProperty.call(incoming, "align")) {
+        const al = incoming["align"];
+        if (al === null || al === "") {
+            delete cur.align;
+        } else if (typeof al === "string" && alignAllowed.has(al)) {
+            cur.align = al;
+        } else {
+            delete cur.align;
+        }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(incoming, "padding")) {
+        const pd = incoming["padding"];
+        if (pd === null) {
+            delete cur.padding;
+        } else if (typeof pd === "number" && Number.isInteger(pd) && pd >= 0) {
+            cur.padding = pd;
+        } else if (Array.isArray(pd)) {
+            const arr = (pd as unknown[]).filter(
+                x => typeof x === "number" && Number.isInteger(x) && x >= 0
+            ) as number[];
+            if (arr.length >= 2 && arr.length <= 4) {
+                cur.padding = arr as StyleProps["padding"];
+            }
+        }
+    }
+
+    const keys = Object.keys(cur);
+    if (keys.length === 0) {
+        delete (comp as { styles?: StyleProps }).styles;
+    } else {
+        (comp as { styles?: StyleProps }).styles = cur as StyleProps;
+    }
+}
+
+/** Parse textarea line points: each line x,y — optional spaces. */
+export function parseLinePointsText(raw: string): Array<{ x: number; y: number }> | undefined {
+    const lines = raw
+        .split(/[\r\n]+/)
+        .map(s => s.trim())
+        .filter(Boolean);
+    const out: Array<{ x: number; y: number }> = [];
+    for (const ln of lines) {
+        const m = ln.split(/[, ]+/).map(p => Number(p.trim()));
+        if (
+            m.length >= 2 &&
+            Number.isFinite(m[0]) &&
+            Number.isFinite(m[1])
+        ) {
+            out.push({ x: Math.round(m[0]), y: Math.round(m[1]) });
+        }
+    }
+    return out.length >= 2 ? out : undefined;
+}
+
+export function stringifyLinePoints(pts?: Array<{ x: number; y: number }>): string {
+    if (!pts?.length) {
+        return "";
+    }
+    return pts.map(p => `${p.x}, ${p.y}`).join("\n");
+}
+
+function setBarMode(comp: Record<string, unknown>, value: unknown): void {
+    if (value === "" || value === undefined) {
+        delete comp["mode"];
+        return;
+    }
+    if (typeof value === "string" && /^(normal|symmetrical|range)$/.test(value)) {
+        comp["mode"] = value;
+    }
+}
+
+function setArcMode(comp: Record<string, unknown>, value: unknown): void {
+    if (value === "" || value === undefined) {
+        delete comp["mode"];
+        return;
+    }
+    if (typeof value === "string" && /^(normal|reverse|symmetrical)$/.test(value)) {
+        comp["mode"] = value;
+    }
+}
+
+function setRollerMode(comp: Record<string, unknown>, value: unknown): void {
+    if (value === "" || value === undefined) {
+        delete comp["mode"];
+        return;
+    }
+    if (typeof value === "string" && /^(normal|infinite)$/.test(value)) {
+        comp["mode"] = value;
+    }
+}
+
+/**
  * Apply editable inspector fields onto a component (does not validate the full project).
  */
 export function applyComponentPatch(comp: Component, patch: Record<string, unknown>): void {
     const r = comp as unknown as Record<string, unknown>;
 
-    if ("x" in patch) setNum(r, "x", patch.x);
-    if ("y" in patch) setNum(r, "y", patch.y);
-    if ("width" in patch) setNum(r, "width", patch.width);
-    if ("height" in patch) setNum(r, "height", patch.height);
+    if ("x" in patch) setFiniteInt(r, "x", patch.x);
+    if ("y" in patch) setFiniteInt(r, "y", patch.y);
+    if ("width" in patch) setFiniteInt(r, "width", patch.width);
+    if ("height" in patch) setFiniteInt(r, "height", patch.height);
     if ("hidden" in patch) setBool(r, "hidden", patch.hidden);
+
+    if ("styles" in patch && patch.styles !== undefined) {
+        if (typeof patch.styles === "object" && patch.styles !== null && !Array.isArray(patch.styles)) {
+            mergeInspectorStyles(comp, patch.styles as Record<string, unknown>);
+        }
+    }
+
+    if ("events" in patch) {
+        if (Array.isArray(patch.events)) {
+            r.events = patch.events as unknown[];
+        }
+    }
 
     switch (comp.type) {
         case "label":
             if ("text" in patch) setStr(r, "text", patch.text);
+            if ("longMode" in patch) {
+                const lm = patch.longMode;
+                if (typeof lm === "string" && lm.trim() === "") {
+                    delete r.longMode;
+                } else if (typeof lm === "string" && /^(wrap|dot|scroll|clip)$/.test(lm)) {
+                    r.longMode = lm;
+                }
+            }
             break;
         case "button":
             if ("label" in patch) setStr(r, "label", patch.label);
@@ -103,11 +278,23 @@ export function applyComponentPatch(comp: Component, patch: Record<string, unkno
             if ("src" in patch) setStr(r, "src", patch.src);
             break;
         case "slider":
+            if ("min" in patch) setFiniteNum(r, "min", patch.min);
+            if ("max" in patch) setFiniteNum(r, "max", patch.max);
+            if ("value" in patch) setFiniteNum(r, "value", patch.value);
+            break;
         case "bar":
+            if ("min" in patch) setFiniteNum(r, "min", patch.min);
+            if ("max" in patch) setFiniteNum(r, "max", patch.max);
+            if ("value" in patch) setFiniteNum(r, "value", patch.value);
+            if ("mode" in patch) setBarMode(r, patch.mode);
+            break;
         case "arc":
-            if ("min" in patch) setNum(r, "min", patch.min);
-            if ("max" in patch) setNum(r, "max", patch.max);
-            if ("value" in patch) setNum(r, "value", patch.value);
+            if ("min" in patch) setFiniteNum(r, "min", patch.min);
+            if ("max" in patch) setFiniteNum(r, "max", patch.max);
+            if ("value" in patch) setFiniteNum(r, "value", patch.value);
+            if ("startAngle" in patch) setFiniteNum(r, "startAngle", patch.startAngle);
+            if ("endAngle" in patch) setFiniteNum(r, "endAngle", patch.endAngle);
+            if ("mode" in patch) setArcMode(r, patch.mode);
             break;
         case "switch":
         case "checkbox":
@@ -119,21 +306,49 @@ export function applyComponentPatch(comp: Component, patch: Record<string, unkno
             if ("options" in patch && Array.isArray(patch.options)) {
                 r.options = patch.options.map(String);
             }
-            if ("selectedIndex" in patch) setNum(r, "selectedIndex", patch.selectedIndex);
+            if ("selectedIndex" in patch) setFiniteInt(r, "selectedIndex", patch.selectedIndex);
+            if (comp.type === "roller" && "mode" in patch) setRollerMode(r, patch.mode);
             break;
         case "textarea":
             if ("text" in patch) setStr(r, "text", patch.text);
             if ("placeholder" in patch) setStr(r, "placeholder", patch.placeholder);
+            if ("oneLine" in patch) setBool(r, "oneLine", patch.oneLine);
             break;
         case "spinner":
-            if ("speed" in patch) setNum(r, "speed", patch.speed);
-            if ("arcLength" in patch) setNum(r, "arcLength", patch.arcLength);
+            if ("speed" in patch) setFiniteNum(r, "speed", patch.speed);
+            if ("arcLength" in patch) setFiniteNum(r, "arcLength", patch.arcLength);
+            break;
+        case "line":
+            if ("points" in patch && Array.isArray(patch.points)) {
+                const pts = (patch.points as unknown[]).filter(
+                    p =>
+                        typeof p === "object" &&
+                        p !== null &&
+                        Number.isFinite((p as { x?: unknown }).x) &&
+                        Number.isFinite((p as { y?: unknown }).y)
+                );
+                if (pts.length >= 2) {
+                    r.points = pts.map(o => ({
+                        x: Math.round(Number((o as { x: number }).x)),
+                        y: Math.round(Number((o as { y: number }).y))
+                    }));
+                }
+            }
+            if ("rounded" in patch) setBool(r, "rounded", patch.rounded);
             break;
         case "container":
             if ("layout" in patch && typeof patch.layout === "string") {
                 const v = patch.layout;
                 if (v === "none" || v === "flex" || v === "grid") {
                     (comp as ContainerComponent).layout = v;
+                }
+            }
+            if ("flexFlow" in patch && typeof patch.flexFlow === "string") {
+                const ff = patch.flexFlow;
+                if (ff.trim() === "") {
+                    delete (comp as ContainerComponent).flexFlow;
+                } else if (/^(row|column|row_wrap|column_wrap)$/.test(ff)) {
+                        (comp as ContainerComponent).flexFlow = ff as NonNullable<ContainerComponent["flexFlow"]>;
                 }
             }
             break;

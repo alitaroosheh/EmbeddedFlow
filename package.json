@@ -1,5 +1,5 @@
 {
-  "name": "embeddedflow",
+  "name": "embf-lvgl",
   "publisher": "erminity",
   "displayName": "embeddedflow (an LVGL Design tool)",
   "description": "Design embedded UIs in .embf projects — live LVGL preview, visual editor, and C code generation.",

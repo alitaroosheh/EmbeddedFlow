@@ -5,7 +5,7 @@ import { EmbfPreviewPanel } from "./previewPanel";
 import { EmbfParseError, parseEmbf, parseEmbfSource, watchEmbf } from "./embfParser";
 import { lintEmbfProject } from "./embfSemanticLint";
 import { EmbfProject } from "./types/embf";
-import { generateCode, writeGeneratedFiles } from "./codeGen/index";
+import { generateCode, resolveCodegenOutputDir, writeGeneratedFiles } from "./codeGen/index";
 import { registerEmbeddedFlowOutput, embeddedFlowLog } from "./outputLog";
 
 // Map from .embf file path → file watcher
@@ -154,21 +154,8 @@ function shouldAutoOpenPreview(): boolean {
     return vscode.workspace.getConfiguration("embeddedflow").get<boolean>("autoOpenPreview", true);
 }
 
-/**
- * `embeddedflow.outputDirectory`: empty → use codegen default; relative → under the .embf parent;
- * absolute → that path.
- */
-function resolveCodegenOutputDirFromSettings(embfPath: string): string | undefined {
-    const raw =
-        vscode.workspace.getConfiguration("embeddedflow").get<string>("outputDirectory") ?? "";
-    const t = raw.trim();
-    if (!t) {
-        return undefined;
-    }
-    if (path.isAbsolute(t)) {
-        return path.normalize(t);
-    }
-    return path.normalize(path.join(path.dirname(embfPath), t));
+function workspaceCodegenOutputSetting(): string {
+    return vscode.workspace.getConfiguration("embeddedflow").get<string>("outputDirectory") ?? "";
 }
 
 function isEmbfDocument(doc: vscode.TextDocument): boolean {
@@ -348,7 +335,8 @@ async function runLiveCodeGen(filePath: string): Promise<void> {
         return;
     }
 
-    const result = generateCode(project, filePath, resolveCodegenOutputDirFromSettings(filePath));
+    const outDir = resolveCodegenOutputDir(project, filePath, workspaceCodegenOutputSetting());
+    const result = generateCode(project, filePath, outDir);
     try {
         const written = writeGeneratedFiles(result);
         const rel = path.relative(path.dirname(filePath), result.outputDir);
@@ -377,8 +365,8 @@ async function runCodeGen(filePath: string): Promise<void> {
         return;
     }
 
-    const result = generateCode(project, filePath, resolveCodegenOutputDirFromSettings(filePath));
-    const outputDir = result.outputDir;
+    const outputDir = resolveCodegenOutputDir(project, filePath, workspaceCodegenOutputSetting());
+    const result = generateCode(project, filePath, outputDir);
 
     // Confirm if output directory already exists and has files
     if (fs.existsSync(outputDir) && fs.readdirSync(outputDir).some(f => f.endsWith(".c") || f.endsWith(".h"))) {

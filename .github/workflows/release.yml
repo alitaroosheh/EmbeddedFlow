@@ -1,0 +1,131 @@
+# Publish EmbeddedFlow to the VS Code Marketplace.
+#
+# Triggers
+#   • Tag push v<major>.<minor>.<patch>  (e.g. v0.1.0) — full release + Marketplace publish
+#   • Push to branch `release`            — CI only (compile, test, package VSIX artifact)
+#
+# Create a release (typical flow):
+#   git checkout release
+#   git merge main
+#   git tag v0.1.0
+#   git push origin release
+#   git push origin v0.1.0
+#
+# Repository secret (required for publish job):
+#   VSCE_PAT — Personal Access Token with Marketplace "Manage" scope
+#   https://code.visualstudio.com/api/working-with-extensions/publishing-extension#create-a-publisher
+
+name: Release
+
+on:
+  push:
+    branches:
+      - release
+    tags:
+      # Semver tags with leading "v" (common for VS Code extensions)
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: "20"
+
+jobs:
+  # ── Release branch: validate without publishing ─────────────────────────────
+  validate:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/release'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Compile
+        run: npm run compile
+
+      - name: Test
+        run: npm test
+
+      - name: Package VSIX
+        run: npx --yes @vscode/vsce@latest package --no-dependencies
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: embeddedflow-vsix-validate
+          path: "*.vsix"
+          if-no-files-found: error
+
+  # ── Version tag: publish to Marketplace ─────────────────────────────────────
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require tag on release branch
+        run: |
+          git fetch origin release --depth=1 2>/dev/null || git fetch origin release
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" "origin/release"; then
+            echo "::error::Tag ${GITHUB_REF_NAME} must point to a commit on branch 'release'."
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Sync package.json version from tag
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Invalid tag format: $TAG (expected vMAJOR.MINOR.PATCH)"
+            exit 1
+          fi
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+          echo "Packaging version $VERSION"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Compile
+        run: npm run compile
+
+      - name: Test
+        run: npm test
+
+      - name: Publish to VS Code Marketplace
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          if [ -z "$VSCE_PAT" ]; then
+            echo "::error::Secret VSCE_PAT is not set. Add a Marketplace PAT in repository secrets."
+            exit 1
+          fi
+          npx --yes @vscode/vsce@latest publish --no-dependencies -p "$VSCE_PAT"
+
+      - name: Package VSIX for GitHub Release
+        run: npx --yes @vscode/vsce@latest package --no-dependencies
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: "*.vsix"
+          generate_release_notes: true
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}

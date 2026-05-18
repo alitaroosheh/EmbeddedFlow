@@ -916,7 +916,7 @@ export class EmbfPreviewPanel {
         <aside id="property-inspector" aria-label="Properties">
             <h2>Properties</h2>
             <div id="inspector-body">
-                <div id="inspector-empty">Design mode: click the page background for page &amp; theme settings, or click a widget for its properties.</div>
+                <div id="inspector-empty">Design mode: click the page background for project, display, and page settings, or click a widget for its properties.</div>
                 <form id="inspector-form" hidden></form>
             </div>
             <button type="button" id="inspector-delete" disabled title="Delete selected widget">Delete widget</button>

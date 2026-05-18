@@ -10,6 +10,8 @@ import {
     generateDisplayHeader
 } from "./pageGen";
 
+export { resolveCodegenOutputDir } from "./outputDir";
+
 export interface CodeGenResult {
     /** Files written: path → content */
     files: Map<string, string>;
@@ -21,14 +23,14 @@ export interface CodeGenResult {
  *
  * @param project   Parsed EmbfProject
  * @param embfPath  Absolute path to the .embf file (output dir is relative to it)
- * @param outputDir Override output directory (default: <embf-dir>/ui_output)
+ * @param outputDir Resolved output directory (use {@link resolveCodegenOutputDir})
  */
 export function generateCode(
     project: EmbfProject,
     embfPath: string,
-    outputDir?: string
+    outputDir: string
 ): CodeGenResult {
-    const dir = outputDir ?? path.join(path.dirname(embfPath), "ui_output");
+    const dir = outputDir;
     const files = new Map<string, string>();
 
     files.set(path.join(dir, "ui_display.h"), generateDisplayHeader(project));

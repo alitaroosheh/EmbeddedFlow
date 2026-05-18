@@ -132,7 +132,7 @@
         "embeddedflow.outputDirectory": {
           "type": "string",
           "default": "",
-          "description": "Output folder for generated C code: relative to the .embf file’s directory, or an absolute path. Leave empty to use ui_output next to the .embf file."
+          "description": "Default output folder when project.outputPath is not set in the .embf JSON. Relative to the .embf file’s directory, or absolute. Leave empty to use ui_output next to the .embf file."
         },
         "embeddedflow.liveGenerateOnSave": {
           "type": "boolean",

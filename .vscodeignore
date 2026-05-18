@@ -2,9 +2,15 @@
 .vscode-test/**
 src/**
 tests/**
-vitest.config.ts
-.gitignore
+wiki/**
+wasm-src/**
+node_modules/**
+.git/**
 **/*.map
 **/*.ts
 !out/**
 tsconfig.json
+vitest.config.ts
+.gitignore
+# Unused legacy WASM bundles (preview uses embf_runtime only)
+media/wasm/lvgl_runtime_v*

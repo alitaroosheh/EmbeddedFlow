@@ -1,4 +1,15 @@
-import type { Component, ContainerComponent, EmbfProject, Page, StyleProps } from "./types/embf";
+import type {
+    ColorFormat,
+    Component,
+    ContainerComponent,
+    EmbfProject,
+    LvglVersion,
+    Orientation,
+    Page,
+    StyleProps,
+    TextDirection
+} from "./types/embf";
+import { SUPPORTED_VERSIONS } from "./embfParser";
 import { allocateNewComponentId } from "./embfWidgetFactory";
 
 function walkComponents(components: Component[], fn: (c: Component) => boolean): boolean {
@@ -455,8 +466,17 @@ export function applyComponentPatch(comp: Component, patch: Record<string, unkno
     }
 }
 
+const COLOR_FORMATS = new Set<ColorFormat>(["RGB565", "RGB888", "ARGB8888", "L8", "AL88"]);
+const ORIENTATIONS = new Set<Orientation>([
+    "portrait",
+    "landscape",
+    "portrait_flipped",
+    "landscape_flipped"
+]);
+const TEXT_DIRECTIONS = new Set<TextDirection>(["ltr", "rtl"]);
+
 /**
- * Inspector edits for the current page and project theme (.embf root `theme`).
+ * Inspector edits for the active page, project meta, display, theme, and codegen path.
  * `backgroundColor`: `null`/empty clears the property so LVGL theme sets screen bg (light/dark).
  */
 export function applyPageInspectorPatch(
@@ -485,9 +505,114 @@ export function applyPageInspectorPatch(
         }
     }
 
+    if (patch.projName !== undefined && typeof patch.projName === "string") {
+        const t = patch.projName.trim();
+        if (t) {
+            project.project.name = t;
+        }
+    }
+
+    if (patch.projLvglVersion !== undefined && typeof patch.projLvglVersion === "string") {
+        const v = patch.projLvglVersion.trim() as LvglVersion;
+        if (SUPPORTED_VERSIONS.includes(v)) {
+            project.project.lvglVersion = v;
+        }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(patch, "projDescription")) {
+        const d = patch.projDescription;
+        if (d === null || d === "") {
+            delete project.project.description;
+        } else if (typeof d === "string") {
+            project.project.description = d;
+        }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(patch, "projOutputPath")) {
+        const op = patch.projOutputPath;
+        if (op === null || op === "") {
+            delete project.project.outputPath;
+        } else if (typeof op === "string" && op.trim()) {
+            project.project.outputPath = op.trim();
+        }
+    }
+
+    const disp = project.display;
+
+    if (patch.dispWidth !== undefined) {
+        const n = Number(patch.dispWidth);
+        if (Number.isFinite(n) && n >= 1) {
+            disp.width = Math.round(n);
+        }
+    }
+    if (patch.dispHeight !== undefined) {
+        const n = Number(patch.dispHeight);
+        if (Number.isFinite(n) && n >= 1) {
+            disp.height = Math.round(n);
+        }
+    }
+    if (patch.dispBitDepth !== undefined) {
+        const n = Number(patch.dispBitDepth);
+        if (n === 16 || n === 24 || n === 32) {
+            disp.bitDepth = n;
+        }
+    }
+    if (patch.dispColorFormat !== undefined && typeof patch.dispColorFormat === "string") {
+        const cf = patch.dispColorFormat as ColorFormat;
+        if (COLOR_FORMATS.has(cf)) {
+            disp.colorFormat = cf;
+        }
+    }
+    if (patch.dispOrientation !== undefined && typeof patch.dispOrientation === "string") {
+        const o = patch.dispOrientation as Orientation;
+        if (ORIENTATIONS.has(o)) {
+            disp.orientation = o;
+        }
+    }
+    if (patch.dispDirection !== undefined && typeof patch.dispDirection === "string") {
+        const d = patch.dispDirection as TextDirection;
+        if (TEXT_DIRECTIONS.has(d)) {
+            disp.direction = d;
+        }
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "dispDpi")) {
+        const dpi = patch.dispDpi;
+        if (dpi === null || dpi === "") {
+            delete disp.dpi;
+        } else {
+            const n = Number(dpi);
+            if (Number.isFinite(n) && n >= 1) {
+                disp.dpi = Math.round(n);
+            }
+        }
+    }
+    if (patch.dispRound !== undefined && typeof patch.dispRound === "boolean") {
+        disp.round = patch.dispRound;
+    }
+
     if (patch.themeDark !== undefined && typeof patch.themeDark === "boolean") {
         project.theme ??= { dark: false };
         project.theme.dark = patch.themeDark;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(patch, "themePrimaryColor")) {
+        const v = patch.themePrimaryColor;
+        project.theme ??= { dark: false };
+        if (v === null || v === "") {
+            delete project.theme.primaryColor;
+        } else if (typeof v === "string" && v.trim()) {
+            project.theme.primaryColor = v.trim();
+        }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(patch, "themeSecondaryColor")) {
+        const v = patch.themeSecondaryColor;
+        project.theme ??= { dark: false };
+        if (v === null || v === "") {
+            delete project.theme.secondaryColor;
+        } else if (typeof v === "string" && v.trim()) {
+            project.theme.secondaryColor = v.trim();
+        }
     }
 
     return true;

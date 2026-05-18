@@ -91,6 +91,15 @@ function validateEmbf(data: unknown): EmbfProject {
             `Supported: ${SUPPORTED_VERSIONS.join(", ")}`
         );
     }
+    if (projectObj["description"] !== undefined && typeof projectObj["description"] !== "string") {
+        throw new EmbfParseError("project.description must be a string when set");
+    }
+    if (projectObj["outputPath"] !== undefined) {
+        const op = projectObj["outputPath"];
+        if (typeof op !== "string" || !op.trim()) {
+            throw new EmbfParseError("project.outputPath must be a non-empty string when set");
+        }
+    }
 
     const display = obj["display"];
     if (typeof display !== "object" || display === null) {

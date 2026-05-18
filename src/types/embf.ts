@@ -17,6 +17,12 @@ export interface ProjectMeta {
     name: string;
     lvglVersion: LvglVersion;
     description?: string;
+    /**
+     * Folder for generated C UI files (`ui.c`, `ui_*.c`, …).
+     * Relative paths are resolved from the `.embf` file’s directory; absolute paths are used as-is.
+     * When omitted, the extension uses `embeddedflow.outputDirectory` or `ui_output` next to the `.embf` file.
+     */
+    outputPath?: string;
 }
 
 export interface DisplayConfig {

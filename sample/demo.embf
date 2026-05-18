@@ -17,8 +17,8 @@
   },
   "theme": {
     "dark": false,
-    "primaryColor": "#0078d4",
-    "secondaryColor": "#005a9e"
+    "primaryColor": "#d6009d",
+    "secondaryColor": "#523847"
   },
   "pages": [
     {
@@ -71,18 +71,18 @@
         {
           "id": "box_1",
           "type": "container",
-          "x": 49,
-          "y": 277,
+          "x": 37,
+          "y": 229,
           "width": 244,
-          "height": 133,
+          "height": 130,
           "layout": "none",
           "hidden": false,
           "children": [
             {
               "id": "sw_dark",
               "type": "switch",
-              "x": 49,
-              "y": 34,
+              "x": 98,
+              "y": 77,
               "width": 60,
               "height": 28,
               "checked": false,
@@ -101,7 +101,7 @@
             {
               "id": "btn_2",
               "x": 156,
-              "y": 3,
+              "y": 0,
               "width": 88,
               "height": 36,
               "type": "button",
@@ -109,8 +109,8 @@
             },
             {
               "id": "sld_2",
-              "x": 0,
-              "y": 109,
+              "x": 21,
+              "y": 45,
               "width": 140,
               "height": 24,
               "type": "slider",

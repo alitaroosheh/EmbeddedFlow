@@ -1439,13 +1439,97 @@ function setSelection(componentId) {
  */
 function renderPageInspectorHtml(page, project) {
     let html =
-        `<div id="inspector-readonly"><strong>${esc(page.id)}</strong> · Page</div>` +
+        `<div id="inspector-readonly"><strong>${esc(page.id)}</strong> · Page &amp; project</div>` +
         `<div class="inspector-group-title">Page</div>` +
         fieldText("page_display_name", "Tab / page name", page.name ?? "") +
         `<div class="field"><p style="font-size:11px;color:#888;margin:0 0 8px;line-height:1.35;">Leave background empty so the LVGL default theme (light/dark) sets the screen color.</p></div>` +
         fieldColor("page_backgroundColor", "Screen background (#hex)", page.backgroundColor ?? "") +
-        `<div class="inspector-group-title">Project theme</div>` +
-        fieldCheck("proj_theme_dark", "Dark mode", !!(project.theme && project.theme.dark));
+        `<div class="inspector-group-title">Project</div>` +
+        fieldText("proj_name", "Name", (project.project && project.project.name) || "") +
+        fieldSelect(
+            "proj_lvglVersion",
+            "LVGL version",
+            [
+                { value: "8.4.0", label: "8.4.0" },
+                { value: "9.2.2", label: "9.2.2" },
+                { value: "9.3.0", label: "9.3.0" },
+                { value: "9.4.0", label: "9.4.0" },
+                { value: "9.5.0", label: "9.5.0" }
+            ],
+            (project.project && project.project.lvglVersion) || "9.5.0"
+        ) +
+        fieldTextarea(
+            "proj_description",
+            "Description",
+            (project.project && project.project.description) || ""
+        ) +
+        fieldText(
+            "proj_outputPath",
+            "Codegen output folder",
+            (project.project && project.project.outputPath) || ""
+        ) +
+        `<div class="field"><p style="font-size:11px;color:#888;margin:0 0 8px;line-height:1.35;">Relative to the .embf file, or an absolute path. Empty uses workspace setting or ui_output.</p></div>` +
+        `<div class="inspector-group-title">Display</div>` +
+        `<div class="row2">` +
+        fieldNum("disp_width", "Width", project.display.width) +
+        fieldNum("disp_height", "Height", project.display.height) +
+        `</div>` +
+        fieldSelect(
+            "disp_bitDepth",
+            "Bit depth",
+            [
+                { value: "16", label: "16" },
+                { value: "24", label: "24" },
+                { value: "32", label: "32" }
+            ],
+            String(project.display.bitDepth)
+        ) +
+        fieldSelect(
+            "disp_colorFormat",
+            "Color format",
+            [
+                { value: "RGB565", label: "RGB565" },
+                { value: "RGB888", label: "RGB888" },
+                { value: "ARGB8888", label: "ARGB8888" },
+                { value: "L8", label: "L8" },
+                { value: "AL88", label: "AL88" }
+            ],
+            project.display.colorFormat
+        ) +
+        fieldSelect(
+            "disp_orientation",
+            "Orientation",
+            [
+                { value: "portrait", label: "portrait" },
+                { value: "landscape", label: "landscape" },
+                { value: "portrait_flipped", label: "portrait_flipped" },
+                { value: "landscape_flipped", label: "landscape_flipped" }
+            ],
+            project.display.orientation
+        ) +
+        fieldSelect(
+            "disp_direction",
+            "Text direction",
+            [
+                { value: "ltr", label: "ltr" },
+                { value: "rtl", label: "rtl" }
+            ],
+            project.display.direction
+        ) +
+        fieldNum("disp_dpi", "DPI (optional)", project.display.dpi ?? "") +
+        fieldCheck("disp_round", "Round panel (preview clip)", !!project.display.round) +
+        `<div class="inspector-group-title">Theme</div>` +
+        fieldCheck("proj_theme_dark", "Dark mode", !!(project.theme && project.theme.dark)) +
+        fieldColor(
+            "theme_primaryColor",
+            "Primary color",
+            (project.theme && project.theme.primaryColor) || ""
+        ) +
+        fieldColor(
+            "theme_secondaryColor",
+            "Secondary color",
+            (project.theme && project.theme.secondaryColor) || ""
+        );
     return html;
 }
 
@@ -2687,7 +2771,7 @@ function readInspectorPatch() {
     return patch;
 }
 
-/** Build patch object for Page inspector (page name, bg, theme.dark). */
+/** Build patch object for page / project / display / theme inspector. */
 function readPageInspectorPatch() {
     if (!inspectorForm || !inspectorShowingPage || !currentProject) {
         return {};
@@ -2710,9 +2794,76 @@ function readPageInspectorPatch() {
         patch.backgroundColor = t === "" ? null : t;
     }
 
+    const projName = inspectorForm.elements.namedItem("proj_name");
+    if (projName instanceof HTMLInputElement) {
+        const t = projName.value.trim();
+        if (t) {
+            patch.projName = t;
+        }
+    }
+
+    const lvSel = inspectorForm.elements.namedItem("proj_lvglVersion");
+    if (lvSel instanceof HTMLSelectElement && lvSel.value) {
+        patch.projLvglVersion = lvSel.value;
+    }
+
+    const desc = inspectorForm.elements.namedItem("proj_description");
+    if (desc instanceof HTMLTextAreaElement) {
+        patch.projDescription = desc.value.trim() === "" ? null : desc.value;
+    }
+
+    const outPath = inspectorForm.elements.namedItem("proj_outputPath");
+    if (outPath instanceof HTMLInputElement) {
+        patch.projOutputPath = outPath.value.trim() === "" ? null : outPath.value.trim();
+    }
+
+    const dw = inspectorForm.elements.namedItem("disp_width");
+    if (dw instanceof HTMLInputElement && dw.value !== "") {
+        patch.dispWidth = Number(dw.value);
+    }
+    const dh = inspectorForm.elements.namedItem("disp_height");
+    if (dh instanceof HTMLInputElement && dh.value !== "") {
+        patch.dispHeight = Number(dh.value);
+    }
+    const bd = inspectorForm.elements.namedItem("disp_bitDepth");
+    if (bd instanceof HTMLSelectElement && bd.value) {
+        patch.dispBitDepth = Number(bd.value);
+    }
+    const cf = inspectorForm.elements.namedItem("disp_colorFormat");
+    if (cf instanceof HTMLSelectElement && cf.value) {
+        patch.dispColorFormat = cf.value;
+    }
+    const ori = inspectorForm.elements.namedItem("disp_orientation");
+    if (ori instanceof HTMLSelectElement && ori.value) {
+        patch.dispOrientation = ori.value;
+    }
+    const dir = inspectorForm.elements.namedItem("disp_direction");
+    if (dir instanceof HTMLSelectElement && dir.value) {
+        patch.dispDirection = dir.value;
+    }
+    const dpi = inspectorForm.elements.namedItem("disp_dpi");
+    if (dpi instanceof HTMLInputElement) {
+        patch.dispDpi = dpi.value.trim() === "" ? null : Number(dpi.value);
+    }
+    const round = inspectorForm.elements.namedItem("disp_round");
+    if (round instanceof HTMLInputElement) {
+        patch.dispRound = round.checked;
+    }
+
     const d = inspectorForm.elements.namedItem("proj_theme_dark");
     if (d instanceof HTMLInputElement) {
         patch.themeDark = d.checked;
+    }
+
+    const prim = inspectorForm.querySelector(`input[type="text"][name="theme_primaryColor"]`);
+    if (prim instanceof HTMLInputElement) {
+        const t = prim.value.trim();
+        patch.themePrimaryColor = t === "" ? null : t;
+    }
+    const sec = inspectorForm.querySelector(`input[type="text"][name="theme_secondaryColor"]`);
+    if (sec instanceof HTMLInputElement) {
+        const t = sec.value.trim();
+        patch.themeSecondaryColor = t === "" ? null : t;
     }
 
     return patch;

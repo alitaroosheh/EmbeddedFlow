@@ -100,6 +100,12 @@ function validateEmbf(data: unknown): EmbfProject {
             throw new EmbfParseError("project.outputPath must be a non-empty string when set");
         }
     }
+    if (projectObj["lvglInclude"] !== undefined) {
+        const inc = projectObj["lvglInclude"];
+        if (inc !== "lvgl.h" && inc !== "lvgl/lvgl.h") {
+            throw new EmbfParseError('project.lvglInclude must be "lvgl.h" or "lvgl/lvgl.h" when set');
+        }
+    }
 
     const display = obj["display"];
     if (typeof display !== "object" || display === null) {

@@ -11,6 +11,12 @@ import {
 } from "./pageGen";
 
 export { resolveCodegenOutputDir } from "./outputDir";
+export {
+    DEFAULT_LVGL_INCLUDE,
+    lvglIncludeDirective,
+    normalizeLvglIncludePath,
+    resolveLvglIncludePath
+} from "./lvglInclude";
 
 export interface CodeGenResult {
     /** Files written: path → content */

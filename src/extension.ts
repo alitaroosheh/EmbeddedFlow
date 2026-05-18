@@ -6,6 +6,7 @@ import { EmbfParseError, parseEmbf, parseEmbfSource, watchEmbf } from "./embfPar
 import { lintEmbfProject } from "./embfSemanticLint";
 import { EmbfProject } from "./types/embf";
 import { generateCode, resolveCodegenOutputDir, writeGeneratedFiles } from "./codeGen/index";
+import { ensureCodegenOutputPath } from "./embfCodegenSetup";
 import { registerEmbeddedFlowOutput, embeddedFlowLog } from "./outputLog";
 
 // Map from .embf file path → file watcher
@@ -365,7 +366,16 @@ async function runCodeGen(filePath: string): Promise<void> {
         return;
     }
 
-    const outputDir = resolveCodegenOutputDir(project, filePath, workspaceCodegenOutputSetting());
+    const setup = await ensureCodegenOutputPath(
+        filePath,
+        project,
+        workspaceCodegenOutputSetting()
+    );
+    if (!setup) {
+        return;
+    }
+    project = setup.project;
+    const outputDir = setup.outputDir;
     const result = generateCode(project, filePath, outputDir);
 
     // Confirm if output directory already exists and has files

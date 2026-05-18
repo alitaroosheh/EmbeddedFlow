@@ -537,6 +537,13 @@ export function applyPageInspectorPatch(
         }
     }
 
+    if (patch.projLvglInclude !== undefined && typeof patch.projLvglInclude === "string") {
+        const inc = patch.projLvglInclude.trim();
+        if (inc === "lvgl.h" || inc === "lvgl/lvgl.h") {
+            project.project.lvglInclude = inc;
+        }
+    }
+
     const disp = project.display;
 
     if (patch.dispWidth !== undefined) {

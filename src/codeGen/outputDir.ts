@@ -1,6 +1,16 @@
 import * as path from "path";
 import type { EmbfProject } from "../types/embf";
 
+/** Store a picked folder in .embf relative to the project file when possible. */
+export function formatOutputPathForStorage(embfPath: string, chosenDir: string): string {
+    const embfDir = path.dirname(embfPath);
+    const rel = path.relative(embfDir, chosenDir);
+    if (rel && !rel.startsWith("..") && !path.isAbsolute(rel)) {
+        return rel.split(path.sep).join("/");
+    }
+    return chosenDir;
+}
+
 /**
  * Resolve where generated C files are written.
  * Priority: `project.outputPath` in .embf → workspace `embeddedflow.outputDirectory` → `<embf-dir>/ui_output`.

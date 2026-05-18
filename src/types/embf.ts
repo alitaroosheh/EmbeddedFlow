@@ -3,6 +3,9 @@ export type ColorFormat = "RGB565" | "RGB888" | "ARGB8888" | "L8" | "AL88";
 export type Orientation = "portrait" | "landscape" | "portrait_flipped" | "landscape_flipped";
 export type TextDirection = "ltr" | "rtl";
 
+/** How generated C code includes LVGL (platform include paths differ). */
+export type LvglIncludePath = "lvgl.h" | "lvgl/lvgl.h";
+
 export interface EmbfProject {
     version: "1.0";
     project: ProjectMeta;
@@ -23,6 +26,11 @@ export interface ProjectMeta {
      * When omitted, the extension uses `embeddedflow.outputDirectory` or `ui_output` next to the `.embf` file.
      */
     outputPath?: string;
+    /**
+     * LVGL header include in generated `ui*.h` / `ui.h`.
+     * @default "lvgl/lvgl.h"
+     */
+    lvglInclude?: LvglIncludePath;
 }
 
 export interface DisplayConfig {

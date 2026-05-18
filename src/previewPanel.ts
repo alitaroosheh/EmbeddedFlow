@@ -15,6 +15,7 @@ import {
     updateWidgetInEmbfFile
 } from "./embfComponentEdit";
 import { readEmbfProject } from "./embfProjectWrite";
+import { formatOutputPathForStorage, resolveCodegenOutputDir } from "./codeGen/outputDir";
 import { undoEmbfEdit, redoEmbfEdit, getEmbfHistoryState } from "./embfUndoRedo";
 import { appendWidgetToEmbfFile } from "./embfWidgetInsert";
 import { embeddedFlowLog } from "./outputLog";
@@ -43,6 +44,7 @@ export type WebviewToHostMessage =
           updates: { componentId: string; patch: Record<string, unknown> }[];
       }
     | { type: "updatePage"; pageIndex: number; patch: Record<string, unknown> }
+    | { type: "pickCodegenOutputFolder"; pageIndex: number }
     | { type: "deleteWidget"; pageIndex: number; componentId: string }
     | { type: "bulkDeleteWidgets"; pageIndex: number; componentIds: string[] }
     | {
@@ -71,6 +73,8 @@ export interface WebviewLoadPayload {
      * Only used after debounced inspector-driven reloads (same WASM build).
      */
     suppressLoadingSpinner?: boolean;
+    /** Absolute path where Generate C Code writes files (from project.outputPath / settings). */
+    codegenOutputResolved?: string;
 }
 
 export interface SendProjectOptions {
@@ -189,6 +193,11 @@ export class EmbfPreviewPanel {
         if (suppressLoadingSpinner) {
             payload.suppressLoadingSpinner = true;
         }
+        payload.codegenOutputResolved = resolveCodegenOutputDir(
+            project,
+            this._filePath,
+            workspaceCodegenOutputSetting()
+        );
 
         this.postToWebview({
             type: "load",
@@ -354,6 +363,12 @@ export class EmbfPreviewPanel {
                     this.sendHistoryState();
                 }
             });
+        } else if (msg.type === "pickCodegenOutputFolder") {
+            const pageIndex = Number(msg.pageIndex);
+            if (!Number.isInteger(pageIndex) || pageIndex < 0) {
+                return;
+            }
+            void this._pickCodegenOutputFolder(pageIndex);
         } else if (msg.type === "deleteWidget") {
             const pageIndex = Number(msg.pageIndex);
             const componentId = String(msg.componentId ?? "").trim();
@@ -410,6 +425,30 @@ export class EmbfPreviewPanel {
                     this.sendHistoryState();
                 }
             });
+        }
+    }
+
+    private async _pickCodegenOutputFolder(pageIndex: number): Promise<void> {
+        const defaultUri = vscode.Uri.file(path.join(path.dirname(this._filePath), "ui_output"));
+        const picked = await vscode.window.showOpenDialog({
+            canSelectFolders: true,
+            canSelectFiles: false,
+            canSelectMany: false,
+            defaultUri,
+            title: "Select folder for generated C UI files",
+            openLabel: "Select folder"
+        });
+        if (!picked?.length) {
+            return;
+        }
+
+        const stored = formatOutputPathForStorage(this._filePath, picked[0].fsPath);
+        const ok = await updatePageInEmbfFile(this._filePath, pageIndex, { projOutputPath: stored });
+        if (ok) {
+            this.reloadPreviewNow(pageIndex);
+            this.sendHistoryState();
+        } else {
+            vscode.window.showErrorMessage("embeddedflow: could not save output folder to the .embf file.");
         }
     }
 
@@ -936,6 +975,10 @@ export class EmbfPreviewPanel {
         this._disposables.forEach(d => d.dispose());
         this._disposables = [];
     }
+}
+
+function workspaceCodegenOutputSetting(): string {
+    return vscode.workspace.getConfiguration("embeddedflow").get<string>("outputDirectory", "") ?? "";
 }
 
 function getNonce(): string {

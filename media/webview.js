@@ -22,6 +22,7 @@
  *   { type: "updateWidget", pageIndex: number, componentId: string, patch: object }
  *   { type: "bulkPatchWidgets", pageIndex: number, updates: [{ componentId, patch }, ...] }
  *   { type: "updatePage", pageIndex: number, patch: object }
+ *   { type: "pickCodegenOutputFolder", pageIndex: number }
  *   { type: "deleteWidget", pageIndex: number, componentId: string }
  *   { type: "bulkDeleteWidgets", pageIndex: number, componentIds: string[] }
  *   { type: "combineWidgets", pageIndex: number, componentIds: string[] } — sibling widgets → one container
@@ -65,6 +66,8 @@ const displayWrapper = document.getElementById("display-wrapper");
 /** @type {ReturnType<typeof setTimeout> | null} */
 let inspectorDebounce = null;
 let inspectorSyncing = false;
+/** Absolute codegen output dir from host (project.outputPath / workspace / ui_output). */
+let codegenOutputResolved = "";
 
 // ── Runtime state ─────────────────────────────────────────────────────────────
 /** @type {any} Current Emscripten module instance */
@@ -219,6 +222,8 @@ function applyEmbfThemeFromProject(project) {
 // ── Load handler ───────────────────────────────────────────────────────────────
 async function handleLoad(payload) {
     currentProject = payload.project;
+    codegenOutputResolved =
+        typeof payload.codegenOutputResolved === "string" ? payload.codegenOutputResolved : "";
     displayRound = !!(currentProject?.display && currentProject.display.round === true);
     previewDarkOverride = null;
     displayWidth = payload.displayWidth;
@@ -1432,6 +1437,20 @@ function setSelection(componentId) {
     renderInspector();
 }
 
+function wirePageInspectorActions() {
+    const browseBtn = document.getElementById("btn-browse-codegen-output");
+    if (browseBtn && !browseBtn.dataset.wired) {
+        browseBtn.dataset.wired = "1";
+        browseBtn.addEventListener("click", e => {
+            e.preventDefault();
+            vscode.postMessage({
+                type: "pickCodegenOutputFolder",
+                pageIndex: currentPageIndex
+            });
+        });
+    }
+}
+
 /**
  * Full HTML block for inspecting the active page (.embf pages[] entry + project.theme.dark).
  * @param {object} page
@@ -1463,12 +1482,26 @@ function renderPageInspectorHtml(page, project) {
             "Description",
             (project.project && project.project.description) || ""
         ) +
+        `<div class="inspector-group-title">Code generation</div>` +
+        fieldSelect(
+            "proj_lvglInclude",
+            "LVGL header include",
+            [
+                { value: "lvgl/lvgl.h", label: '#include "lvgl/lvgl.h"' },
+                { value: "lvgl.h", label: '#include "lvgl.h"' }
+            ],
+            (project.project && project.project.lvglInclude) || "lvgl/lvgl.h"
+        ) +
         fieldText(
             "proj_outputPath",
-            "Codegen output folder",
+            "Output folder (saved in .embf)",
             (project.project && project.project.outputPath) || ""
         ) +
-        `<div class="field"><p style="font-size:11px;color:#888;margin:0 0 8px;line-height:1.35;">Relative to the .embf file, or an absolute path. Empty uses workspace setting or ui_output.</p></div>` +
+        `<button type="button" class="tb-btn-small" id="btn-browse-codegen-output">Browse...</button>` +
+        `<div class="field"><p style="font-size:11px;color:#888;margin:0 0 8px;line-height:1.35;">` +
+        `Resolved: <code>${esc(codegenOutputResolved || "(workspace default or ui_output next to .embf)")}</code><br/>` +
+        `Relative to the .embf file, or absolute. On first Generate C Code you will be asked if empty.` +
+        `</p></div>` +
         `<div class="inspector-group-title">Display</div>` +
         `<div class="row2">` +
         fieldNum("disp_width", "Width", project.display.width) +
@@ -2363,6 +2396,8 @@ function renderInspector() {
         inspectorForm.innerHTML = renderPageInspectorHtml(page, currentProject);
         inspectorSyncing = false;
 
+        wirePageInspectorActions();
+
         if (inspectorFocusSnap) {
             requestAnimationFrame(() => {
                 queueMicrotask(() => restoreInspectorFocus(inspectorFocusSnap));
@@ -2815,6 +2850,11 @@ function readPageInspectorPatch() {
     const outPath = inspectorForm.elements.namedItem("proj_outputPath");
     if (outPath instanceof HTMLInputElement) {
         patch.projOutputPath = outPath.value.trim() === "" ? null : outPath.value.trim();
+    }
+
+    const lvInc = inspectorForm.elements.namedItem("proj_lvglInclude");
+    if (lvInc instanceof HTMLSelectElement && lvInc.value) {
+        patch.projLvglInclude = lvInc.value;
     }
 
     const dw = inspectorForm.elements.namedItem("disp_width");

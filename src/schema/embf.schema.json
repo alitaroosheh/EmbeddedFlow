@@ -27,6 +27,11 @@
           "type": "string",
           "minLength": 1,
           "description": "Output folder for generated C code (relative to the .embf file or absolute). Overrides the embeddedflow.outputDirectory workspace setting when set."
+        },
+        "lvglInclude": {
+          "type": "string",
+          "enum": ["lvgl.h", "lvgl/lvgl.h"],
+          "description": "LVGL header include path emitted in generated ui*.h files."
         }
       }
     },

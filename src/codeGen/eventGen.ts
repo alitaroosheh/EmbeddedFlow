@@ -101,7 +101,7 @@ function emitAction(project: EmbfProject, page: Page, action: Action, v9: boolea
             if (v9) {
                 return `{ lv_theme_t *t = lv_theme_default_init(lv_display_get_default(), ${primary}, ${secondary}, ${darkExpr}, LV_FONT_DEFAULT); lv_display_set_theme(lv_display_get_default(), t); lv_obj_report_style_change(NULL); }`;
             }
-            return `{ lv_theme_t *t = lv_theme_default_init(${primary}, ${secondary}, ${darkExpr}, LV_FONT_DEFAULT); lv_disp_set_theme(lv_disp_get_default(), t); lv_obj_report_style_change(NULL); }`;
+            return `{ lv_theme_t *t = lv_theme_default_init(lv_disp_get_default(), ${primary}, ${secondary}, ${darkExpr}, LV_FONT_DEFAULT); lv_disp_set_theme(lv_disp_get_default(), t); lv_obj_report_style_change(NULL); }`;
         }
         default:
             return `/* unsupported action: ${(action as any).type} */`;

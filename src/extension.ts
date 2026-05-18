@@ -18,7 +18,7 @@ const liveGenDebounceMs = 600;
 const liveGenTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 export function activate(context: vscode.ExtensionContext): void {
-    const embfOutput = vscode.window.createOutputChannel("EmbeddedFlow");
+    const embfOutput = vscode.window.createOutputChannel("embeddedflow");
     context.subscriptions.push(embfOutput);
     registerEmbeddedFlowOutput(embfOutput);
 

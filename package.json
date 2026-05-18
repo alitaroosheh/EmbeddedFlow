@@ -1,9 +1,18 @@
 {
   "name": "embeddedflow",
-  "displayName": "EmbeddedFlow",
-  "description": "LVGL UI preview for .embf project files — live canvas rendering via WebAssembly",
+  "publisher": "erminity",
+  "displayName": "embeddedflow (an LVGL Design tool)",
+  "description": "Design embedded UIs in .embf projects — live LVGL preview, visual editor, and C code generation.",
   "version": "0.1.0",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alitaroosheh/EmbeddedFlow.git"
+  },
+  "bugs": {
+    "url": "https://github.com/alitaroosheh/EmbeddedFlow/issues"
+  },
+  "homepage": "https://github.com/alitaroosheh/EmbeddedFlow#readme",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -27,21 +36,21 @@
     "onCommand:embeddedflow.showOutput"
   ],
   "main": "./out/extension.js",
-  "icon": "media/erminity-mark.png",
+  "icon": "media/embeddedflow-icon.png",
   "contributes": {
     "languages": [
       {
         "id": "embf",
         "aliases": [
-          "EmbeddedFlow Project",
+          "embeddedflow project",
           "embf"
         ],
         "extensions": [
           ".embf"
         ],
         "icon": {
-          "light": "./media/erminity-mark.png",
-          "dark": "./media/erminity-mark.png"
+          "light": "./media/embeddedflow-icon.png",
+          "dark": "./media/embeddedflow-icon.png"
         },
         "configuration": "./language-configuration.json"
       }
@@ -49,21 +58,21 @@
     "commands": [
       {
         "command": "embeddedflow.openPreview",
-        "title": "EmbeddedFlow: Open UI Preview",
+        "title": "embeddedflow: Open UI Preview",
         "icon": "$(preview)"
       },
       {
         "command": "embeddedflow.newProject",
-        "title": "EmbeddedFlow: New Project"
+        "title": "embeddedflow: New Project"
       },
       {
         "command": "embeddedflow.generateCode",
-        "title": "EmbeddedFlow: Generate C Code",
+        "title": "embeddedflow: Generate C Code",
         "icon": "$(file-code)"
       },
       {
         "command": "embeddedflow.showOutput",
-        "title": "EmbeddedFlow: Show Output Log",
+        "title": "embeddedflow: Show Output Log",
         "icon": "$(output)"
       }
     ],
@@ -110,7 +119,7 @@
       }
     ],
     "configuration": {
-      "title": "EmbeddedFlow",
+      "title": "embeddedflow",
       "properties": {
         "embeddedflow.defaultLvglVersion": {
           "type": "string",

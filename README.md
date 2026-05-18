@@ -1,6 +1,6 @@
-# EmbeddedFlow
+# embeddedflow (an LVGL Design tool)
 
-**EmbeddedFlow** is a [Visual Studio Code](https://code.visualstudio.com/) extension for describing embedded UIs in a JSON project format (`.embf`), previewing them with **LVGL** in a live canvas inside the editor, and generating **C** source you can drop into a firmware project.
+**embeddedflow** is a [Visual Studio Code](https://code.visualstudio.com/) extension for designing embedded UIs with **LVGL**: edit `.embf` project files, preview on a live canvas in the editor, and generate **C** source for your firmware.
 
 ## What it does
 

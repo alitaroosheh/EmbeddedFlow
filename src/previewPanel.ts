@@ -497,7 +497,7 @@ export class EmbfPreviewPanel {
 
     private _buildHtml(): string {
         const webviewJsUri = this._webviewUri("webview.js");
-        const faviconUri = this._webviewUri("erminity-mark.png").toString();
+        const faviconUri = this._webviewUri("embeddedflow-icon.png").toString();
         const nonce = getNonce();
 
         // CSP: nonce for inline scripts, cspSource for extension-hosted scripts/wasm
@@ -517,7 +517,7 @@ export class EmbfPreviewPanel {
     <meta http-equiv="Content-Security-Policy" content="${csp}" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/png" href="${faviconUri}" />
-    <title>EmbeddedFlow Preview</title>
+    <title>embeddedflow Preview</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {

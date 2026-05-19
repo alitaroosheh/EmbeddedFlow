@@ -1,0 +1,138 @@
+{
+  "version": "1.0",
+  "project": {
+    "name": "traffic",
+    "lvglVersion": "8.4.0",
+    "lvglInclude": "lvgl.h",
+    "outputPath": "main/ui"
+  },
+  "display": {
+    "width": 800,
+    "height": 600,
+    "bitDepth": 16,
+    "colorFormat": "RGB565",
+    "orientation": "landscape",
+    "direction": "ltr",
+    "dpi": 100,
+    "round": false
+  },
+  "theme": {
+    "dark": false,
+    "primaryColor": "#d04981",
+    "secondaryColor": "#715b5b"
+  },
+  "pages": [
+    {
+      "id": "page_main",
+      "name": "Main",
+      "components": [
+        {
+          "id": "lbl_hello",
+          "type": "label",
+          "x": 10,
+          "y": 10,
+          "width": 200,
+          "height": 30,
+          "text": "Hello, EmbeddedFlow!"
+        },
+        {
+          "id": "sw_1",
+          "x": 245,
+          "y": 170,
+          "width": 52,
+          "height": 28,
+          "type": "switch",
+          "checked": false
+        },
+        {
+          "id": "ta_1",
+          "x": 204,
+          "y": 12,
+          "width": 160,
+          "height": 72,
+          "type": "textarea",
+          "text": ""
+        },
+        {
+          "id": "lbl_1",
+          "x": 119,
+          "y": 139,
+          "width": 120,
+          "height": 28,
+          "type": "label",
+          "text": "Label"
+        },
+        {
+          "id": "dd_1",
+          "x": 325,
+          "y": 155,
+          "width": 140,
+          "height": 36,
+          "type": "dropdown",
+          "options": [
+            "One",
+            "Two",
+            "Three"
+          ],
+          "selectedIndex": 0
+        },
+        {
+          "id": "sld_1",
+          "x": 290,
+          "y": 305,
+          "width": 140,
+          "height": 24,
+          "type": "slider",
+          "min": 0,
+          "max": 100,
+          "value": 50
+        },
+        {
+          "id": "btn_1",
+          "x": 670,
+          "y": 526,
+          "width": 88,
+          "height": 36,
+          "type": "button",
+          "label": "Settings",
+          "hidden": false,
+          "events": [
+            {
+              "trigger": "clicked",
+              "actions": [
+                {
+                  "type": "navigate",
+                  "target": "page_settings"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "page_settings",
+      "name": "Settings",
+      "components": [
+        {
+          "id": "ta_2",
+          "x": 302,
+          "y": 249,
+          "width": 160,
+          "height": 72,
+          "type": "textarea",
+          "text": ""
+        },
+        {
+          "id": "sw_2",
+          "x": 341,
+          "y": 137,
+          "width": 52,
+          "height": 28,
+          "type": "switch",
+          "checked": false
+        }
+      ]
+    }
+  ]
+}

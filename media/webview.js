@@ -51,7 +51,15 @@ const designModeCheck = /** @type {HTMLInputElement | null} */ (document.getElem
 const errorOverlay = document.getElementById("error-overlay");
 const loadingOverlay = document.getElementById("loading-overlay");
 const pageSelect = document.getElementById("page-select");
-const widgetPalette = document.getElementById("widget-palette");
+const leftSidebar = document.getElementById("left-sidebar");
+const sidebarRail = document.getElementById("sidebar-rail");
+const sidebarPanel = document.getElementById("sidebar-panel");
+const sidebarPanelTitle = document.getElementById("sidebar-panel-title");
+const sidebarPanelComponents = document.getElementById("sidebar-panel-components");
+const pageListEl = document.getElementById("page-list");
+const btnPageAdd = document.getElementById("btn-page-add");
+const btnPageRemove = document.getElementById("btn-page-remove");
+const btnPageRename = document.getElementById("btn-page-rename");
 const canvasContainer = document.getElementById("canvas-container");
 const statusEl = document.getElementById("status");
 const inspectorEmpty = document.getElementById("inspector-empty");
@@ -67,7 +75,21 @@ const toolbarShell = document.getElementById("toolbar-shell");
 const btnToggleToolbar = document.getElementById("btn-toggle-toolbar");
 const propertyInspector = document.getElementById("property-inspector");
 const btnToggleInspector = document.getElementById("btn-toggle-inspector");
-const btnTogglePalette = document.getElementById("btn-toggle-palette");
+const btnToggleLeftSidebar = document.getElementById("btn-toggle-left-sidebar");
+
+/** Sidebar category rail → parallel panel (extend when adding categories in sidebarCategories.ts). */
+const SIDEBAR_PANEL_LABELS = {
+    components: "Components",
+    pages: "Pages",
+    flow: "Flow"
+};
+const SIDEBAR_PANEL_WIDE = new Set(["pages", "flow"]);
+const flowFromPage = /** @type {HTMLSelectElement | null} */ (document.getElementById("flow-from-page"));
+const flowComponent = /** @type {HTMLSelectElement | null} */ (document.getElementById("flow-component"));
+const flowTrigger = /** @type {HTMLSelectElement | null} */ (document.getElementById("flow-trigger"));
+const flowToPage = /** @type {HTMLSelectElement | null} */ (document.getElementById("flow-to-page"));
+const flowListEl = document.getElementById("flow-list");
+const btnFlowAdd = document.getElementById("btn-flow-add");
 /** @type {ReturnType<typeof setTimeout> | null} */
 let inspectorDebounce = null;
 let inspectorSyncing = false;
@@ -267,6 +289,9 @@ async function handleLoad(payload) {
             : currentPageIndex;
     populatePageSelect(pages);
     currentPageIndex = Math.min(Math.max(0, requestedPage), Math.max(0, pages.length - 1));
+    renderPageList();
+    populateFlowForm();
+    renderFlowList();
     if (pageSelect) {
         pageSelectProgrammatic = true;
         pageSelect.value = String(currentPageIndex);
@@ -450,12 +475,16 @@ initPreviewLayoutObserver();
 
 // ── Collapsible toolbar, widget palette & properties panel ─────────────────────
 
-/** @type {{ toolbarCollapsed: boolean, paletteCollapsed: boolean, inspectorCollapsed: boolean }} */
+/** @type {{ toolbarCollapsed: boolean, leftSidebarCollapsed: boolean, inspectorCollapsed: boolean, sidebarCategory?: string }} */
 let panelCollapseState = {
     toolbarCollapsed: false,
-    paletteCollapsed: false,
-    inspectorCollapsed: false
+    leftSidebarCollapsed: false,
+    inspectorCollapsed: false,
+    sidebarCategory: "components"
 };
+
+/** Active category in the left rail (components, pages, …). */
+let activeSidebarCategory = "components";
 
 function loadPanelCollapseState() {
     const saved = vscode.getState();
@@ -465,14 +494,19 @@ function loadPanelCollapseState() {
         saved.panelCollapse &&
         typeof saved.panelCollapse === "object"
     ) {
-        const pc = /** @type {{ toolbarCollapsed?: boolean, paletteCollapsed?: boolean, inspectorCollapsed?: boolean }} */ (
+        const pc = /** @type {{ toolbarCollapsed?: boolean, paletteCollapsed?: boolean, leftSidebarCollapsed?: boolean, inspectorCollapsed?: boolean, sidebarCategory?: string }} */ (
             saved.panelCollapse
         );
         panelCollapseState = {
             toolbarCollapsed: !!pc.toolbarCollapsed,
-            paletteCollapsed: !!pc.paletteCollapsed,
-            inspectorCollapsed: !!pc.inspectorCollapsed
+            leftSidebarCollapsed: !!(pc.leftSidebarCollapsed ?? pc.paletteCollapsed),
+            inspectorCollapsed: !!pc.inspectorCollapsed,
+            sidebarCategory:
+                typeof pc.sidebarCategory === "string" && pc.sidebarCategory in SIDEBAR_PANEL_LABELS
+                    ? pc.sidebarCategory
+                    : "components"
         };
+        activeSidebarCategory = panelCollapseState.sidebarCategory ?? "components";
     }
 }
 
@@ -500,15 +534,16 @@ function applyPanelCollapseState() {
         btnToggleToolbar.textContent = collapsed ? "▼ Show toolbar" : "▲ Hide toolbar";
         btnToggleToolbar.title = collapsed ? "Show toolbar" : "Hide toolbar";
     }
-    if (widgetPalette) {
-        widgetPalette.classList.toggle("collapsed", panelCollapseState.paletteCollapsed);
+    if (leftSidebar) {
+        leftSidebar.classList.toggle("collapsed", panelCollapseState.leftSidebarCollapsed);
     }
-    if (btnTogglePalette) {
-        const collapsed = panelCollapseState.paletteCollapsed;
-        btnTogglePalette.setAttribute("aria-expanded", String(!collapsed));
-        btnTogglePalette.textContent = collapsed ? "›" : "‹";
-        btnTogglePalette.title = collapsed ? "Show widget palette" : "Hide widget palette";
+    if (btnToggleLeftSidebar) {
+        const collapsed = panelCollapseState.leftSidebarCollapsed;
+        btnToggleLeftSidebar.setAttribute("aria-expanded", String(!collapsed));
+        btnToggleLeftSidebar.textContent = collapsed ? "›" : "‹";
+        btnToggleLeftSidebar.title = collapsed ? "Show sidebar" : "Hide sidebar";
     }
+    setSidebarCategory(activeSidebarCategory, false);
     if (propertyInspector) {
         propertyInspector.classList.toggle("collapsed", panelCollapseState.inspectorCollapsed);
     }
@@ -540,11 +575,70 @@ if (btnToggleInspector) {
     });
 }
 
-if (btnTogglePalette) {
-    btnTogglePalette.addEventListener("click", () => {
-        panelCollapseState.paletteCollapsed = !panelCollapseState.paletteCollapsed;
+if (btnToggleLeftSidebar) {
+    btnToggleLeftSidebar.addEventListener("click", () => {
+        panelCollapseState.leftSidebarCollapsed = !panelCollapseState.leftSidebarCollapsed;
         savePanelCollapseState();
         applyPanelCollapseState();
+    });
+}
+
+function setSidebarCategory(categoryId, persist = true) {
+    if (!(categoryId in SIDEBAR_PANEL_LABELS)) {
+        return;
+    }
+    activeSidebarCategory = categoryId;
+    if (persist) {
+        panelCollapseState.sidebarCategory = categoryId;
+        savePanelCollapseState();
+    }
+    if (sidebarRail) {
+        sidebarRail.querySelectorAll(".sidebar-rail-btn").forEach(btn => {
+            if (!(btn instanceof HTMLButtonElement)) {
+                return;
+            }
+            const id = btn.getAttribute("data-sidebar-panel");
+            btn.classList.toggle("active", id === categoryId);
+            btn.setAttribute("aria-selected", id === categoryId ? "true" : "false");
+        });
+    }
+    document.querySelectorAll(".sidebar-panel-view").forEach(view => {
+        if (!(view instanceof HTMLElement)) {
+            return;
+        }
+        const id = view.getAttribute("data-sidebar-panel");
+        view.hidden = id !== categoryId;
+    });
+    if (sidebarPanelTitle) {
+        sidebarPanelTitle.textContent = SIDEBAR_PANEL_LABELS[categoryId] ?? categoryId;
+    }
+    if (sidebarPanel) {
+        sidebarPanel.classList.toggle("wide", SIDEBAR_PANEL_WIDE.has(categoryId));
+    }
+    if (categoryId === "pages") {
+        renderPageList();
+    }
+    if (categoryId === "flow") {
+        populateFlowForm();
+        renderFlowList();
+    }
+    refreshPreviewLayoutAfterPanelChange();
+}
+
+if (sidebarRail) {
+    sidebarRail.addEventListener("click", e => {
+        const t = e.target;
+        if (!(t instanceof Element)) {
+            return;
+        }
+        const btn = t.closest(".sidebar-rail-btn[data-sidebar-panel]");
+        if (!(btn instanceof HTMLButtonElement)) {
+            return;
+        }
+        const id = btn.getAttribute("data-sidebar-panel");
+        if (id) {
+            setSidebarCategory(id);
+        }
     });
 }
 
@@ -992,6 +1086,8 @@ function dispatchAction(action, eventValue, currentPage) {
                 buildUiFromProject(currentProject, targetIdx);
                 drawDesignOverlay();
                 renderInspector();
+                renderPageList();
+                renderFlowList();
             } finally {
                 pageSelectProgrammatic = false;
             }
@@ -1258,6 +1354,194 @@ function findComponentById(components, id) {
         }
     }
     return null;
+}
+
+/** @param {object[]} components */
+function flatComponentsList(components) {
+    /** @type {object[]} */
+    const out = [];
+    for (const c of components ?? []) {
+        out.push(c);
+        if (c.children?.length) {
+            out.push(...flatComponentsList(c.children));
+        }
+    }
+    return out;
+}
+
+/** @returns {Array<{ sourcePageIndex: number, sourcePageId: string, sourcePageName: string, componentId: string, componentType: string, trigger: string, targetPageId: string, targetPageName: string, targetPageIndex: number }>} */
+function collectNavigateFlowsFromProject() {
+    if (!currentProject) {
+        return [];
+    }
+    /** @type {ReturnType<typeof collectNavigateFlowsFromProject>} */
+    const flows = [];
+    for (let pi = 0; pi < currentProject.pages.length; pi++) {
+        const page = currentProject.pages[pi];
+        for (const comp of flatComponentsList(page.components)) {
+            for (const evt of comp.events ?? []) {
+                for (const action of evt.actions ?? []) {
+                    if (action.type !== "navigate") {
+                        continue;
+                    }
+                    const ti = currentProject.pages.findIndex(p => p.id === action.target);
+                    if (ti < 0) {
+                        continue;
+                    }
+                    const target = currentProject.pages[ti];
+                    flows.push({
+                        sourcePageIndex: pi,
+                        sourcePageId: page.id,
+                        sourcePageName: page.name,
+                        componentId: comp.id,
+                        componentType: comp.type,
+                        trigger: evt.trigger,
+                        targetPageId: target.id,
+                        targetPageName: target.name,
+                        targetPageIndex: ti
+                    });
+                }
+            }
+        }
+    }
+    return flows;
+}
+
+function populateFlowForm() {
+    if (!currentProject) {
+        return;
+    }
+    const pages = currentProject.pages;
+    if (flowFromPage) {
+        const prev = flowFromPage.value;
+        flowFromPage.innerHTML = "";
+        pages.forEach((p, i) => {
+            const opt = document.createElement("option");
+            opt.value = String(i);
+            opt.textContent = `${p.name} (${p.id})`;
+            flowFromPage.appendChild(opt);
+        });
+        flowFromPage.value =
+            prev && pages[Number(prev)] !== undefined ? prev : String(currentPageIndex);
+    }
+    if (flowToPage) {
+        flowToPage.innerHTML = "";
+        pages.forEach(p => {
+            const opt = document.createElement("option");
+            opt.value = p.id;
+            opt.textContent = `${p.name} (${p.id})`;
+            flowToPage.appendChild(opt);
+        });
+    }
+    populateFlowComponentSelect();
+}
+
+function populateFlowComponentSelect() {
+    if (!flowComponent || !flowFromPage || !currentProject) {
+        return;
+    }
+    const pi = parseInt(flowFromPage.value, 10) || 0;
+    const page = currentProject.pages[pi];
+    const prev = flowComponent.value;
+    flowComponent.innerHTML = "";
+    if (!page) {
+        return;
+    }
+    for (const comp of flatComponentsList(page.components)) {
+        const opt = document.createElement("option");
+        opt.value = comp.id;
+        opt.textContent = `${comp.id} (${comp.type})`;
+        flowComponent.appendChild(opt);
+    }
+    if (prev && [...flowComponent.options].some(o => o.value === prev)) {
+        flowComponent.value = prev;
+    }
+}
+
+function renderFlowList() {
+    if (!flowListEl) {
+        return;
+    }
+    flowListEl.innerHTML = "";
+    const flows = collectNavigateFlowsFromProject();
+    if (!flows.length) {
+        const empty = document.createElement("li");
+        empty.className = "flow-list-empty";
+        empty.textContent =
+            "No page flows yet. Use + Add flow to wire a component event to another page.";
+        flowListEl.appendChild(empty);
+        return;
+    }
+    for (const f of flows) {
+        const li = document.createElement("li");
+        li.className = "flow-list-item";
+
+        const main = document.createElement("button");
+        main.type = "button";
+        main.className = "flow-list-main";
+        main.title = "Go to source widget";
+        const route = document.createElement("span");
+        route.className = "flow-route";
+        route.textContent = `${f.sourcePageName} → ${f.targetPageName}`;
+        const meta = document.createElement("span");
+        meta.className = "flow-meta";
+        meta.textContent = `${f.componentId} (${f.componentType}) · ${f.trigger}`;
+        main.appendChild(route);
+        main.appendChild(meta);
+        main.addEventListener("click", () => {
+            navigateToPageIndex(f.sourcePageIndex);
+            inspectorShowingPage = false;
+            selectedComponentOrder = [f.componentId];
+            drawDesignOverlay();
+            renderInspector();
+        });
+
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.className = "flow-list-remove";
+        removeBtn.textContent = "×";
+        removeBtn.title = "Remove this flow";
+        removeBtn.addEventListener("click", e => {
+            e.stopPropagation();
+            vscode.postMessage({
+                type: "removeNavigateFlow",
+                sourcePageIndex: f.sourcePageIndex,
+                componentId: f.componentId,
+                trigger: f.trigger,
+                targetPageId: f.targetPageId
+            });
+        });
+
+        li.appendChild(main);
+        li.appendChild(removeBtn);
+        flowListEl.appendChild(li);
+    }
+}
+
+if (flowFromPage) {
+    flowFromPage.addEventListener("change", () => populateFlowComponentSelect());
+}
+
+if (btnFlowAdd) {
+    btnFlowAdd.addEventListener("click", () => {
+        if (!currentProject || !flowFromPage || !flowComponent || !flowTrigger || !flowToPage) {
+            return;
+        }
+        const sourcePageIndex = parseInt(flowFromPage.value, 10) || 0;
+        const componentId = flowComponent.value;
+        const trigger = flowTrigger.value;
+        const targetPageId = flowToPage.value;
+        if (!componentId || !targetPageId) {
+            return;
+        }
+        vscode.postMessage({
+            type: "addNavigateFlow",
+            sourcePageIndex,
+            componentId,
+            trigger,
+            targetPageId
+        });
+    });
 }
 
 /** Absolute boxes for all selected widgets (skips stale ids). */
@@ -3476,6 +3760,9 @@ function setupDesignOverlay() {
                 pageIndex: currentPageIndex,
                 moves
             });
+        } else {
+            // Design mode captures the overlay; forward a short tap so widget events (e.g. navigate) run.
+            forwardPointerTapToLvgl(x, y);
         }
         dragState = null;
         drawDesignOverlay();
@@ -3589,12 +3876,25 @@ function sendPointer(e, pressed, pumpLevel) {
     const scaleY = displayHeight / rect.height;
     const x = Math.round((e.clientX - rect.left) * scaleX);
     const y = Math.round((e.clientY - rect.top) * scaleY);
+    forwardPointerToLvgl(x, y, pressed, pumpLevel);
+}
+
+/** Send pointer to WASM in display coordinates (used by canvas + design-mode taps). */
+function forwardPointerToLvgl(x, y, pressed, pumpLevel = 0) {
+    if (!wasmReady || !WasmModule) {
+        return;
+    }
     const fn = WasmModule._embf_on_pointer ?? WasmModule._onPointerEvent;
     fn?.(x, y, pressed ? 1 : 0);
-    /* pumpLevel: 0 = none (rely on rAF), 1 = light tick while dragging, 4 = press/release (CLICKED) */
     if (pumpLevel > 0) {
         pumpLvglAfterPointer(pumpLevel);
     }
+}
+
+/** Tap at display coords — press/release so LVGL fires CLICKED and the event queue drains. */
+function forwardPointerTapToLvgl(x, y) {
+    forwardPointerToLvgl(x, y, true, 4);
+    forwardPointerToLvgl(x, y, false, 4);
 }
 
 /**
@@ -3609,24 +3909,111 @@ function pumpLvglAfterPointer(iterations) {
     drainEventQueue();
 }
 
-// ── Page selector ─────────────────────────────────────────────────────────────
-if (pageSelect) {
-    pageSelect.addEventListener("change", () => {
-        if (!currentProject || pageSelectProgrammatic) return;
-        const idx = parseInt(pageSelect.value, 10) || 0;
-        currentPageIndex = idx;
-        selectedComponentOrder = [];
-        inspectorShowingPage = true;
-        dragState = null;
-        marqueeState = null;
-        buildUiFromProject(currentProject, idx);
-        drawDesignOverlay();
-        renderInspector();
+// ── Page navigation ───────────────────────────────────────────────────────────
+
+function navigateToPageIndex(idx) {
+    if (!currentProject) {
+        return;
+    }
+    const max = currentProject.pages.length - 1;
+    const next = Math.min(Math.max(0, idx), Math.max(0, max));
+    if (next === currentPageIndex) {
+        renderPageList();
+        return;
+    }
+    currentPageIndex = next;
+    pageSelectProgrammatic = true;
+    if (pageSelect) {
+        pageSelect.value = String(next);
+    }
+    pageSelectProgrammatic = false;
+    selectedComponentOrder = [];
+    inspectorShowingPage = true;
+    dragState = null;
+    marqueeState = null;
+    buildUiFromProject(currentProject, next);
+    drawDesignOverlay();
+    renderInspector();
+    renderPageList();
+}
+
+function updatePageSidebarActions() {
+    const multi = (currentProject?.pages.length ?? 0) > 1;
+    if (btnPageRemove instanceof HTMLButtonElement) {
+        btnPageRemove.disabled = !multi;
+    }
+    if (btnPageRename instanceof HTMLButtonElement) {
+        btnPageRename.disabled = !currentProject;
+    }
+    if (btnPageAdd instanceof HTMLButtonElement) {
+        btnPageAdd.disabled = !currentProject;
+    }
+}
+
+function renderPageList() {
+    if (!pageListEl || !currentProject) {
+        updatePageSidebarActions();
+        return;
+    }
+    pageListEl.innerHTML = "";
+    currentProject.pages.forEach((p, i) => {
+        const li = document.createElement("li");
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "page-list-item" + (i === currentPageIndex ? " active" : "");
+        btn.dataset.pageIndex = String(i);
+        const name = document.createElement("span");
+        name.className = "page-list-name";
+        name.textContent = p.name || `Page ${i + 1}`;
+        const idSpan = document.createElement("span");
+        idSpan.className = "page-list-id";
+        idSpan.textContent = p.id;
+        btn.appendChild(name);
+        btn.appendChild(idSpan);
+        btn.addEventListener("click", () => navigateToPageIndex(i));
+        li.appendChild(btn);
+        pageListEl.appendChild(li);
+    });
+    updatePageSidebarActions();
+}
+
+if (btnPageAdd) {
+    btnPageAdd.addEventListener("click", () => {
+        vscode.postMessage({ type: "addPage" });
     });
 }
 
-if (widgetPalette) {
-    widgetPalette.addEventListener("click", e => {
+if (btnPageRemove) {
+    btnPageRemove.addEventListener("click", () => {
+        if (!currentProject || currentProject.pages.length <= 1) {
+            return;
+        }
+        vscode.postMessage({ type: "removePage", pageIndex: currentPageIndex });
+    });
+}
+
+if (btnPageRename) {
+    btnPageRename.addEventListener("click", () => {
+        if (!currentProject) {
+            return;
+        }
+        vscode.postMessage({ type: "renamePage", pageIndex: currentPageIndex });
+    });
+}
+
+// ── Page selector (toolbar) ───────────────────────────────────────────────────
+if (pageSelect) {
+    pageSelect.addEventListener("change", () => {
+        if (!currentProject || pageSelectProgrammatic) {
+            return;
+        }
+        const idx = parseInt(pageSelect.value, 10) || 0;
+        navigateToPageIndex(idx);
+    });
+}
+
+if (sidebarPanelComponents) {
+    sidebarPanelComponents.addEventListener("click", e => {
         const t = e.target;
         if (!(t instanceof Element)) {
             return;

@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as path from "path";
 import { EmbfProject } from "./types/embf";
 import { buildWidgetPaletteHtml } from "./embfPaletteIcons";
+import { buildSidebarPanelViewsHtml, buildSidebarRailHtml } from "./sidebarCategories";
 import { EmbfParseError, getEffectiveDisplaySize } from "./embfParser";
 import {
     bulkDeleteWidgetsInEmbfFile,
@@ -18,6 +19,8 @@ import { readEmbfProject } from "./embfProjectWrite";
 import { formatOutputPathForStorage, resolveCodegenOutputDir } from "./codeGen/outputDir";
 import { undoEmbfEdit, redoEmbfEdit, getEmbfHistoryState } from "./embfUndoRedo";
 import { appendWidgetToEmbfFile } from "./embfWidgetInsert";
+import { addPageInEmbfFile, removePageInEmbfFile, renamePageInEmbfFile } from "./embfPageEdit";
+import { addNavigateFlowInEmbfFile, removeNavigateFlowInEmbfFile } from "./embfFlowEdit";
 import { embeddedFlowLog } from "./outputLog";
 
 // Messages sent from extension host → webview
@@ -54,7 +57,24 @@ export type WebviewToHostMessage =
       }
     | { type: "ungroupWidget"; pageIndex: number; componentId: string }
     | { type: "undo"; pageIndex: number; selectedComponentId?: string; selectedComponentIds?: string[] }
-    | { type: "redo"; pageIndex: number; selectedComponentId?: string; selectedComponentIds?: string[] };
+    | { type: "redo"; pageIndex: number; selectedComponentId?: string; selectedComponentIds?: string[] }
+    | { type: "addPage" }
+    | { type: "removePage"; pageIndex: number }
+    | { type: "renamePage"; pageIndex: number }
+    | {
+          type: "addNavigateFlow";
+          sourcePageIndex: number;
+          componentId: string;
+          trigger: string;
+          targetPageId: string;
+      }
+    | {
+          type: "removeNavigateFlow";
+          sourcePageIndex: number;
+          componentId: string;
+          trigger: string;
+          targetPageId: string;
+      };
 
 export interface WebviewLoadPayload {
     project: EmbfProject;
@@ -425,6 +445,87 @@ export class EmbfPreviewPanel {
                     this.sendHistoryState();
                 }
             });
+        } else if (msg.type === "addPage") {
+            void addPageInEmbfFile(this._filePath).then(res => {
+                if (res.ok && res.pageIndex !== undefined) {
+                    this.reloadPreviewNow(res.pageIndex);
+                    this.sendHistoryState();
+                }
+            });
+        } else if (msg.type === "removePage") {
+            const pageIndex = Number(msg.pageIndex);
+            if (!Number.isInteger(pageIndex) || pageIndex < 0) {
+                return;
+            }
+            void removePageInEmbfFile(this._filePath, pageIndex).then(res => {
+                if (res.ok && res.pageIndex !== undefined) {
+                    this.reloadPreviewNow(res.pageIndex);
+                    this.sendHistoryState();
+                }
+            });
+        } else if (msg.type === "renamePage") {
+            const pageIndex = Number(msg.pageIndex);
+            if (!Number.isInteger(pageIndex) || pageIndex < 0) {
+                return;
+            }
+            void renamePageInEmbfFile(this._filePath, pageIndex).then(ok => {
+                if (ok) {
+                    this.reloadPreviewNow(pageIndex);
+                    this.sendHistoryState();
+                }
+            });
+        } else if (msg.type === "addNavigateFlow") {
+            const sourcePageIndex = Number(msg.sourcePageIndex);
+            const componentId = String(msg.componentId ?? "").trim();
+            const trigger = String(msg.trigger ?? "").trim();
+            const targetPageId = String(msg.targetPageId ?? "").trim();
+            if (
+                !Number.isInteger(sourcePageIndex) ||
+                sourcePageIndex < 0 ||
+                !componentId ||
+                !trigger ||
+                !targetPageId
+            ) {
+                return;
+            }
+            void addNavigateFlowInEmbfFile(
+                this._filePath,
+                sourcePageIndex,
+                componentId,
+                trigger,
+                targetPageId
+            ).then(ok => {
+                if (ok) {
+                    this.reloadPreviewNow(sourcePageIndex, { selectedComponentId: componentId });
+                    this.sendHistoryState();
+                }
+            });
+        } else if (msg.type === "removeNavigateFlow") {
+            const sourcePageIndex = Number(msg.sourcePageIndex);
+            const componentId = String(msg.componentId ?? "").trim();
+            const trigger = String(msg.trigger ?? "").trim();
+            const targetPageId = String(msg.targetPageId ?? "").trim();
+            if (
+                !Number.isInteger(sourcePageIndex) ||
+                sourcePageIndex < 0 ||
+                !componentId ||
+                !trigger ||
+                !targetPageId
+            ) {
+                return;
+            }
+            void removeNavigateFlowInEmbfFile(
+                this._filePath,
+                sourcePageIndex,
+                componentId,
+                trigger,
+                targetPageId
+            ).then(ok => {
+                if (ok) {
+                    this.reloadPreviewNow(sourcePageIndex);
+                    this.sendHistoryState();
+                }
+            });
         }
     }
 
@@ -646,11 +747,8 @@ export class EmbfPreviewPanel {
             min-height: 0;
             overflow: hidden;
         }
-        #widget-palette {
+        #left-sidebar {
             flex-shrink: 0;
-            width: 52px;
-            min-width: 52px;
-            max-width: 52px;
             order: 1;
             display: flex;
             flex-direction: column;
@@ -659,59 +757,296 @@ export class EmbfPreviewPanel {
             overflow: hidden;
             transition: width 0.15s ease, min-width 0.15s ease, max-width 0.15s ease;
         }
-        #widget-palette.collapsed {
-            width: 26px;
-            min-width: 26px;
-            max-width: 26px;
+        #left-sidebar.collapsed {
+            width: 26px !important;
+            min-width: 26px !important;
+            max-width: 26px !important;
         }
-        #widget-palette.collapsed #palette-collapsible {
+        #left-sidebar.collapsed #left-sidebar-body {
             display: none;
         }
-        #widget-palette.collapsed .palette-header-label {
-            display: none;
-        }
-        #widget-palette.collapsed #palette-header {
-            flex: 1;
-            justify-content: center;
-            padding: 8px 0;
-        }
-        #palette-header {
+        #left-sidebar-header {
             display: flex;
             align-items: center;
-            justify-content: space-between;
-            gap: 2px;
-            padding: 6px 4px 6px 6px;
+            justify-content: center;
             flex-shrink: 0;
             border-bottom: 1px solid #3c3c3c;
         }
-        .palette-header-label {
-            font-size: 9px;
+        .dock-toggle-left-sidebar {
+            width: 100%;
+            justify-content: center;
+        }
+        #left-sidebar-body {
+            flex: 1;
+            display: flex;
+            flex-direction: row;
+            min-height: 0;
+            overflow: hidden;
+        }
+        #sidebar-rail {
+            flex-shrink: 0;
+            width: 40px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            padding: 8px 4px;
+            border-right: 1px solid #3c3c3c;
+            background: #2a2a2b;
+        }
+        .sidebar-rail-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            padding: 0;
+            border: 1px solid transparent;
+            border-radius: 6px;
+            background: transparent;
+            color: #aaa;
+            cursor: pointer;
+        }
+        .sidebar-rail-btn svg {
+            width: 20px;
+            height: 20px;
+            pointer-events: none;
+        }
+        .sidebar-rail-btn:hover {
+            background: #3c3c3c;
+            color: #fff;
+            border-color: #555;
+        }
+        .sidebar-rail-btn.active {
+            background: #094771;
+            border-color: #007acc;
+            color: #fff;
+        }
+        #sidebar-panel {
+            flex-shrink: 0;
+            width: 52px;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            overflow: hidden;
+            transition: width 0.15s ease;
+        }
+        #sidebar-panel.wide {
+            width: 168px;
+        }
+        #sidebar-panel-header {
+            flex-shrink: 0;
+            padding: 8px 10px 6px;
+            font-size: 10px;
             font-weight: 600;
             text-transform: uppercase;
-            letter-spacing: 0.04em;
-            color: #666;
-            writing-mode: vertical-rl;
-            transform: rotate(180deg);
-            line-height: 1;
-            user-select: none;
+            letter-spacing: 0.05em;
+            color: #888;
+            border-bottom: 1px solid #3c3c3c;
         }
-        .dock-toggle-palette {
-            flex-shrink: 0;
-            padding: 4px 4px;
-            font-size: 14px;
-        }
-        #palette-collapsible {
+        #sidebar-panel-body {
             flex: 1;
+            min-height: 0;
+            overflow: hidden;
+            position: relative;
+        }
+        .sidebar-panel-view {
+            position: absolute;
+            inset: 0;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+        .sidebar-panel-view[hidden] {
+            display: none !important;
+        }
+        #sidebar-panel-components {
             display: flex;
             flex-direction: column;
             align-items: center;
             gap: 4px;
             padding: 8px 6px;
-            overflow-y: auto;
-            overflow-x: hidden;
-            min-height: 0;
         }
-        #widget-palette .palette-item {
+        .page-sidebar-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            padding: 8px 8px 4px;
+            border-bottom: 1px solid #3c3c3c;
+            flex-shrink: 0;
+        }
+        .page-sidebar-actions .tb-btn-small {
+            flex: 1 1 auto;
+            min-width: 0;
+            font-size: 11px;
+            padding: 4px 6px;
+            background: #3c3c3c;
+            color: #ccc;
+            border: 1px solid #555;
+            border-radius: 3px;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .page-sidebar-actions .tb-btn-small:hover:not(:disabled) {
+            background: #4a4a4a;
+            color: #fff;
+        }
+        .page-sidebar-actions .tb-btn-small:disabled {
+            opacity: 0.35;
+            cursor: default;
+        }
+        .page-list {
+            list-style: none;
+            margin: 0;
+            padding: 4px;
+        }
+        .page-list-item {
+            display: block;
+            width: 100%;
+            text-align: left;
+            padding: 8px 10px;
+            margin-bottom: 2px;
+            border: 1px solid transparent;
+            border-radius: 4px;
+            background: transparent;
+            color: #ccc;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .page-list-item:hover {
+            background: #3c3c3c;
+            border-color: #555;
+        }
+        .page-list-item.active {
+            background: #094771;
+            border-color: #007acc;
+            color: #fff;
+        }
+        .page-list-name {
+            display: block;
+            font-size: 12px;
+            font-weight: 500;
+            line-height: 1.3;
+        }
+        .page-list-id {
+            display: block;
+            font-size: 10px;
+            color: #888;
+            margin-top: 2px;
+        }
+        .page-list-item.active .page-list-id {
+            color: #b3d4f5;
+        }
+        .flow-add-form {
+            padding: 8px;
+            border-bottom: 1px solid #3c3c3c;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .flow-field {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .flow-label {
+            font-size: 10px;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+        .flow-add-form select {
+            width: 100%;
+            background: #3c3c3c;
+            color: #ccc;
+            border: 1px solid #555;
+            border-radius: 3px;
+            padding: 4px 6px;
+            font-size: 12px;
+            font-family: inherit;
+        }
+        .flow-add-form .tb-btn-small {
+            margin-top: 4px;
+            width: 100%;
+            font-size: 11px;
+            padding: 5px 8px;
+            background: #3c3c3c;
+            color: #ccc;
+            border: 1px solid #555;
+            border-radius: 3px;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .flow-add-form .tb-btn-small:hover:not(:disabled) {
+            background: #4a4a4a;
+            color: #fff;
+        }
+        .flow-list {
+            list-style: none;
+            margin: 0;
+            padding: 4px;
+        }
+        .flow-list-empty {
+            font-size: 11px;
+            color: #888;
+            padding: 8px 10px;
+            line-height: 1.4;
+        }
+        .flow-list-item {
+            display: flex;
+            align-items: stretch;
+            gap: 4px;
+            margin-bottom: 4px;
+        }
+        .flow-list-main {
+            flex: 1;
+            min-width: 0;
+            text-align: left;
+            padding: 8px 10px;
+            border: 1px solid transparent;
+            border-radius: 4px;
+            background: transparent;
+            color: #ccc;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .flow-list-main:hover {
+            background: #3c3c3c;
+            border-color: #555;
+        }
+        .flow-route {
+            display: block;
+            font-size: 12px;
+            font-weight: 500;
+            line-height: 1.35;
+        }
+        .flow-meta {
+            display: block;
+            font-size: 10px;
+            color: #888;
+            margin-top: 2px;
+        }
+        .flow-list-remove {
+            flex-shrink: 0;
+            font-size: 11px;
+            padding: 4px 8px;
+            background: #3c3c3c;
+            color: #ccc;
+            border: 1px solid #555;
+            border-radius: 3px;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .flow-list-remove:hover {
+            background: #5a2d2d;
+            border-color: #a04040;
+            color: #fff;
+        }
+        #sidebar-panel-flow {
+            display: flex;
+            flex-direction: column;
+        }
+        #sidebar-panel-components .palette-item {
             display: flex;
             align-items: center;
             justify-content: center;
@@ -724,17 +1059,17 @@ export class EmbfPreviewPanel {
             color: #bbb;
             cursor: pointer;
         }
-        #widget-palette .palette-item:hover {
+        #sidebar-panel-components .palette-item:hover {
             background: #3c3c3c;
             color: #fff;
             border-color: #555;
         }
-        #widget-palette .palette-item:active {
+        #sidebar-panel-components .palette-item:active {
             background: #094771;
             border-color: #007acc;
             color: #fff;
         }
-        #widget-palette .palette-item svg {
+        #sidebar-panel-components .palette-item svg {
             width: 20px;
             height: 20px;
             pointer-events: none;
@@ -1069,13 +1404,20 @@ export class EmbfPreviewPanel {
         </div>
     </div>
     <div id="main">
-        <aside id="widget-palette" aria-label="Widgets">
-            <div id="palette-header">
-                <button type="button" id="btn-toggle-palette" class="dock-toggle dock-toggle-palette" aria-expanded="true" title="Hide widget palette">‹</button>
-                <span class="palette-header-label" aria-hidden="true">Widgets</span>
+        <aside id="left-sidebar" aria-label="Design sidebar">
+            <div id="left-sidebar-header">
+                <button type="button" id="btn-toggle-left-sidebar" class="dock-toggle dock-toggle-left-sidebar" aria-expanded="true" title="Hide sidebar">‹</button>
             </div>
-            <div id="palette-collapsible">
-                ${buildWidgetPaletteHtml()}
+            <div id="left-sidebar-body">
+                <nav id="sidebar-rail" aria-label="Sidebar categories">
+                    ${buildSidebarRailHtml()}
+                </nav>
+                <div id="sidebar-panel">
+                    <div id="sidebar-panel-header"><span id="sidebar-panel-title">Components</span></div>
+                    <div id="sidebar-panel-body">
+                        ${buildSidebarPanelViewsHtml(buildWidgetPaletteHtml())}
+                    </div>
+                </div>
             </div>
         </aside>
         <div id="canvas-container">

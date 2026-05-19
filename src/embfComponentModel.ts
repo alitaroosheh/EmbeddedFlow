@@ -496,6 +496,13 @@ export function applyPageInspectorPatch(
         }
     }
 
+    if (patch.pageId !== undefined && typeof patch.pageId === "string") {
+        const id = patch.pageId.trim();
+        if (id && isPageIdAvailable(project, id, pageIndex)) {
+            page.id = id;
+        }
+    }
+
     if (Object.prototype.hasOwnProperty.call(patch, "backgroundColor")) {
         const v = patch.backgroundColor;
         if (v === null || v === "") {
@@ -818,4 +825,83 @@ export function ungroupContainerOnPage(page: Page, containerId: string): Ungroup
     }
 
     return { ok: true, liftedIds: lifted.map(c => c.id) };
+}
+
+// ─── Page list operations (preview sidebar) ───────────────────────────────────
+
+export function collectPageIds(project: EmbfProject): Set<string> {
+    return new Set(project.pages.map(p => p.id));
+}
+
+export function allocateNewPageId(project: EmbfProject): string {
+    const ids = collectPageIds(project);
+    if (!ids.has("page_main")) {
+        return "page_main";
+    }
+    for (let i = 2; i < 100000; i++) {
+        const id = `page_${i}`;
+        if (!ids.has(id)) {
+            return id;
+        }
+    }
+    return `page_${Date.now()}`;
+}
+
+/** Append a new empty page; returns its index. */
+export function addPageToProject(project: EmbfProject): number {
+    const id = allocateNewPageId(project);
+    const page: Page = {
+        id,
+        name: `Page ${project.pages.length + 1}`,
+        components: []
+    };
+    project.pages.push(page);
+    return project.pages.length - 1;
+}
+
+/** Remove a page when more than one exists. Returns new selected index hint. */
+export function removePageFromProject(project: EmbfProject, pageIndex: number): number | undefined {
+    if (project.pages.length <= 1) {
+        return undefined;
+    }
+    if (pageIndex < 0 || pageIndex >= project.pages.length) {
+        return undefined;
+    }
+    project.pages.splice(pageIndex, 1);
+    return Math.min(pageIndex, project.pages.length - 1);
+}
+
+export function isPageIdAvailable(project: EmbfProject, pageId: string, exceptIndex: number): boolean {
+    const t = pageId.trim();
+    if (!t) {
+        return false;
+    }
+    return !project.pages.some((p, i) => i !== exceptIndex && p.id === t);
+}
+
+/** Rename display name and/or page id. Returns false if id collides or invalid. */
+export function renamePageOnProject(
+    project: EmbfProject,
+    pageIndex: number,
+    patch: { name?: string; id?: string }
+): boolean {
+    if (pageIndex < 0 || pageIndex >= project.pages.length) {
+        return false;
+    }
+    const page = project.pages[pageIndex];
+    if (patch.name !== undefined) {
+        const n = patch.name.trim();
+        if (!n) {
+            return false;
+        }
+        page.name = n;
+    }
+    if (patch.id !== undefined) {
+        const id = patch.id.trim();
+        if (!id || !isPageIdAvailable(project, id, pageIndex)) {
+            return false;
+        }
+        page.id = id;
+    }
+    return true;
 }

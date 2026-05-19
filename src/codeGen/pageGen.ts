@@ -97,7 +97,8 @@ export function generatePageSource(project: EmbfProject, page: Page): string {
 
     return [
         AUTOGEN_BANNER,
-        `#include "ui_${page.id}.h"`,
+        `/* ui.h includes every ui_<page>.h so navigate handlers can reference other screens. */`,
+        `#include "ui.h"`,
         ``,
         `/* Screen variable */`,
         `lv_obj_t *${scrVar} = NULL;`,

@@ -101,6 +101,11 @@
           "group": "embeddedflow"
         },
         {
+          "command": "embeddedflow.openPreview",
+          "when": "explorerResourceIsFolder",
+          "group": "embeddedflow"
+        },
+        {
           "command": "embeddedflow.generateCode",
           "when": "resourceExtname == .embf",
           "group": "embeddedflow"
@@ -136,7 +141,7 @@
         "embeddedflow.autoOpenPreview": {
           "type": "boolean",
           "default": true,
-          "description": "When true, opening a .embf file automatically opens the UI preview beside the editor."
+          "description": "When true, opens the UI preview on startup from a .embf in the workspace folder root (no editor tab required). Also opens or refreshes preview when you open a .embf file."
         },
         "embeddedflow.outputDirectory": {
           "type": "string",

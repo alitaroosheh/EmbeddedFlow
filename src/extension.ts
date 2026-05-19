@@ -8,6 +8,7 @@ import { EmbfProject } from "./types/embf";
 import { generateCode, resolveCodegenOutputDir, writeGeneratedFiles } from "./codeGen/index";
 import { ensureCodegenOutputPath } from "./embfCodegenSetup";
 import { registerEmbeddedFlowOutput, embeddedFlowLog } from "./outputLog";
+import { resolveEmbfForPreview } from "./embfPreviewResolve";
 
 // Map from .embf file path → file watcher
 const watchers = new Map<string, fs.FSWatcher>();
@@ -27,15 +28,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
     // ── Command: Open Preview ─────────────────────────────────────────────────
     context.subscriptions.push(
-        vscode.commands.registerCommand("embeddedflow.openPreview", (uri?: vscode.Uri) => {
-            const filePath = resolveFilePath(uri);
-            if (!filePath) {
-                vscode.window.showErrorMessage(
-                    "EmbeddedFlow: No .embf file is active. Open a .embf file first."
-                );
-                return;
-            }
-            openPreview(filePath, context.extensionUri);
+        vscode.commands.registerCommand("embeddedflow.openPreview", async (uri?: vscode.Uri) => {
+            await openPreviewResolved(context.extensionUri, uri);
         })
     );
 
@@ -84,17 +78,13 @@ export function activate(context: vscode.ExtensionContext): void {
             if (!shouldAutoOpenPreview()) {
                 return;
             }
-            const doc = vscode.window.activeTextEditor?.document;
-            if (doc?.fileName.endsWith(".embf")) {
-                openPreview(doc.fileName, context.extensionUri);
-            }
+            void openPreviewResolved(context.extensionUri);
         })
     );
 
-    // ── If a .embf is already active on startup, open its preview (when enabled) ─
-    const activeDoc = vscode.window.activeTextEditor?.document;
-    if (activeDoc?.fileName.endsWith(".embf") && shouldAutoOpenPreview()) {
-        openPreview(activeDoc.fileName, context.extensionUri);
+    // ── Auto-open preview from workspace folder .embf (no editor tab required) ─
+    if (shouldAutoOpenPreview()) {
+        void openPreviewResolved(context.extensionUri);
     }
 
     // ── Problems panel: semantic validation beyond JSON schema ──────────────
@@ -219,7 +209,7 @@ export function deactivate(): void {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function resolveFilePath(uri?: vscode.Uri): string | undefined {
-    if (uri) {
+    if (uri?.fsPath.toLowerCase().endsWith(".embf")) {
         return uri.fsPath;
     }
     const doc = vscode.window.activeTextEditor?.document;
@@ -227,6 +217,14 @@ function resolveFilePath(uri?: vscode.Uri): string | undefined {
         return doc.fileName;
     }
     return undefined;
+}
+
+async function openPreviewResolved(extensionUri: vscode.Uri, uri?: vscode.Uri): Promise<void> {
+    const filePath = await resolveEmbfForPreview(uri);
+    if (!filePath) {
+        return;
+    }
+    openPreview(filePath, extensionUri);
 }
 
 function openPreview(filePath: string, extensionUri: vscode.Uri): void {

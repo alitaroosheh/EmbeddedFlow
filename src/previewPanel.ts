@@ -569,14 +569,45 @@ export class EmbfPreviewPanel {
             height: 100vh;
             overflow: hidden;
         }
+        #toolbar-shell {
+            flex-shrink: 0;
+            background: #252526;
+            border-bottom: 1px solid #3c3c3c;
+        }
+        #toolbar-shell.collapsed #toolbar {
+            display: none;
+        }
+        .dock-toggle {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            border: none;
+            background: transparent;
+            color: #888;
+            font-size: 11px;
+            font-family: inherit;
+            cursor: pointer;
+            padding: 3px 8px;
+            line-height: 1.2;
+        }
+        .dock-toggle:hover {
+            color: #ccc;
+            background: #2a2d2e;
+        }
+        .dock-toggle-toolbar {
+            width: 100%;
+            justify-content: center;
+            border-bottom: 1px solid transparent;
+        }
+        #toolbar-shell.collapsed .dock-toggle-toolbar {
+            border-bottom: none;
+        }
         #toolbar {
             display: flex;
             align-items: center;
             gap: 8px;
             padding: 6px 10px;
-            background: #252526;
-            border-bottom: 1px solid #3c3c3c;
-            flex-shrink: 0;
+            flex-wrap: wrap;
         }
         #toolbar select {
             background: #3c3c3c;
@@ -618,16 +649,67 @@ export class EmbfPreviewPanel {
         #widget-palette {
             flex-shrink: 0;
             width: 52px;
+            min-width: 52px;
+            max-width: 52px;
             order: 1;
+            display: flex;
+            flex-direction: column;
+            background: #252526;
+            border-right: 1px solid #3c3c3c;
+            overflow: hidden;
+            transition: width 0.15s ease, min-width 0.15s ease, max-width 0.15s ease;
+        }
+        #widget-palette.collapsed {
+            width: 26px;
+            min-width: 26px;
+            max-width: 26px;
+        }
+        #widget-palette.collapsed #palette-collapsible {
+            display: none;
+        }
+        #widget-palette.collapsed .palette-header-label {
+            display: none;
+        }
+        #widget-palette.collapsed #palette-header {
+            flex: 1;
+            justify-content: center;
+            padding: 8px 0;
+        }
+        #palette-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 2px;
+            padding: 6px 4px 6px 6px;
+            flex-shrink: 0;
+            border-bottom: 1px solid #3c3c3c;
+        }
+        .palette-header-label {
+            font-size: 9px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: #666;
+            writing-mode: vertical-rl;
+            transform: rotate(180deg);
+            line-height: 1;
+            user-select: none;
+        }
+        .dock-toggle-palette {
+            flex-shrink: 0;
+            padding: 4px 4px;
+            font-size: 14px;
+        }
+        #palette-collapsible {
+            flex: 1;
             display: flex;
             flex-direction: column;
             align-items: center;
             gap: 4px;
             padding: 8px 6px;
-            background: #252526;
-            border-right: 1px solid #3c3c3c;
             overflow-y: auto;
             overflow-x: hidden;
+            min-height: 0;
         }
         #widget-palette .palette-item {
             display: flex;
@@ -668,6 +750,45 @@ export class EmbfPreviewPanel {
             border-left: 1px solid #3c3c3c;
             overflow: hidden;
             order: 3;
+            transition: width 0.15s ease, min-width 0.15s ease, max-width 0.15s ease;
+        }
+        #property-inspector.collapsed {
+            flex: 0 0 26px;
+            width: 26px;
+            min-width: 26px;
+            max-width: 26px;
+        }
+        #property-inspector.collapsed #inspector-collapsible {
+            display: none;
+        }
+        #property-inspector.collapsed #inspector-header h2 {
+            display: none;
+        }
+        #property-inspector.collapsed #inspector-header {
+            flex: 1;
+            justify-content: center;
+            padding: 8px 0;
+        }
+        #inspector-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 4px;
+            padding: 6px 6px 6px 12px;
+            flex-shrink: 0;
+            border-bottom: 1px solid #3c3c3c;
+        }
+        .dock-toggle-inspector {
+            flex-shrink: 0;
+            padding: 4px 6px;
+            font-size: 14px;
+        }
+        #inspector-collapsible {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            overflow: hidden;
         }
         #inspector-body {
             flex: 1;
@@ -681,7 +802,10 @@ export class EmbfPreviewPanel {
             text-transform: uppercase;
             letter-spacing: 0.04em;
             color: #999;
-            padding: 10px 12px 6px;
+            padding: 0;
+            margin: 0;
+            flex: 1;
+            min-width: 0;
         }
         #inspector-empty {
             font-size: 12px;
@@ -918,7 +1042,9 @@ export class EmbfPreviewPanel {
     </style>
 </head>
 <body>
-    <div id="toolbar">
+    <div id="toolbar-shell">
+        <button type="button" id="btn-toggle-toolbar" class="dock-toggle dock-toggle-toolbar" aria-expanded="true" title="Hide toolbar">▲ Hide toolbar</button>
+        <div id="toolbar">
         <label>Page:</label>
         <select id="page-select"></select>
         <button type="button" class="tb-btn" id="btn-undo" disabled title="Undo (Ctrl+Z)">Undo</button>
@@ -940,10 +1066,17 @@ export class EmbfPreviewPanel {
             <option value="4">400%</option>
         </select>
         <span id="status">Waiting for project…</span>
+        </div>
     </div>
     <div id="main">
         <aside id="widget-palette" aria-label="Widgets">
-            ${buildWidgetPaletteHtml()}
+            <div id="palette-header">
+                <button type="button" id="btn-toggle-palette" class="dock-toggle dock-toggle-palette" aria-expanded="true" title="Hide widget palette">‹</button>
+                <span class="palette-header-label" aria-hidden="true">Widgets</span>
+            </div>
+            <div id="palette-collapsible">
+                ${buildWidgetPaletteHtml()}
+            </div>
         </aside>
         <div id="canvas-container">
         <div id="display-wrapper">
@@ -957,12 +1090,17 @@ export class EmbfPreviewPanel {
         </div>
         </div>
         <aside id="property-inspector" aria-label="Properties">
-            <h2>Properties</h2>
-            <div id="inspector-body">
-                <div id="inspector-empty">Design mode: click the page background for project, display, and page settings, or click a widget for its properties.</div>
-                <form id="inspector-form" hidden></form>
+            <div id="inspector-header">
+                <h2>Properties</h2>
+                <button type="button" id="btn-toggle-inspector" class="dock-toggle dock-toggle-inspector" aria-expanded="true" title="Hide properties panel">›</button>
             </div>
-            <button type="button" id="inspector-delete" disabled title="Delete selected widget">Delete widget</button>
+            <div id="inspector-collapsible">
+                <div id="inspector-body">
+                    <div id="inspector-empty">Design mode: click the page background for project, display, and page settings, or click a widget for its properties.</div>
+                    <form id="inspector-form" hidden></form>
+                </div>
+                <button type="button" id="inspector-delete" disabled title="Delete selected widget">Delete widget</button>
+            </div>
         </aside>
     </div>
     <script nonce="${nonce}" src="${webviewJsUri}"></script>

@@ -63,6 +63,11 @@ const previewZoomSelect = /** @type {HTMLSelectElement | null} */ (
     document.getElementById("preview-zoom")
 );
 const displayWrapper = document.getElementById("display-wrapper");
+const toolbarShell = document.getElementById("toolbar-shell");
+const btnToggleToolbar = document.getElementById("btn-toggle-toolbar");
+const propertyInspector = document.getElementById("property-inspector");
+const btnToggleInspector = document.getElementById("btn-toggle-inspector");
+const btnTogglePalette = document.getElementById("btn-toggle-palette");
 /** @type {ReturnType<typeof setTimeout> | null} */
 let inspectorDebounce = null;
 let inspectorSyncing = false;
@@ -442,6 +447,106 @@ if (previewZoomSelect) {
 }
 
 initPreviewLayoutObserver();
+
+// ── Collapsible toolbar, widget palette & properties panel ─────────────────────
+
+/** @type {{ toolbarCollapsed: boolean, paletteCollapsed: boolean, inspectorCollapsed: boolean }} */
+let panelCollapseState = {
+    toolbarCollapsed: false,
+    paletteCollapsed: false,
+    inspectorCollapsed: false
+};
+
+function loadPanelCollapseState() {
+    const saved = vscode.getState();
+    if (
+        saved &&
+        typeof saved === "object" &&
+        saved.panelCollapse &&
+        typeof saved.panelCollapse === "object"
+    ) {
+        const pc = /** @type {{ toolbarCollapsed?: boolean, paletteCollapsed?: boolean, inspectorCollapsed?: boolean }} */ (
+            saved.panelCollapse
+        );
+        panelCollapseState = {
+            toolbarCollapsed: !!pc.toolbarCollapsed,
+            paletteCollapsed: !!pc.paletteCollapsed,
+            inspectorCollapsed: !!pc.inspectorCollapsed
+        };
+    }
+}
+
+function savePanelCollapseState() {
+    const prev = vscode.getState();
+    const base = prev && typeof prev === "object" ? prev : {};
+    vscode.setState({ ...base, panelCollapse: panelCollapseState });
+}
+
+function refreshPreviewLayoutAfterPanelChange() {
+    if (previewZoomMode === "auto") {
+        updatePreviewZoom();
+    }
+    applyPreviewLayout();
+    drawDesignOverlay();
+}
+
+function applyPanelCollapseState() {
+    if (toolbarShell) {
+        toolbarShell.classList.toggle("collapsed", panelCollapseState.toolbarCollapsed);
+    }
+    if (btnToggleToolbar) {
+        const collapsed = panelCollapseState.toolbarCollapsed;
+        btnToggleToolbar.setAttribute("aria-expanded", String(!collapsed));
+        btnToggleToolbar.textContent = collapsed ? "▼ Show toolbar" : "▲ Hide toolbar";
+        btnToggleToolbar.title = collapsed ? "Show toolbar" : "Hide toolbar";
+    }
+    if (widgetPalette) {
+        widgetPalette.classList.toggle("collapsed", panelCollapseState.paletteCollapsed);
+    }
+    if (btnTogglePalette) {
+        const collapsed = panelCollapseState.paletteCollapsed;
+        btnTogglePalette.setAttribute("aria-expanded", String(!collapsed));
+        btnTogglePalette.textContent = collapsed ? "›" : "‹";
+        btnTogglePalette.title = collapsed ? "Show widget palette" : "Hide widget palette";
+    }
+    if (propertyInspector) {
+        propertyInspector.classList.toggle("collapsed", panelCollapseState.inspectorCollapsed);
+    }
+    if (btnToggleInspector) {
+        const collapsed = panelCollapseState.inspectorCollapsed;
+        btnToggleInspector.setAttribute("aria-expanded", String(!collapsed));
+        btnToggleInspector.textContent = collapsed ? "‹" : "›";
+        btnToggleInspector.title = collapsed ? "Show properties panel" : "Hide properties panel";
+    }
+    refreshPreviewLayoutAfterPanelChange();
+}
+
+loadPanelCollapseState();
+applyPanelCollapseState();
+
+if (btnToggleToolbar) {
+    btnToggleToolbar.addEventListener("click", () => {
+        panelCollapseState.toolbarCollapsed = !panelCollapseState.toolbarCollapsed;
+        savePanelCollapseState();
+        applyPanelCollapseState();
+    });
+}
+
+if (btnToggleInspector) {
+    btnToggleInspector.addEventListener("click", () => {
+        panelCollapseState.inspectorCollapsed = !panelCollapseState.inspectorCollapsed;
+        savePanelCollapseState();
+        applyPanelCollapseState();
+    });
+}
+
+if (btnTogglePalette) {
+    btnTogglePalette.addEventListener("click", () => {
+        panelCollapseState.paletteCollapsed = !panelCollapseState.paletteCollapsed;
+        savePanelCollapseState();
+        applyPanelCollapseState();
+    });
+}
 
 // ── WASM loading ───────────────────────────────────────────────────────────────
 /**

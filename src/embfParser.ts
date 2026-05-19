@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import { normalizeScreenLoadAnim } from "./codeGen/screenLoadAnim";
 import type { EmbfProject, LvglVersion } from "./types/embf";
 
 const COLOR_FORMATS = new Set<string>(["RGB565", "RGB888", "ARGB8888", "L8", "AL88"]);
@@ -226,6 +227,20 @@ function validateEventActionShape(action: Record<string, unknown>, ap: string): 
     switch (ty) {
         case "navigate":
             needTarget("navigate");
+            if (action["anim"] !== undefined) {
+                if (!normalizeScreenLoadAnim(action["anim"])) {
+                    throw new EmbfParseError(`${ap}: navigate "anim" must be a known screen load animation id`);
+                }
+            }
+            if (action["time"] !== undefined && !isFiniteNumber(action["time"])) {
+                throw new EmbfParseError(`${ap}: navigate "time" must be a finite number (ms)`);
+            }
+            if (action["delay"] !== undefined && !isFiniteNumber(action["delay"])) {
+                throw new EmbfParseError(`${ap}: navigate "delay" must be a finite number (ms)`);
+            }
+            if (action["autoDel"] !== undefined && typeof action["autoDel"] !== "boolean") {
+                throw new EmbfParseError(`${ap}: navigate "autoDel" must be a boolean`);
+            }
             break;
         case "set_text":
             needTarget("set_text");

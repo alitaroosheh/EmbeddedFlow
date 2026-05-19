@@ -30,4 +30,19 @@ describe("navigate flow", () => {
         expect(removeNavigateFlow(p, 0, label.id, "clicked", "page_b")).toBe(true);
         expect(collectNavigateFlows(p)).toHaveLength(0);
     });
+
+    it("stores animation options on navigate actions", () => {
+        const p = minimalProject();
+        p.pages.push({ id: "page_b", name: "B", components: [] });
+        const label = p.pages[0].components[0];
+        expect(
+            addNavigateFlow(p, 0, label.id, "clicked", "page_b", { anim: "move_left", time: 250 })
+        ).toBe(true);
+        const flows = collectNavigateFlows(p);
+        expect(flows[0].anim).toBe("move_left");
+        expect(flows[0].time).toBe(250);
+        const evt = label.events?.find(e => e.trigger === "clicked");
+        const nav = evt?.actions.find(a => a.type === "navigate" && a.target === "page_b");
+        expect(nav).toMatchObject({ type: "navigate", target: "page_b", anim: "move_left", time: 250 });
+    });
 });

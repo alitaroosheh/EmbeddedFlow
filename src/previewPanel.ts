@@ -67,6 +67,8 @@ export type WebviewToHostMessage =
           componentId: string;
           trigger: string;
           targetPageId: string;
+          anim?: string;
+          time?: number;
       }
     | {
           type: "removeNavigateFlow";
@@ -488,12 +490,16 @@ export class EmbfPreviewPanel {
             ) {
                 return;
             }
+            const anim = msg.anim !== undefined ? String(msg.anim) : undefined;
+            const time = msg.time !== undefined ? Number(msg.time) : undefined;
             void addNavigateFlowInEmbfFile(
                 this._filePath,
                 sourcePageIndex,
                 componentId,
                 trigger,
-                targetPageId
+                targetPageId,
+                anim,
+                time
             ).then(ok => {
                 if (ok) {
                     this.reloadPreviewNow(sourcePageIndex, { selectedComponentId: componentId });
@@ -955,7 +961,8 @@ export class EmbfPreviewPanel {
             text-transform: uppercase;
             letter-spacing: 0.04em;
         }
-        .flow-add-form select {
+        .flow-add-form select,
+        .flow-add-form input[type="number"] {
             width: 100%;
             background: #3c3c3c;
             color: #ccc;

@@ -88,6 +88,8 @@ const flowFromPage = /** @type {HTMLSelectElement | null} */ (document.getElemen
 const flowComponent = /** @type {HTMLSelectElement | null} */ (document.getElementById("flow-component"));
 const flowTrigger = /** @type {HTMLSelectElement | null} */ (document.getElementById("flow-trigger"));
 const flowToPage = /** @type {HTMLSelectElement | null} */ (document.getElementById("flow-to-page"));
+const flowAnim = /** @type {HTMLSelectElement | null} */ (document.getElementById("flow-anim"));
+const flowTime = /** @type {HTMLInputElement | null} */ (document.getElementById("flow-time"));
 const flowListEl = document.getElementById("flow-list");
 const btnFlowAdd = document.getElementById("btn-flow-add");
 /** @type {ReturnType<typeof setTimeout> | null} */
@@ -1369,7 +1371,7 @@ function flatComponentsList(components) {
     return out;
 }
 
-/** @returns {Array<{ sourcePageIndex: number, sourcePageId: string, sourcePageName: string, componentId: string, componentType: string, trigger: string, targetPageId: string, targetPageName: string, targetPageIndex: number }>} */
+/** @returns {Array<{ sourcePageIndex: number, sourcePageId: string, sourcePageName: string, componentId: string, componentType: string, trigger: string, targetPageId: string, targetPageName: string, targetPageIndex: number, anim: string, time: number }>} */
 function collectNavigateFlowsFromProject() {
     if (!currentProject) {
         return [];
@@ -1398,7 +1400,9 @@ function collectNavigateFlowsFromProject() {
                         trigger: evt.trigger,
                         targetPageId: target.id,
                         targetPageName: target.name,
-                        targetPageIndex: ti
+                        targetPageIndex: ti,
+                        anim: action.anim ?? "none",
+                        time: action.time ?? 300
                     });
                 }
             }
@@ -1485,7 +1489,9 @@ function renderFlowList() {
         route.textContent = `${f.sourcePageName} → ${f.targetPageName}`;
         const meta = document.createElement("span");
         meta.className = "flow-meta";
-        meta.textContent = `${f.componentId} (${f.componentType}) · ${f.trigger}`;
+        const animLabel =
+            f.anim && f.anim !== "none" ? ` · ${f.anim.replace(/_/g, " ")} ${f.time}ms` : "";
+        meta.textContent = `${f.componentId} (${f.componentType}) · ${f.trigger}${animLabel}`;
         main.appendChild(route);
         main.appendChild(meta);
         main.addEventListener("click", () => {
@@ -1522,6 +1528,24 @@ if (flowFromPage) {
     flowFromPage.addEventListener("change", () => populateFlowComponentSelect());
 }
 
+function syncFlowTimeField() {
+    if (!flowTime || !flowAnim) {
+        return;
+    }
+    const instant = flowAnim.value === "none" || flowAnim.value === "";
+    flowTime.disabled = instant;
+    if (instant) {
+        flowTime.title = "Not used when animation is None";
+    } else {
+        flowTime.title = "Animation duration in milliseconds";
+    }
+}
+
+if (flowAnim) {
+    flowAnim.addEventListener("change", syncFlowTimeField);
+    syncFlowTimeField();
+}
+
 if (btnFlowAdd) {
     btnFlowAdd.addEventListener("click", () => {
         if (!currentProject || !flowFromPage || !flowComponent || !flowTrigger || !flowToPage) {
@@ -1531,6 +1555,8 @@ if (btnFlowAdd) {
         const componentId = flowComponent.value;
         const trigger = flowTrigger.value;
         const targetPageId = flowToPage.value;
+        const anim = flowAnim?.value ?? "none";
+        const time = flowTime ? parseInt(flowTime.value, 10) : 300;
         if (!componentId || !targetPageId) {
             return;
         }
@@ -1539,7 +1565,9 @@ if (btnFlowAdd) {
             sourcePageIndex,
             componentId,
             trigger,
-            targetPageId
+            targetPageId,
+            anim,
+            time: Number.isFinite(time) ? time : 300
         });
     });
 }

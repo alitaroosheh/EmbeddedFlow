@@ -119,9 +119,43 @@ export type EventTrigger =
     | "long_pressed"   // LV_EVENT_LONG_PRESSED
     | "value_changed"; // LV_EVENT_VALUE_CHANGED
 
+/**
+ * Screen transition when loading another page (maps to LVGL `lv_scr_load_anim` / `lv_screen_load_anim`).
+ * Omitted or `"none"` → instant `lv_scr_load` / `lv_screen_load`.
+ */
+export type ScreenLoadAnim =
+    | "none"
+    | "move_left"
+    | "move_right"
+    | "move_top"
+    | "move_bottom"
+    | "over_left"
+    | "over_right"
+    | "over_top"
+    | "over_bottom"
+    | "fade_in"
+    | "fade_out"
+    | "out_left"
+    | "out_right"
+    | "out_top"
+    | "out_bottom";
+
+/** Navigate to another page by id. */
+export interface NavigateAction {
+    type: "navigate";
+    target: string;
+    anim?: ScreenLoadAnim;
+    /** Animation duration in ms (default 300). */
+    time?: number;
+    /** Delay before animation in ms (default 0). */
+    delay?: number;
+    /** LVGL `auto_del` — delete previous screen when anim finishes (default false). */
+    autoDel?: boolean;
+}
+
 /** What happens when an event fires */
 export type Action =
-    | { type: "navigate";    target: string }                        // load page by id
+    | NavigateAction
     | { type: "set_text";    target: string; text: string }          // update label text
     | { type: "set_value";   target: string; value: number }         // slider/bar/arc
     | { type: "set_checked"; target: string; checked: boolean }      // switch/checkbox

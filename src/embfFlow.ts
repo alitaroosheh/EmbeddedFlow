@@ -1,4 +1,4 @@
-import type { Component, EmbfProject, EventDef, EventTrigger } from "./types/embf";
+import type { Component, EmbfProject, EventDef, EventTrigger, NavigateAction, ScreenLoadAnim } from "./types/embf";
 
 /** A navigate action from a widget on one page to another page. */
 export interface NavigateFlow {
@@ -11,6 +11,26 @@ export interface NavigateFlow {
     targetPageId: string;
     targetPageName: string;
     targetPageIndex: number;
+    anim: ScreenLoadAnim;
+    time: number;
+    delay: number;
+    autoDel: boolean;
+}
+
+export interface NavigateFlowOptions {
+    anim?: ScreenLoadAnim;
+    time?: number;
+    delay?: number;
+    autoDel?: boolean;
+}
+
+function navigateActionFields(action: NavigateAction): Pick<NavigateFlow, "anim" | "time" | "delay" | "autoDel"> {
+    return {
+        anim: action.anim ?? "none",
+        time: action.time ?? 300,
+        delay: action.delay ?? 0,
+        autoDel: action.autoDel ?? false
+    };
 }
 
 function flatComponents(components: Component[]): Component[] {
@@ -60,17 +80,14 @@ export function collectNavigateFlows(project: EmbfProject): NavigateFlow[] {
                         trigger: evt.trigger,
                         targetPageId: target.page.id,
                         targetPageName: target.page.name,
-                        targetPageIndex: target.index
+                        targetPageIndex: target.index,
+                        ...navigateActionFields(action)
                     });
                 }
             }
         }
     }
     return flows;
-}
-
-function hasNavigateAction(evt: EventDef, targetPageId: string): boolean {
-    return evt.actions.some(a => a.type === "navigate" && a.target === targetPageId);
 }
 
 /**
@@ -81,7 +98,8 @@ export function addNavigateFlow(
     sourcePageIndex: number,
     componentId: string,
     trigger: EventTrigger,
-    targetPageId: string
+    targetPageId: string,
+    options: NavigateFlowOptions = {}
 ): boolean {
     if (sourcePageIndex < 0 || sourcePageIndex >= project.pages.length) {
         return false;
@@ -105,11 +123,39 @@ export function addNavigateFlow(
         comp.events.push(evt);
     }
 
-    if (hasNavigateAction(evt, targetPageId)) {
+    const existing = evt.actions.find(
+        a => a.type === "navigate" && a.target === targetPageId
+    ) as NavigateAction | undefined;
+    if (existing) {
+        if (options.anim !== undefined) {
+            existing.anim = options.anim;
+        }
+        if (options.time !== undefined) {
+            existing.time = options.time;
+        }
+        if (options.delay !== undefined) {
+            existing.delay = options.delay;
+        }
+        if (options.autoDel !== undefined) {
+            existing.autoDel = options.autoDel;
+        }
         return true;
     }
 
-    evt.actions.push({ type: "navigate", target: targetPageId });
+    const action: NavigateAction = { type: "navigate", target: targetPageId };
+    if (options.anim !== undefined && options.anim !== "none") {
+        action.anim = options.anim;
+    }
+    if (options.time !== undefined && options.time !== 300) {
+        action.time = options.time;
+    }
+    if (options.delay !== undefined && options.delay !== 0) {
+        action.delay = options.delay;
+    }
+    if (options.autoDel) {
+        action.autoDel = true;
+    }
+    evt.actions.push(action);
     return true;
 }
 

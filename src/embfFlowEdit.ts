@@ -1,6 +1,7 @@
 import * as path from "path";
 import * as vscode from "vscode";
-import type { EventTrigger } from "./types/embf";
+import { normalizeScreenLoadAnim } from "./codeGen/screenLoadAnim";
+import type { EventTrigger, ScreenLoadAnim } from "./types/embf";
 import { addNavigateFlow, removeNavigateFlow } from "./embfFlow";
 import { cloneEmbfProject } from "./embfWidgetFactory";
 import { embeddedFlowLog } from "./outputLog";
@@ -17,7 +18,9 @@ export async function addNavigateFlowInEmbfFile(
     sourcePageIndex: number,
     componentId: string,
     trigger: string,
-    targetPageId: string
+    targetPageId: string,
+    anim?: string,
+    time?: number
 ): Promise<boolean> {
     if (!isEventTrigger(trigger)) {
         return false;
@@ -30,8 +33,21 @@ export async function addNavigateFlowInEmbfFile(
         return false;
     }
 
+    let screenAnim: ScreenLoadAnim | undefined;
+    if (anim !== undefined && anim !== "") {
+        const normalized = normalizeScreenLoadAnim(anim);
+        if (!normalized) {
+            vscode.window.showErrorMessage(`EmbeddedFlow: unknown screen animation "${anim}".`);
+            return false;
+        }
+        screenAnim = normalized;
+    }
+
     const next = cloneEmbfProject(project);
-    const ok = addNavigateFlow(next, sourcePageIndex, componentId.trim(), trigger, targetPageId.trim());
+    const ok = addNavigateFlow(next, sourcePageIndex, componentId.trim(), trigger, targetPageId.trim(), {
+        anim: screenAnim,
+        time: time !== undefined && Number.isFinite(time) ? Math.max(0, Math.round(time)) : undefined
+    });
     if (!ok) {
         vscode.window.showErrorMessage(
             "EmbeddedFlow: could not add flow (check page, component, and target page id)."

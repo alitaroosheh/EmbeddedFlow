@@ -153,6 +153,41 @@
               "type": "string",
               "minLength": 1,
               "description": "Page ID to load"
+            },
+            "anim": {
+              "type": "string",
+              "enum": [
+                "none",
+                "move_left",
+                "move_right",
+                "move_top",
+                "move_bottom",
+                "over_left",
+                "over_right",
+                "over_top",
+                "over_bottom",
+                "fade_in",
+                "fade_out",
+                "out_left",
+                "out_right",
+                "out_top",
+                "out_bottom"
+              ],
+              "description": "Screen load animation (omit or none for instant load)"
+            },
+            "time": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Animation duration in ms (default 300)"
+            },
+            "delay": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Delay before animation in ms (default 0)"
+            },
+            "autoDel": {
+              "type": "boolean",
+              "description": "Delete previous screen when animation finishes"
             }
           }
         },

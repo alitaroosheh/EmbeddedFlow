@@ -1,5 +1,6 @@
-import type { EmbfProject, Page, Component, EventDef, Action } from "../types/embf";
+import type { EmbfProject, Page, Component, EventDef, Action, NavigateAction } from "../types/embf";
 import { widgetVar, screenVar, toIdentifier } from "./naming";
+import { screenLoadAnimCConstant } from "./screenLoadAnim";
 
 /** Name for the event callback function of a component+trigger. */
 export function eventCbName(pageId: string, compId: string, trigger: string): string {
@@ -57,12 +58,23 @@ export function emitEventCallback(
 function emitAction(project: EmbfProject, page: Page, action: Action, v9: boolean): string {
     switch (action.type) {
         case "navigate": {
-            const targetPage = project.pages.find(p => p.id === action.target);
+            const nav = action as NavigateAction;
+            const targetPage = project.pages.find(p => p.id === nav.target);
             if (!targetPage) {
-                return `/* navigate: page "${action.target}" not found */`;
+                return `/* navigate: page "${nav.target}" not found */`;
             }
-            const loadFn = v9 ? "lv_screen_load" : "lv_scr_load";
-            return `${loadFn}(${screenVar(action.target)});`;
+            const scr = screenVar(nav.target);
+            const anim = nav.anim ?? "none";
+            if (anim === "none") {
+                const loadFn = v9 ? "lv_screen_load" : "lv_scr_load";
+                return `${loadFn}(${scr});`;
+            }
+            const time = Math.max(0, Math.round(nav.time ?? 300));
+            const delay = Math.max(0, Math.round(nav.delay ?? 0));
+            const autoDel = nav.autoDel ? "true" : "false";
+            const lvAnim = screenLoadAnimCConstant(anim, v9);
+            const loadAnimFn = v9 ? "lv_screen_load_anim" : "lv_scr_load_anim";
+            return `${loadAnimFn}(${scr}, ${lvAnim}, ${time}, ${delay}, ${autoDel});`;
         }
         case "set_text": {
             // Escape the string

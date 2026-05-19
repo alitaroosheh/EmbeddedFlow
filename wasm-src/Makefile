@@ -45,6 +45,7 @@ EM_FLAGS := \
         '_embf_clear_screen', \
         '_embf_create_screen', \
         '_embf_load_screen', \
+        '_embf_load_screen_anim', \
         '_embf_create_label', \
         '_embf_label_set_text', \
         '_embf_create_button', \

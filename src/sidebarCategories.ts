@@ -92,7 +92,7 @@ ${widgetPaletteHtml}
 </select></label>
 </div>
 <label class="flow-field"><span class="flow-label">To page</span><select id="flow-to-page"></select></label>
-<label class="flow-field"><span class="flow-label">Animation</span><select id="flow-anim" title="LVGL screen load animation (firmware; preview stays instant)">
+<label class="flow-field"><span class="flow-label">Animation</span><select id="flow-anim" title="LVGL on device; preview plays a matching slide/fade">
 <option value="none">None (instant)</option>
 <option value="move_left">Move left</option>
 <option value="move_right">Move right</option>

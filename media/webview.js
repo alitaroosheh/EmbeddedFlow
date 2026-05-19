@@ -142,6 +142,44 @@ function formatPreviewZoomPct(zoom) {
 let previewLayoutObserver = null;
 /** @type {import("../src/types/embf").EmbfProject | null} */
 let currentProject = null;
+
+/** @type {Map<string, { screenPtr: number, idToObjPtr: Map<string, number>, objPtrToId: Map<number, string> }>} */
+const pageScreenCache = new Map();
+
+/** LVGL `lv_screen_load_anim_t` values (must match lv_display.h). */
+const LV_SCREEN_LOAD_ANIM = {
+    none: 0,
+    over_left: 1,
+    over_right: 2,
+    over_top: 3,
+    over_bottom: 4,
+    move_left: 5,
+    move_right: 6,
+    move_top: 7,
+    move_bottom: 8,
+    fade_in: 9,
+    fade_out: 10,
+    out_left: 11,
+    out_right: 12,
+    out_top: 13,
+    out_bottom: 14
+};
+
+function screenLoadAnimToLv(anim) {
+    if (!anim || anim === "none") {
+        return LV_SCREEN_LOAD_ANIM.none;
+    }
+    return LV_SCREEN_LOAD_ANIM[anim] ?? LV_SCREEN_LOAD_ANIM.none;
+}
+
+function clearPageScreenCache() {
+    /* Drop JS handles only — never lv_obj_delete() the active screen (crashes LVGL/WASM). */
+    pageScreenCache.clear();
+}
+
+function invalidatePageScreen(pageId) {
+    pageScreenCache.delete(pageId);
+}
 /** @type {string | null} last loaded wasm js uri */
 let loadedWasmJsUri = null;
 
@@ -150,6 +188,11 @@ let previewDarkOverride = null;
 
 /** Skip duplicate rebuild when `pageSelect.value` is set from code (navigate). */
 let pageSelectProgrammatic = false;
+
+/** While true, the main loop must not blit WASM (JS drives the transition frames). */
+let previewJsTransition = false;
+/** @type {number | null} */
+let previewTransitionRaf = null;
 
 /** Active page index (0-based); preserved across project reloads. */
 let currentPageIndex = 0;
@@ -287,6 +330,7 @@ async function handleLoad(payload) {
     }
     hideError();
 
+    try {
     updatePreviewZoom();
     applyPreviewLayout();
 
@@ -322,14 +366,10 @@ async function handleLoad(payload) {
         }
     }
 
-    // Build the UI from the project JSON
-    try {
-        buildUiFromProject(currentProject, currentPageIndex);
-    } catch (e) {
-        showError(`UI build error: ${e.message ?? e}`);
-        log("error", `UI build error: ${e}`);
-        return;
-    }
+    cancelPreviewTransition();
+    clearPageScreenCache();
+
+    buildUiFromProject(currentProject, currentPageIndex);
 
     resizeDesignOverlay();
     setDesignPointerMode();
@@ -348,8 +388,13 @@ async function handleLoad(payload) {
     }
     drawDesignOverlay();
     renderInspector();
+    } catch (e) {
+        showError(`Preview error: ${e.message ?? e}`);
+        log("error", `handleLoad: ${e}`);
+    } finally {
+        showLoading(false);
+    }
 
-    showLoading(false);
     const disp = currentProject.display;
     const depthHint =
         disp?.bitDepth && disp?.colorFormat
@@ -723,23 +768,221 @@ function injectScript(uri) {
 
 
 // ── UI Builder ─────────────────────────────────────────────────────────────────
-function buildUiFromProject(project, pageIndex) {
-    if (!wasmReady || !WasmModule) return;
-    buildWithEmbfApi(project, pageIndex);
+function buildUiFromProject(project, pageIndex, navOpts) {
+    if (!wasmReady || !WasmModule) {
+        return;
+    }
+    switchToPage(project, pageIndex, navOpts ?? { anim: "none" });
 }
 
-function buildWithEmbfApi(project, pageIndex) {
+function cancelPreviewTransition() {
+    if (previewTransitionRaf !== null) {
+        cancelAnimationFrame(previewTransitionRaf);
+        previewTransitionRaf = null;
+    }
+    previewJsTransition = false;
+}
+
+/** Snapshot the WASM RGBA framebuffer (copy; heap buffer is reused each frame). */
+function copyFramebuffer() {
     const wasm = WasmModule;
+    if (!wasm || typeof wasm._embf_get_buffer !== "function") {
+        return null;
+    }
+    wasm._embf_main_loop();
+    const addr = wasm._embf_get_buffer();
+    if (!addr) {
+        return null;
+    }
+    const n = displayWidth * displayHeight * 4;
+    return new Uint8ClampedArray(wasm.HEAPU8.buffer.slice(addr, addr + n));
+}
+
+/** Blit `frameCanvas` to the visible preview canvas (respects zoom / HiDPI). */
+function blitFrameCanvasToDisplay() {
+    if (!frameCtx || !frameCanvas || !ctx) {
+        return;
+    }
+    const dpr = getPreviewDpr();
+    const cssW = displayWidth * previewZoom;
+    const cssH = displayHeight * previewZoom;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(frameCanvas, 0, 0, displayWidth, displayHeight, 0, 0, cssW * dpr, cssH * dpr);
+}
+
+/** Preview-only slide/fade offsets (approximates LVGL screen-load animations). */
+function offsetsForPreviewAnim(anim, t, w, h) {
+    const p = 1 - t;
+    switch (anim) {
+        case "move_right":
+        case "over_right":
+        case "out_right":
+            return { bx: t * w, by: 0, ax: -p * w, ay: 0, fade: false };
+        case "move_top":
+        case "over_top":
+        case "out_top":
+            return { bx: 0, by: -t * h, ax: 0, ay: p * h, fade: false };
+        case "move_bottom":
+        case "over_bottom":
+        case "out_bottom":
+            return { bx: 0, by: t * h, ax: 0, ay: -p * h, fade: false };
+        case "fade_in":
+        case "fade_out":
+            return { bx: 0, by: 0, ax: 0, ay: 0, fade: true, alpha: t };
+        case "move_left":
+        case "over_left":
+        case "out_left":
+        default:
+            return { bx: -t * w, by: 0, ax: p * w, ay: 0, fade: false };
+    }
+}
+
+/**
+ * Instant WASM page switch (LVGL `lv_screen_load`). Used after capturing a transition frame.
+ * @param {{ anim?: string, time?: number, delay?: number, autoDel?: boolean }} [navOpts]
+ */
+function applyPageSwitch(project, pageIndex, navOpts) {
+    const wasm = WasmModule;
+    if (!wasm) {
+        return;
+    }
 
     applyEmbfThemeFromProject(project);
 
-    wasm._embf_clear_screen();
     const page = project.pages[pageIndex];
-    if (!page) return;
+    if (!page) {
+        return;
+    }
 
-    // Reset pointer maps for this screen
-    objPtrToId = new Map();
-    idToObjPtr = new Map();
+    const entry = ensurePageScreenBuilt(project, pageIndex);
+    if (!entry) {
+        return;
+    }
+    objPtrToId = entry.objPtrToId;
+    idToObjPtr = entry.idToObjPtr;
+
+    wasm._embf_load_screen(entry.screenPtr);
+    if (typeof wasm._embf_main_loop === "function") {
+        wasm._embf_main_loop();
+    }
+}
+
+/**
+ * JS canvas transition between two framebuffer snapshots (preview only; firmware uses LVGL anim).
+ * @param {{ anim?: string, time?: number, delay?: number, autoDel?: boolean }} navOpts
+ */
+function playPreviewPageTransition(project, pageIndex, navOpts) {
+    const wasm = WasmModule;
+    if (!wasm || !frameCtx || !frameCanvas) {
+        applyPageSwitch(project, pageIndex, navOpts);
+        return;
+    }
+
+    cancelPreviewTransition();
+
+    const anim = navOpts.anim ?? "move_left";
+    const time = Math.max(50, Math.round(navOpts.time ?? 300));
+    const delay = Math.max(0, Math.round(navOpts.delay ?? 0));
+
+    const beforeCopy = copyFramebuffer();
+    if (!beforeCopy) {
+        applyPageSwitch(project, pageIndex, navOpts);
+        return;
+    }
+
+    const startTransition = () => {
+        applyPageSwitch(project, pageIndex, { anim: "none" });
+        const afterCopy = copyFramebuffer();
+        if (!afterCopy) {
+            return;
+        }
+
+        const w = displayWidth;
+        const h = displayHeight;
+        const beforeCanvas = document.createElement("canvas");
+        beforeCanvas.width = w;
+        beforeCanvas.height = h;
+        beforeCanvas.getContext("2d").putImageData(new ImageData(beforeCopy, w, h), 0, 0);
+
+        const afterCanvas = document.createElement("canvas");
+        afterCanvas.width = w;
+        afterCanvas.height = h;
+        afterCanvas.getContext("2d").putImageData(new ImageData(afterCopy, w, h), 0, 0);
+
+        previewJsTransition = true;
+        const t0 = performance.now();
+
+        const tick = now => {
+            const t = Math.min(1, (now - t0) / time);
+            const o = offsetsForPreviewAnim(anim, t, w, h);
+            frameCtx.clearRect(0, 0, w, h);
+            if (o.fade) {
+                frameCtx.drawImage(beforeCanvas, 0, 0);
+                frameCtx.globalAlpha = o.alpha;
+                frameCtx.drawImage(afterCanvas, 0, 0);
+                frameCtx.globalAlpha = 1;
+            } else {
+                frameCtx.drawImage(beforeCanvas, o.bx, o.by);
+                frameCtx.drawImage(afterCanvas, o.ax, o.ay);
+            }
+            blitFrameCanvasToDisplay();
+
+            if (t < 1) {
+                previewTransitionRaf = requestAnimationFrame(tick);
+            } else {
+                cancelPreviewTransition();
+            }
+        };
+
+        previewTransitionRaf = requestAnimationFrame(tick);
+    };
+
+    if (delay > 0) {
+        setTimeout(startTransition, delay);
+    } else {
+        startTransition();
+    }
+}
+
+/**
+ * @param {{ anim?: string, time?: number, delay?: number, autoDel?: boolean }} [navOpts]
+ */
+function switchToPage(project, pageIndex, navOpts) {
+    if (!wasmReady || !WasmModule) {
+        return;
+    }
+
+    const anim = navOpts?.anim ?? "none";
+    const usePreviewAnim =
+        anim !== "none" && screenLoadAnimToLv(anim) !== LV_SCREEN_LOAD_ANIM.none;
+
+    if (usePreviewAnim) {
+        for (let i = 0; i < project.pages.length; i++) {
+            ensurePageScreenBuilt(project, i);
+        }
+        playPreviewPageTransition(project, pageIndex, navOpts);
+        return;
+    }
+
+    applyPageSwitch(project, pageIndex, navOpts);
+}
+
+function ensurePageScreenBuilt(project, pageIndex) {
+    const page = project.pages[pageIndex];
+    const cached = pageScreenCache.get(page.id);
+    if (cached) {
+        return cached;
+    }
+
+    const wasm = WasmModule;
+    const idToObjPtrLocal = new Map();
+    const objPtrToIdLocal = new Map();
+    const prevId = idToObjPtr;
+    const prevObj = objPtrToId;
+    idToObjPtr = idToObjPtrLocal;
+    objPtrToId = objPtrToIdLocal;
 
     const screenObj = wasm._embf_create_screen();
 
@@ -751,10 +994,14 @@ function buildWithEmbfApi(project, pageIndex) {
         buildComponentEmbf(wasm, comp, screenObj);
     }
 
-    // Register LVGL event callbacks for components that have events defined
     registerPageEvents(wasm, page);
 
-    wasm._embf_load_screen(screenObj);
+    idToObjPtr = prevId;
+    objPtrToId = prevObj;
+
+    const entry = { screenPtr: screenObj, idToObjPtr: idToObjPtrLocal, objPtrToId: objPtrToIdLocal };
+    pageScreenCache.set(page.id, entry);
+    return entry;
 }
 
 /** Register LVGL event callbacks for all components with events on the current page. */
@@ -997,7 +1244,7 @@ function loop() {
             bufAddr = WasmModule._getSyncedBuffer();
         }
 
-        if (bufAddr !== 0 && frameCtx && frameCanvas && ctx) {
+        if (!previewJsTransition && bufAddr !== 0 && frameCtx && frameCanvas && ctx) {
             const pixels = new Uint8ClampedArray(
                 WasmModule.HEAPU8.buffer,
                 bufAddr,
@@ -1005,24 +1252,7 @@ function loop() {
             );
             const imageData = new ImageData(pixels, displayWidth, displayHeight);
             frameCtx.putImageData(imageData, 0, 0);
-
-            const dpr = getPreviewDpr();
-            const cssW = displayWidth * previewZoom;
-            const cssH = displayHeight * previewZoom;
-            ctx.setTransform(1, 0, 0, 1, 0, 0);
-            ctx.imageSmoothingEnabled = false;
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.drawImage(
-                frameCanvas,
-                0,
-                0,
-                displayWidth,
-                displayHeight,
-                0,
-                0,
-                cssW * dpr,
-                cssH * dpr
-            );
+            blitFrameCanvasToDisplay();
         }
     } catch (e) {
         showError(`Runtime error: ${e.message ?? e}`);
@@ -1092,7 +1322,12 @@ function dispatchAction(action, eventValue, currentPage) {
                 if (pageSelect) {
                     pageSelect.value = String(targetIdx);
                 }
-                buildUiFromProject(currentProject, targetIdx);
+                switchToPage(currentProject, targetIdx, {
+                    anim: action.anim,
+                    time: action.time,
+                    delay: action.delay,
+                    autoDel: action.autoDel
+                });
                 drawDesignOverlay();
                 renderInspector();
                 renderPageList();

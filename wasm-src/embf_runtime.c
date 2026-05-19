@@ -101,12 +101,18 @@ void embf_init(int width, int height, int dark_theme,
     g_display = lv_display_create(width, height);
     lv_display_set_color_format(g_display, LV_COLOR_FORMAT_ARGB8888);
 
-    /* Allocate draw buffers (double buffer, each 1/10 of screen) */
+    /* Partial buffers (low memory); preview clears the RGBA framebuffer each frame. */
     size_t buf_size = (size_t)(width * height / 10) * sizeof(lv_color_t);
+    if (buf_size < 4) {
+        buf_size = 4;
+    }
     if (g_draw_buf1) free(g_draw_buf1);
     if (g_draw_buf2) free(g_draw_buf2);
     g_draw_buf1 = (lv_color_t *)malloc(buf_size);
     g_draw_buf2 = (lv_color_t *)malloc(buf_size);
+    if(!g_draw_buf1 || !g_draw_buf2) {
+        return;
+    }
     lv_display_set_buffers(g_display, g_draw_buf1, g_draw_buf2, buf_size,
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
 
@@ -125,6 +131,11 @@ void embf_init(int width, int height, int dark_theme,
 EMSCRIPTEN_KEEPALIVE
 void embf_main_loop(void)
 {
+    /* Only clear during screen-load animation (partial flushes leave stale pixels then).
+     * Clearing every frame breaks static UI: nothing stays dirty so nothing redraws. */
+    if(g_framebuffer && g_display && lv_display_get_screen_loading(g_display) != NULL) {
+        memset(g_framebuffer, 0, (size_t)g_width * g_height * 4);
+    }
     lv_timer_handler();
 }
 
@@ -157,6 +168,16 @@ EMSCRIPTEN_KEEPALIVE
 void embf_load_screen(lv_obj_t *screen)
 {
     lv_screen_load(screen);
+    lv_obj_invalidate(screen);
+    embf_discard_pending_events();
+}
+
+EMSCRIPTEN_KEEPALIVE
+void embf_load_screen_anim(lv_obj_t *screen, int anim_type, uint32_t time, uint32_t delay, int auto_del)
+{
+    lv_screen_load_anim(screen, (lv_screen_load_anim_t)anim_type, time, delay, auto_del != 0);
+    lv_obj_invalidate(screen);
+  /* Do NOT call lv_refr_now() — it runs lv_anim_refr_now() and finishes the transition instantly. */
     embf_discard_pending_events();
 }
 

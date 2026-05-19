@@ -91,10 +91,17 @@ let displayRound = false;
 let frameCanvas = null;
 /** @type {CanvasRenderingContext2D | null} */
 let frameCtx = null;
-/** Integer CSS pixels per logical LVGL pixel (1–4). */
+/** CSS pixels per logical LVGL pixel (0.1–4). */
 let previewZoom = 1;
-/** @type {"auto" | 1 | 2 | 3 | 4} */
+/** @type {"auto" | number} */
 let previewZoomMode = "auto";
+
+const PREVIEW_ZOOM_MIN = 0.1;
+const PREVIEW_ZOOM_MAX = 4;
+
+function formatPreviewZoomPct(zoom) {
+    return `${Math.round(zoom * 100)}%`;
+}
 /** @type {ResizeObserver | null} */
 let previewLayoutObserver = null;
 /** @type {import("../src/types/embf").EmbfProject | null} */
@@ -311,7 +318,7 @@ async function handleLoad(payload) {
             : "";
     const roundHint = disp?.round ? " · round clip" : "";
     setStatus(
-        `${currentProject.project.name} · LVGL ${currentProject.project.lvglVersion} · ${displayWidth}×${displayHeight} · ${previewZoom * 100}%${depthHint}${roundHint}`
+        `${currentProject.project.name} · LVGL ${currentProject.project.lvglVersion} · ${displayWidth}×${displayHeight} · ${formatPreviewZoomPct(previewZoom)}${depthHint}${roundHint}`
     );
     startLoop();
 }
@@ -413,8 +420,9 @@ if (previewZoomSelect) {
         if (raw === "auto") {
             previewZoomMode = "auto";
         } else {
-            const n = parseInt(raw, 10);
-            previewZoomMode = n >= 1 && n <= 4 ? /** @type {1|2|3|4} */ (n) : 1;
+            const n = parseFloat(raw);
+            previewZoomMode =
+                Number.isFinite(n) && n >= PREVIEW_ZOOM_MIN && n <= PREVIEW_ZOOM_MAX ? n : 1;
         }
         updatePreviewZoom();
         applyPreviewLayout();
@@ -427,7 +435,7 @@ if (previewZoomSelect) {
                     : "";
             const roundHint = disp?.round ? " · round clip" : "";
             setStatus(
-                `${currentProject.project.name} · LVGL ${currentProject.project.lvglVersion} · ${displayWidth}×${displayHeight} · ${previewZoom * 100}%${depthHint}${roundHint}`
+                `${currentProject.project.name} · LVGL ${currentProject.project.lvglVersion} · ${displayWidth}×${displayHeight} · ${formatPreviewZoomPct(previewZoom)}${depthHint}${roundHint}`
             );
         }
     });

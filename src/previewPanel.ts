@@ -930,6 +930,10 @@ export class EmbfPreviewPanel {
         <label for="preview-zoom">Zoom:</label>
         <select id="preview-zoom" title="Preview scale only — device resolution stays in .embf">
             <option value="auto" selected>Auto</option>
+            <option value="0.1">10%</option>
+            <option value="0.25">25%</option>
+            <option value="0.5">50%</option>
+            <option value="0.75">75%</option>
             <option value="1">100%</option>
             <option value="2">200%</option>
             <option value="3">300%</option>

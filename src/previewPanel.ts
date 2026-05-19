@@ -21,6 +21,7 @@ import { undoEmbfEdit, redoEmbfEdit, getEmbfHistoryState } from "./embfUndoRedo"
 import { appendWidgetToEmbfFile } from "./embfWidgetInsert";
 import { addPageInEmbfFile, removePageInEmbfFile, renamePageInEmbfFile } from "./embfPageEdit";
 import { addNavigateFlowInEmbfFile, removeNavigateFlowInEmbfFile } from "./embfFlowEdit";
+import { addPageSwipeFlowInEmbfFile, removePageSwipeFlowInEmbfFile } from "./embfPageSwipeEdit";
 import { embeddedFlowLog } from "./outputLog";
 
 // Messages sent from extension host → webview
@@ -76,6 +77,19 @@ export type WebviewToHostMessage =
           componentId: string;
           trigger: string;
           targetPageId: string;
+      }
+    | {
+          type: "addPageSwipeFlow";
+          sourcePageIndex: number;
+          direction: string;
+          targetPageId: string;
+          anim?: string;
+          time?: number;
+      }
+    | {
+          type: "removePageSwipeFlow";
+          sourcePageIndex: number;
+          direction: string;
       };
 
 export interface WebviewLoadPayload {
@@ -527,6 +541,45 @@ export class EmbfPreviewPanel {
                 trigger,
                 targetPageId
             ).then(ok => {
+                if (ok) {
+                    this.reloadPreviewNow(sourcePageIndex);
+                    this.sendHistoryState();
+                }
+            });
+        } else if (msg.type === "addPageSwipeFlow") {
+            const sourcePageIndex = Number(msg.sourcePageIndex);
+            const direction = String(msg.direction ?? "").trim();
+            const targetPageId = String(msg.targetPageId ?? "").trim();
+            if (
+                !Number.isInteger(sourcePageIndex) ||
+                sourcePageIndex < 0 ||
+                !direction ||
+                !targetPageId
+            ) {
+                return;
+            }
+            const anim = msg.anim !== undefined ? String(msg.anim) : undefined;
+            const time = msg.time !== undefined ? Number(msg.time) : undefined;
+            void addPageSwipeFlowInEmbfFile(
+                this._filePath,
+                sourcePageIndex,
+                direction,
+                targetPageId,
+                anim,
+                time
+            ).then(ok => {
+                if (ok) {
+                    this.reloadPreviewNow(sourcePageIndex);
+                    this.sendHistoryState();
+                }
+            });
+        } else if (msg.type === "removePageSwipeFlow") {
+            const sourcePageIndex = Number(msg.sourcePageIndex);
+            const direction = String(msg.direction ?? "").trim();
+            if (!Number.isInteger(sourcePageIndex) || sourcePageIndex < 0 || !direction) {
+                return;
+            }
+            void removePageSwipeFlowInEmbfFile(this._filePath, sourcePageIndex, direction).then(ok => {
                 if (ok) {
                     this.reloadPreviewNow(sourcePageIndex);
                     this.sendHistoryState();

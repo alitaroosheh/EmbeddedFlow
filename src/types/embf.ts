@@ -68,11 +68,26 @@ export interface ImageDef {
 
 // ─── Page ────────────────────────────────────────────────────────────────────
 
+/** Finger swipe direction on a page (maps to `lv_indev_get_gesture_dir()` / `LV_DIR_*`). */
+export type SwipeDirection = "left" | "right" | "top" | "bottom";
+
+/** Navigate to another page when the user swipes on this page's screen. */
+export interface PageSwipeFlow {
+    direction: SwipeDirection;
+    target: string;
+    anim?: ScreenLoadAnim;
+    time?: number;
+    delay?: number;
+    autoDel?: boolean;
+}
+
 export interface Page {
     id: string;
     name: string;
     backgroundColor?: string;
     components: Component[];
+    /** Page-level swipe handlers (LVGL `LV_EVENT_GESTURE` on the screen). */
+    swipes?: PageSwipeFlow[];
 }
 
 // ─── Components ──────────────────────────────────────────────────────────────

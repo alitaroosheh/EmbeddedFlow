@@ -113,7 +113,52 @@
         "components": {
           "type": "array",
           "items": { "$ref": "#/definitions/component" }
+        },
+        "swipes": {
+          "type": "array",
+          "description": "Swipe on this page's screen to navigate (LVGL LV_EVENT_GESTURE)",
+          "items": { "$ref": "#/definitions/pageSwipe" }
         }
+      }
+    },
+    "pageSwipe": {
+      "type": "object",
+      "required": ["direction", "target"],
+      "additionalProperties": false,
+      "properties": {
+        "direction": {
+          "type": "string",
+          "enum": ["left", "right", "top", "bottom"],
+          "description": "Finger swipe direction on the screen"
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Page ID to load"
+        },
+        "anim": {
+          "type": "string",
+          "enum": [
+            "none",
+            "move_left",
+            "move_right",
+            "move_top",
+            "move_bottom",
+            "over_left",
+            "over_right",
+            "over_top",
+            "over_bottom",
+            "fade_in",
+            "fade_out",
+            "out_left",
+            "out_right",
+            "out_top",
+            "out_bottom"
+          ]
+        },
+        "time": { "type": "integer", "minimum": 0 },
+        "delay": { "type": "integer", "minimum": 0 },
+        "autoDel": { "type": "boolean" }
       }
     },
     "styleProps": {

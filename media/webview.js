@@ -84,14 +84,21 @@ const SIDEBAR_PANEL_LABELS = {
     flow: "Flow"
 };
 const SIDEBAR_PANEL_WIDE = new Set(["pages", "flow"]);
+const flowKind = /** @type {HTMLSelectElement | null} */ (document.getElementById("flow-kind"));
 const flowFromPage = /** @type {HTMLSelectElement | null} */ (document.getElementById("flow-from-page"));
+const flowComponentFields = document.getElementById("flow-component-fields");
+const flowSwipeFields = document.getElementById("flow-swipe-fields");
 const flowComponent = /** @type {HTMLSelectElement | null} */ (document.getElementById("flow-component"));
 const flowTrigger = /** @type {HTMLSelectElement | null} */ (document.getElementById("flow-trigger"));
+const flowSwipeDirection = /** @type {HTMLSelectElement | null} */ (document.getElementById("flow-swipe-direction"));
 const flowToPage = /** @type {HTMLSelectElement | null} */ (document.getElementById("flow-to-page"));
 const flowAnim = /** @type {HTMLSelectElement | null} */ (document.getElementById("flow-anim"));
 const flowTime = /** @type {HTMLInputElement | null} */ (document.getElementById("flow-time"));
 const flowListEl = document.getElementById("flow-list");
 const btnFlowAdd = document.getElementById("btn-flow-add");
+
+/** Minimum pointer travel (px) to treat as a page swipe in preview. */
+const PAGE_SWIPE_MIN_PX = 48;
 /** @type {ReturnType<typeof setTimeout> | null} */
 let inspectorDebounce = null;
 let inspectorSyncing = false;
@@ -1411,6 +1418,94 @@ function collectNavigateFlowsFromProject() {
     return flows;
 }
 
+/** @returns {Array<{ kind: string, sourcePageIndex: number, sourcePageName: string, targetPageName: string, targetPageId: string, direction?: string, componentId?: string, componentType?: string, trigger?: string, anim: string, time: number }>} */
+function collectPageSwipeFlowsFromProject() {
+    if (!currentProject) {
+        return [];
+    }
+    /** @type {ReturnType<typeof collectPageSwipeFlowsFromProject>} */
+    const flows = [];
+    for (let pi = 0; pi < currentProject.pages.length; pi++) {
+        const page = currentProject.pages[pi];
+        for (const swipe of page.swipes ?? []) {
+            const ti = currentProject.pages.findIndex(p => p.id === swipe.target);
+            if (ti < 0) {
+                continue;
+            }
+            const target = currentProject.pages[ti];
+            flows.push({
+                kind: "swipe",
+                sourcePageIndex: pi,
+                sourcePageName: page.name,
+                targetPageId: target.id,
+                targetPageName: target.name,
+                direction: swipe.direction,
+                anim: swipe.anim ?? "none",
+                time: swipe.time ?? 300
+            });
+        }
+    }
+    return flows;
+}
+
+function collectAllFlowsFromProject() {
+    const component = collectNavigateFlowsFromProject().map(f => ({ kind: "component", ...f }));
+    const swipe = collectPageSwipeFlowsFromProject();
+    return [...component, ...swipe];
+}
+
+/** Map pointer delta to swipe direction (matches LVGL `lv_dir_t`). */
+function detectSwipeDirection(dx, dy) {
+    const adx = Math.abs(dx);
+    const ady = Math.abs(dy);
+    if (adx < PAGE_SWIPE_MIN_PX && ady < PAGE_SWIPE_MIN_PX) {
+        return null;
+    }
+    if (adx >= ady) {
+        return dx < 0 ? "left" : "right";
+    }
+    return dy < 0 ? "top" : "bottom";
+}
+
+/** Run a page swipe flow in preview when the user swipes on the canvas. */
+function tryExecutePageSwipe(dx, dy) {
+    if (!currentProject) {
+        return false;
+    }
+    const direction = detectSwipeDirection(dx, dy);
+    if (!direction) {
+        return false;
+    }
+    const page = currentProject.pages[currentPageIndex];
+    const swipe = (page.swipes ?? []).find(s => s.direction === direction);
+    if (!swipe) {
+        return false;
+    }
+    dispatchAction(
+        {
+            type: "navigate",
+            target: swipe.target,
+            anim: swipe.anim,
+            time: swipe.time,
+            delay: swipe.delay,
+            autoDel: swipe.autoDel
+        },
+        null,
+        page
+    );
+    return true;
+}
+
+function syncFlowKindFields() {
+    const isSwipe = flowKind?.value === "swipe";
+    if (flowComponentFields) {
+        flowComponentFields.hidden = isSwipe;
+    }
+    if (flowSwipeFields) {
+        flowSwipeFields.hidden = !isSwipe;
+    }
+}
+
 function populateFlowForm() {
     if (!currentProject) {
         return;
@@ -1467,12 +1562,12 @@ function renderFlowList() {
         return;
     }
     flowListEl.innerHTML = "";
-    const flows = collectNavigateFlowsFromProject();
+    const flows = collectAllFlowsFromProject();
     if (!flows.length) {
         const empty = document.createElement("li");
         empty.className = "flow-list-empty";
         empty.textContent =
-            "No page flows yet. Use + Add flow to wire a component event to another page.";
+            "No page flows yet. Add a component event or swipe to switch pages.";
         flowListEl.appendChild(empty);
         return;
     }
@@ -1483,7 +1578,6 @@ function renderFlowList() {
         const main = document.createElement("button");
         main.type = "button";
         main.className = "flow-list-main";
-        main.title = "Go to source widget";
         const route = document.createElement("span");
         route.className = "flow-route";
         route.textContent = `${f.sourcePageName} → ${f.targetPageName}`;
@@ -1491,16 +1585,30 @@ function renderFlowList() {
         meta.className = "flow-meta";
         const animLabel =
             f.anim && f.anim !== "none" ? ` · ${f.anim.replace(/_/g, " ")} ${f.time}ms` : "";
-        meta.textContent = `${f.componentId} (${f.componentType}) · ${f.trigger}${animLabel}`;
+        if (f.kind === "swipe") {
+            main.title = "Go to source page";
+            const dirLabel = f.direction === "top" ? "up" : f.direction === "bottom" ? "down" : f.direction;
+            meta.textContent = `swipe ${dirLabel}${animLabel}`;
+            main.addEventListener("click", () => {
+                navigateToPageIndex(f.sourcePageIndex);
+                inspectorShowingPage = true;
+                selectedComponentOrder = [];
+                drawDesignOverlay();
+                renderInspector();
+            });
+        } else {
+            main.title = "Go to source widget";
+            meta.textContent = `${f.componentId} (${f.componentType}) · ${f.trigger}${animLabel}`;
+            main.addEventListener("click", () => {
+                navigateToPageIndex(f.sourcePageIndex);
+                inspectorShowingPage = false;
+                selectedComponentOrder = [f.componentId];
+                drawDesignOverlay();
+                renderInspector();
+            });
+        }
         main.appendChild(route);
         main.appendChild(meta);
-        main.addEventListener("click", () => {
-            navigateToPageIndex(f.sourcePageIndex);
-            inspectorShowingPage = false;
-            selectedComponentOrder = [f.componentId];
-            drawDesignOverlay();
-            renderInspector();
-        });
 
         const removeBtn = document.createElement("button");
         removeBtn.type = "button";
@@ -1509,13 +1617,21 @@ function renderFlowList() {
         removeBtn.title = "Remove this flow";
         removeBtn.addEventListener("click", e => {
             e.stopPropagation();
-            vscode.postMessage({
-                type: "removeNavigateFlow",
-                sourcePageIndex: f.sourcePageIndex,
-                componentId: f.componentId,
-                trigger: f.trigger,
-                targetPageId: f.targetPageId
-            });
+            if (f.kind === "swipe") {
+                vscode.postMessage({
+                    type: "removePageSwipeFlow",
+                    sourcePageIndex: f.sourcePageIndex,
+                    direction: f.direction
+                });
+            } else {
+                vscode.postMessage({
+                    type: "removeNavigateFlow",
+                    sourcePageIndex: f.sourcePageIndex,
+                    componentId: f.componentId,
+                    trigger: f.trigger,
+                    targetPageId: f.targetPageId
+                });
+            }
         });
 
         li.appendChild(main);
@@ -1541,6 +1657,11 @@ function syncFlowTimeField() {
     }
 }
 
+if (flowKind) {
+    flowKind.addEventListener("change", syncFlowKindFields);
+    syncFlowKindFields();
+}
+
 if (flowAnim) {
     flowAnim.addEventListener("change", syncFlowTimeField);
     syncFlowTimeField();
@@ -1548,16 +1669,38 @@ if (flowAnim) {
 
 if (btnFlowAdd) {
     btnFlowAdd.addEventListener("click", () => {
-        if (!currentProject || !flowFromPage || !flowComponent || !flowTrigger || !flowToPage) {
+        if (!currentProject || !flowFromPage || !flowToPage) {
             return;
         }
         const sourcePageIndex = parseInt(flowFromPage.value, 10) || 0;
-        const componentId = flowComponent.value;
-        const trigger = flowTrigger.value;
         const targetPageId = flowToPage.value;
         const anim = flowAnim?.value ?? "none";
         const time = flowTime ? parseInt(flowTime.value, 10) : 300;
-        if (!componentId || !targetPageId) {
+        if (!targetPageId) {
+            return;
+        }
+        const kind = flowKind?.value ?? "component";
+        if (kind === "swipe") {
+            const direction = flowSwipeDirection?.value;
+            if (!direction) {
+                return;
+            }
+            vscode.postMessage({
+                type: "addPageSwipeFlow",
+                sourcePageIndex,
+                direction,
+                targetPageId,
+                anim,
+                time: Number.isFinite(time) ? time : 300
+            });
+            return;
+        }
+        if (!flowComponent || !flowTrigger) {
+            return;
+        }
+        const componentId = flowComponent.value;
+        const trigger = flowTrigger.value;
+        if (!componentId) {
             return;
         }
         vscode.postMessage({
@@ -3717,6 +3860,16 @@ function setupDesignOverlay() {
                 const isMarquee = dxM >= MARQUEE_DRAG_THRESHOLD || dyM >= MARQUEE_DRAG_THRESHOLD;
 
                 if (!isMarquee) {
+                    const sdx = m.x - m.ox;
+                    const sdy = m.y - m.oy;
+                    if (tryExecutePageSwipe(sdx, sdy)) {
+                        marqueeState = null;
+                        drawDesignOverlay();
+                        renderInspector();
+                        releaseCaptureSafe();
+                        e.preventDefault();
+                        return;
+                    }
                     if (!m.shift && !m.ctrl) {
                         selectPageInspector();
                     }

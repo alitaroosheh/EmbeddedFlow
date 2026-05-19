@@ -3,6 +3,7 @@ import { getEffectiveDisplaySize } from "../embfParser";
 import { screenVar, screenInitFn, headerGuard, widgetVar } from "./naming";
 import { emitComponent } from "./widgetGen";
 import { collectPageEvents } from "./eventGen";
+import { collectPageSwipes } from "./swipeGen";
 import { lvglIncludeDirective } from "./lvglInclude";
 
 const AUTOGEN_BANNER = `/*
@@ -92,8 +93,12 @@ export function generatePageSource(project: EmbfProject, page: Page): string {
         );
     }
 
-    // Event callbacks
-    const { decls, impls, registrations } = collectPageEvents(project, page);
+    // Event callbacks and page swipe handlers
+    const events = collectPageEvents(project, page);
+    const swipes = collectPageSwipes(project, page);
+    const decls = [...events.decls, ...swipes.decls];
+    const impls = [...events.impls, ...swipes.impls];
+    const registrations = [...events.registrations, ...swipes.registrations];
 
     return [
         AUTOGEN_BANNER,

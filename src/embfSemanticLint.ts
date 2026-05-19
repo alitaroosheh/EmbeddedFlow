@@ -198,9 +198,19 @@ export function lintEmbfProject(text: string, project: EmbfProject): EmbfSemanti
         }
     }
 
+    const pageIds = new Set(project.pages.map(p => p.id));
     for (const page of project.pages) {
         for (const comp of flatComponents(page.components)) {
             issues.push(...lintEvents(project, page, comp, text));
+        }
+        for (const swipe of page.swipes ?? []) {
+            if (!pageIds.has(swipe.target)) {
+                issues.push({
+                    message:
+                        `Swipe (${swipe.direction}) on page "${page.id}": target is not a page id: "${swipe.target}"`,
+                    range: firstTargetSpan(text, swipe.target)
+                });
+            }
         }
     }
 

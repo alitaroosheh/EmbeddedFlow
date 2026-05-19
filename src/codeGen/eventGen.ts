@@ -1,4 +1,12 @@
-import type { EmbfProject, Page, Component, EventDef, Action, NavigateAction } from "../types/embf";
+import type {
+    EmbfProject,
+    Page,
+    Component,
+    EventDef,
+    Action,
+    NavigateAction,
+    PageSwipeFlow
+} from "../types/embf";
 import { widgetVar, screenVar, toIdentifier } from "./naming";
 import { screenLoadAnimCConstant } from "./screenLoadAnim";
 
@@ -54,28 +62,35 @@ export function emitEventCallback(
     return { decl, impl, registration };
 }
 
+/** Emit C to load another page (instant or animated). */
+export function emitNavigateStatement(
+    project: EmbfProject,
+    nav: Pick<NavigateAction, "target" | "anim" | "time" | "delay" | "autoDel"> | PageSwipeFlow,
+    v9: boolean
+): string {
+    const targetPage = project.pages.find(p => p.id === nav.target);
+    if (!targetPage) {
+        return `/* navigate: page "${nav.target}" not found */`;
+    }
+    const scr = screenVar(nav.target);
+    const anim = nav.anim ?? "none";
+    if (anim === "none") {
+        const loadFn = v9 ? "lv_screen_load" : "lv_scr_load";
+        return `${loadFn}(${scr});`;
+    }
+    const time = Math.max(0, Math.round(nav.time ?? 300));
+    const delay = Math.max(0, Math.round(nav.delay ?? 0));
+    const autoDel = nav.autoDel ? "true" : "false";
+    const lvAnim = screenLoadAnimCConstant(anim, v9);
+    const loadAnimFn = v9 ? "lv_screen_load_anim" : "lv_scr_load_anim";
+    return `${loadAnimFn}(${scr}, ${lvAnim}, ${time}, ${delay}, ${autoDel});`;
+}
+
 /** Emit one action as a C statement (no leading indent). */
 function emitAction(project: EmbfProject, page: Page, action: Action, v9: boolean): string {
     switch (action.type) {
-        case "navigate": {
-            const nav = action as NavigateAction;
-            const targetPage = project.pages.find(p => p.id === nav.target);
-            if (!targetPage) {
-                return `/* navigate: page "${nav.target}" not found */`;
-            }
-            const scr = screenVar(nav.target);
-            const anim = nav.anim ?? "none";
-            if (anim === "none") {
-                const loadFn = v9 ? "lv_screen_load" : "lv_scr_load";
-                return `${loadFn}(${scr});`;
-            }
-            const time = Math.max(0, Math.round(nav.time ?? 300));
-            const delay = Math.max(0, Math.round(nav.delay ?? 0));
-            const autoDel = nav.autoDel ? "true" : "false";
-            const lvAnim = screenLoadAnimCConstant(anim, v9);
-            const loadAnimFn = v9 ? "lv_screen_load_anim" : "lv_scr_load_anim";
-            return `${loadAnimFn}(${scr}, ${lvAnim}, ${time}, ${delay}, ${autoDel});`;
-        }
+        case "navigate":
+            return emitNavigateStatement(project, action as NavigateAction, v9);
         case "set_text": {
             // Escape the string
             const escaped = action.text

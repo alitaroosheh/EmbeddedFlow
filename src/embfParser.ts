@@ -601,10 +601,55 @@ function validatePagesDeep(pages: unknown[]): void {
         if (!Array.isArray(p["components"])) {
             throw new EmbfParseError(`${path}.components must be an array`);
         }
+        if (p["swipes"] !== undefined) {
+            validatePageSwipes(p["swipes"], `${path}.swipes`);
+        }
         (p["components"] as unknown[]).forEach((c, ci) => {
             validateComponentDeep(c, `${path}.components[${ci}]`);
         });
     });
+}
+
+const SWIPE_DIRECTIONS = new Set<string>(["left", "right", "top", "bottom"]);
+
+function validatePageSwipes(swipes: unknown, path: string): void {
+    if (!Array.isArray(swipes)) {
+        throw new EmbfParseError(`${path} must be an array`);
+    }
+    const seen = new Set<string>();
+    for (let i = 0; i < swipes.length; i++) {
+        const sp = `${path}[${i}]`;
+        const s = swipes[i];
+        if (typeof s !== "object" || s === null) {
+            throw new EmbfParseError(`${sp} must be an object`);
+        }
+        const so = s as Record<string, unknown>;
+        const dir = so["direction"];
+        if (typeof dir !== "string" || !SWIPE_DIRECTIONS.has(dir)) {
+            throw new EmbfParseError(`${sp}.direction must be one of: left, right, top, bottom`);
+        }
+        if (seen.has(dir)) {
+            throw new EmbfParseError(`${path}: duplicate swipe direction "${dir}"`);
+        }
+        seen.add(dir);
+        if (typeof so["target"] !== "string" || !so["target"].trim()) {
+            throw new EmbfParseError(`${sp}: swipe requires non-empty string "target"`);
+        }
+        if (so["anim"] !== undefined) {
+            if (!normalizeScreenLoadAnim(so["anim"])) {
+                throw new EmbfParseError(`${sp}: swipe "anim" must be a known screen load animation id`);
+            }
+        }
+        if (so["time"] !== undefined && !isFiniteNumber(so["time"])) {
+            throw new EmbfParseError(`${sp}: swipe "time" must be a finite number (ms)`);
+        }
+        if (so["delay"] !== undefined && !isFiniteNumber(so["delay"])) {
+            throw new EmbfParseError(`${sp}: swipe "delay" must be a finite number (ms)`);
+        }
+        if (so["autoDel"] !== undefined && typeof so["autoDel"] !== "boolean") {
+            throw new EmbfParseError(`${sp}: swipe "autoDel" must be a boolean`);
+        }
+    }
 }
 
 export function resolveWasmVersion(lvglVersion: LvglVersion): string {

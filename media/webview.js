@@ -194,6 +194,10 @@ let previewJsTransition = false;
 /** @type {number | null} */
 let previewTransitionRaf = null;
 
+/** Pointer trail for page-swipe detection in run mode (design overlay off). */
+/** @type {{ ox: number, oy: number, x: number, y: number } | null} */
+let canvasSwipeTrack = null;
+
 /** Active page index (0-based); preserved across project reloads. */
 let currentPageIndex = 0;
 
@@ -1394,6 +1398,8 @@ if (designModeCheck) {
             inspectorShowingPage = false;
             dragState = null;
             marqueeState = null;
+        } else {
+            canvasSwipeTrack = null;
         }
         setDesignPointerMode();
         drawDesignOverlay();
@@ -1702,9 +1708,9 @@ function detectSwipeDirection(dx, dy) {
     return dy < 0 ? "top" : "bottom";
 }
 
-/** Run a page swipe flow in preview when the user swipes on the canvas. */
+/** Run a page swipe flow in preview when the user swipes on the canvas (run mode only). */
 function tryExecutePageSwipe(dx, dy) {
-    if (!currentProject) {
+    if (designMode || !currentProject) {
         return false;
     }
     const direction = detectSwipeDirection(dx, dy);
@@ -4095,16 +4101,6 @@ function setupDesignOverlay() {
                 const isMarquee = dxM >= MARQUEE_DRAG_THRESHOLD || dyM >= MARQUEE_DRAG_THRESHOLD;
 
                 if (!isMarquee) {
-                    const sdx = m.x - m.ox;
-                    const sdy = m.y - m.oy;
-                    if (tryExecutePageSwipe(sdx, sdy)) {
-                        marqueeState = null;
-                        drawDesignOverlay();
-                        renderInspector();
-                        releaseCaptureSafe();
-                        e.preventDefault();
-                        return;
-                    }
                     if (!m.shift && !m.ctrl) {
                         selectPageInspector();
                     }
@@ -4250,17 +4246,45 @@ if (designOverlay) {
 }
 
 // ── Input forwarding (LVGL interaction when design mode is off) ───────────────
+function canvasDisplayCoords(e) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = displayWidth / rect.width;
+    const scaleY = displayHeight / rect.height;
+    return {
+        x: Math.round((e.clientX - rect.left) * scaleX),
+        y: Math.round((e.clientY - rect.top) * scaleY)
+    };
+}
+
 if (canvas) {
     canvas.addEventListener("pointerdown", e => {
+        if (!designMode) {
+            const c = canvasDisplayCoords(e);
+            canvasSwipeTrack = { ox: c.x, oy: c.y, x: c.x, y: c.y };
+        }
         canvas.setPointerCapture(e.pointerId);
         sendPointer(e, true, 4);
     });
     canvas.addEventListener("pointermove", e => {
+        if (!designMode && canvasSwipeTrack) {
+            const c = canvasDisplayCoords(e);
+            canvasSwipeTrack.x = c.x;
+            canvasSwipeTrack.y = c.y;
+        }
         const drag = e.buttons > 0;
         sendPointer(e, drag, drag ? 1 : 0);
     });
     canvas.addEventListener("pointerup", e => {
-        sendPointer(e, false, 4);
+        let consumedSwipe = false;
+        if (!designMode && canvasSwipeTrack) {
+            const sdx = canvasSwipeTrack.x - canvasSwipeTrack.ox;
+            const sdy = canvasSwipeTrack.y - canvasSwipeTrack.oy;
+            consumedSwipe = tryExecutePageSwipe(sdx, sdy);
+            canvasSwipeTrack = null;
+        }
+        if (!consumedSwipe) {
+            sendPointer(e, false, 4);
+        }
         try {
             canvas.releasePointerCapture(e.pointerId);
         } catch {
@@ -4268,6 +4292,7 @@ if (canvas) {
         }
     });
     canvas.addEventListener("pointercancel", e => {
+        canvasSwipeTrack = null;
         sendPointer(e, false, 4);
         try {
             canvas.releasePointerCapture(e.pointerId);
@@ -4287,11 +4312,7 @@ if (canvas) {
 
 function sendPointer(e, pressed, pumpLevel) {
     if (!wasmReady || !WasmModule || !canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = displayWidth / rect.width;
-    const scaleY = displayHeight / rect.height;
-    const x = Math.round((e.clientX - rect.left) * scaleX);
-    const y = Math.round((e.clientY - rect.top) * scaleY);
+    const { x, y } = canvasDisplayCoords(e);
     forwardPointerToLvgl(x, y, pressed, pumpLevel);
 }
 

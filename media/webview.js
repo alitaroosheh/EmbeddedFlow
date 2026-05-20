@@ -226,6 +226,9 @@ let marqueeState = null;
 /** At least one axis must exceed this delta (logical px) to count as marquee vs empty click */
 const MARQUEE_DRAG_THRESHOLD = 5;
 
+/** Design-mode magnetic snap: align edges/centers when within this distance (logical px). */
+const DESIGN_SNAP_THRESHOLD = 8;
+
 /**
  * Maps WASM object pointer (number) → component ID string.
  * Rebuilt every time a screen is constructed.
@@ -1515,6 +1518,166 @@ function getAbsBounds(page, componentId) {
     return walk(page.components ?? [], 0, 0);
 }
 
+/** Bounds of all page widgets except ids being dragged (for magnetic snap). */
+function collectSnapTargets(page, excludeIds) {
+    /** @type {{ id: string, left: number, right: number, top: number, bottom: number, cx: number, cy: number }[]} */
+    const out = [];
+    for (const c of flatComponentsList(page.components)) {
+        if (excludeIds.has(c.id)) {
+            continue;
+        }
+        const b = getAbsBounds(page, c.id);
+        if (!b) {
+            continue;
+        }
+        out.push({
+            id: c.id,
+            left: b.x,
+            right: b.x + b.width,
+            top: b.y,
+            bottom: b.y + b.height,
+            cx: b.x + b.width / 2,
+            cy: b.y + b.height / 2
+        });
+    }
+    return out;
+}
+
+/** Selection bounding box at the current drag offset. */
+function dragSelectionBox(items, dx, dy) {
+    let left = Infinity;
+    let top = Infinity;
+    let right = -Infinity;
+    let bottom = -Infinity;
+    for (const it of items) {
+        const x = it.startAbsX + dx;
+        const y = it.startAbsY + dy;
+        left = Math.min(left, x);
+        top = Math.min(top, y);
+        right = Math.max(right, x + it.width);
+        bottom = Math.max(bottom, y + it.height);
+    }
+    return {
+        left,
+        top,
+        right,
+        bottom,
+        cx: (left + right) / 2,
+        cy: (top + bottom) / 2
+    };
+}
+
+/**
+ * Snap selection to nearby widget edges/centers on X and Y.
+ * @returns {{ dx: number, dy: number, guides: { axis: string, pos: number, crossStart: number, crossEnd: number }[] }}
+ */
+function magneticSnapAdjust(page, items, dx, dy, excludeIds) {
+    const targets = collectSnapTargets(page, excludeIds);
+    if (!targets.length) {
+        return { dx, dy, guides: [] };
+    }
+
+    const box = dragSelectionBox(items, dx, dy);
+    const edges = {
+        left: box.left,
+        right: box.right,
+        top: box.top,
+        bottom: box.bottom,
+        cx: box.cx,
+        cy: box.cy
+    };
+
+    let snapDx = 0;
+    let snapDy = 0;
+    let bestX = DESIGN_SNAP_THRESHOLD + 1;
+    let bestY = DESIGN_SNAP_THRESHOLD + 1;
+    /** @type {{ axis: string, pos: number, crossStart: number, crossEnd: number } | null} */
+    let guideX = null;
+    /** @type {{ axis: string, pos: number, crossStart: number, crossEnd: number } | null} */
+    let guideY = null;
+
+    const xPairs = [
+        ["left", "left"],
+        ["right", "right"],
+        ["left", "right"],
+        ["right", "left"],
+        ["cx", "cx"]
+    ];
+    const yPairs = [
+        ["top", "top"],
+        ["bottom", "bottom"],
+        ["top", "bottom"],
+        ["bottom", "top"],
+        ["cy", "cy"]
+    ];
+
+    for (const t of targets) {
+        for (const [me, te] of xPairs) {
+            const mv = edges[me];
+            const tv = t[te];
+            const dist = Math.abs(mv - tv);
+            if (dist <= DESIGN_SNAP_THRESHOLD && dist < bestX) {
+                bestX = dist;
+                snapDx = tv - mv;
+                guideX = {
+                    axis: "x",
+                    pos: Math.round(tv),
+                    crossStart: 0,
+                    crossEnd: displayHeight
+                };
+            }
+        }
+        for (const [me, te] of yPairs) {
+            const mv = edges[me];
+            const tv = t[te];
+            const dist = Math.abs(mv - tv);
+            if (dist <= DESIGN_SNAP_THRESHOLD && dist < bestY) {
+                bestY = dist;
+                snapDy = tv - mv;
+                guideY = {
+                    axis: "y",
+                    pos: Math.round(tv),
+                    crossStart: 0,
+                    crossEnd: displayWidth
+                };
+            }
+        }
+    }
+
+    const guides = [];
+    if (guideX) {
+        guides.push(guideX);
+    }
+    if (guideY) {
+        guides.push(guideY);
+    }
+    return { dx: dx + snapDx, dy: dy + snapDy, guides };
+}
+
+function drawSnapGuides(guides) {
+    if (!designCtx || !guides?.length) {
+        return;
+    }
+    designCtx.save();
+    designCtx.strokeStyle = "rgba(236, 72, 153, 0.95)";
+    designCtx.lineWidth = 1;
+    designCtx.setLineDash([6, 4]);
+    for (const g of guides) {
+        if (g.axis === "x") {
+            designCtx.beginPath();
+            designCtx.moveTo(g.pos + 0.5, g.crossStart);
+            designCtx.lineTo(g.pos + 0.5, g.crossEnd);
+            designCtx.stroke();
+        } else if (g.axis === "y") {
+            designCtx.beginPath();
+            designCtx.moveTo(g.crossStart, g.pos + 0.5);
+            designCtx.lineTo(g.crossEnd, g.pos + 0.5);
+            designCtx.stroke();
+        }
+    }
+    designCtx.restore();
+}
+
 function drawDesignOverlay() {
     if (!designCtx || !designOverlay) {
         return;
@@ -1532,6 +1695,7 @@ function drawDesignOverlay() {
     designCtx.setLineDash([4, 3]);
 
     if (dragState) {
+        drawSnapGuides(dragState.snapGuides);
         const dx = dragState.dx;
         const dy = dragState.dy;
         for (const item of dragState.items) {
@@ -4045,6 +4209,7 @@ function setupDesignOverlay() {
             pointerY: y,
             dx: 0,
             dy: 0,
+            snapGuides: [],
             items: /** @type {{ id: string; startAbsX: number; startAbsY: number; width: number; height: number }[]} */ (
                 dragItems
             )
@@ -4070,8 +4235,20 @@ function setupDesignOverlay() {
             return;
         }
         const { x, y } = overlayCoords(e);
-        dragState.dx = x - dragState.pointerX;
-        dragState.dy = y - dragState.pointerY;
+        const rawDx = x - dragState.pointerX;
+        const rawDy = y - dragState.pointerY;
+        const page = currentProject?.pages[currentPageIndex];
+        if (page) {
+            const exclude = new Set(dragState.items.map(it => it.id));
+            const snapped = magneticSnapAdjust(page, dragState.items, rawDx, rawDy, exclude);
+            dragState.dx = snapped.dx;
+            dragState.dy = snapped.dy;
+            dragState.snapGuides = snapped.guides;
+        } else {
+            dragState.dx = rawDx;
+            dragState.dy = rawDy;
+            dragState.snapGuides = [];
+        }
         drawDesignOverlay();
         e.preventDefault();
     });

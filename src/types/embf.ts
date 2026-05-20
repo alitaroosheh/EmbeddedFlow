@@ -155,22 +155,48 @@ export type ScreenLoadAnim =
     | "out_top"
     | "out_bottom";
 
+/** Shared transition fields for page navigation actions. */
+export interface NavTransitionFields {
+    anim?: ScreenLoadAnim;
+    time?: number;
+    delay?: number;
+    autoDel?: boolean;
+}
+
 /** Navigate to another page by id. */
-export interface NavigateAction {
+export interface NavigateAction extends NavTransitionFields {
     type: "navigate";
     target: string;
-    anim?: ScreenLoadAnim;
-    /** Animation duration in ms (default 300). */
-    time?: number;
-    /** Delay before animation in ms (default 0). */
-    delay?: number;
-    /** LVGL `auto_del` — delete previous screen when anim finishes (default false). */
-    autoDel?: boolean;
+}
+
+/** Push route onto navigation stack (codegen: same as navigate until ui_nav ships). */
+export interface NavPushAction extends NavTransitionFields {
+    type: "nav_push";
+    route: string;
+}
+
+/** Pop navigation stack (parsed/stored; stack codegen postponed). */
+export interface NavPopAction extends NavTransitionFields {
+    type: "nav_pop";
+}
+
+export interface NavReplaceAction extends NavTransitionFields {
+    type: "nav_replace";
+    route: string;
+}
+
+export interface NavResetAction extends NavTransitionFields {
+    type: "nav_reset";
+    route: string;
 }
 
 /** What happens when an event fires */
 export type Action =
     | NavigateAction
+    | NavPushAction
+    | NavPopAction
+    | NavReplaceAction
+    | NavResetAction
     | { type: "set_text";    target: string; text: string }          // update label text
     | { type: "set_value";   target: string; value: number }         // slider/bar/arc
     | { type: "set_checked"; target: string; checked: boolean }      // switch/checkbox

@@ -224,23 +224,44 @@ function validateEventActionShape(action: Record<string, unknown>, ap: string): 
         }
     };
 
+    const needRoute = (label: string) => {
+        const v = action["route"];
+        if (typeof v !== "string" || !v.trim()) {
+            throw new EmbfParseError(`${ap}: ${label} requires non-empty string "route"`);
+        }
+    };
+
+    const validateNavTransitionFields = () => {
+        if (action["anim"] !== undefined && !normalizeScreenLoadAnim(action["anim"])) {
+            throw new EmbfParseError(`${ap}: "anim" must be a known screen load animation id`);
+        }
+        if (action["time"] !== undefined && !isFiniteNumber(action["time"])) {
+            throw new EmbfParseError(`${ap}: "time" must be a finite number (ms)`);
+        }
+        if (action["delay"] !== undefined && !isFiniteNumber(action["delay"])) {
+            throw new EmbfParseError(`${ap}: "delay" must be a finite number (ms)`);
+        }
+        if (action["autoDel"] !== undefined && typeof action["autoDel"] !== "boolean") {
+            throw new EmbfParseError(`${ap}: "autoDel" must be a boolean`);
+        }
+    };
+
     switch (ty) {
         case "navigate":
             needTarget("navigate");
-            if (action["anim"] !== undefined) {
-                if (!normalizeScreenLoadAnim(action["anim"])) {
-                    throw new EmbfParseError(`${ap}: navigate "anim" must be a known screen load animation id`);
-                }
-            }
-            if (action["time"] !== undefined && !isFiniteNumber(action["time"])) {
-                throw new EmbfParseError(`${ap}: navigate "time" must be a finite number (ms)`);
-            }
-            if (action["delay"] !== undefined && !isFiniteNumber(action["delay"])) {
-                throw new EmbfParseError(`${ap}: navigate "delay" must be a finite number (ms)`);
-            }
-            if (action["autoDel"] !== undefined && typeof action["autoDel"] !== "boolean") {
-                throw new EmbfParseError(`${ap}: navigate "autoDel" must be a boolean`);
-            }
+            validateNavTransitionFields();
+            break;
+        case "nav_push":
+            needRoute("nav_push");
+            validateNavTransitionFields();
+            break;
+        case "nav_pop":
+            validateNavTransitionFields();
+            break;
+        case "nav_replace":
+        case "nav_reset":
+            needRoute(ty);
+            validateNavTransitionFields();
             break;
         case "set_text":
             needTarget("set_text");

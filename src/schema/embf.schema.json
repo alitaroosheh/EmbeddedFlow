@@ -238,6 +238,56 @@
         },
         {
           "type": "object",
+          "required": ["type", "route"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "nav_push" },
+            "route": { "type": "string", "minLength": 1 },
+            "anim": { "type": "string" },
+            "time": { "type": "integer", "minimum": 0 },
+            "delay": { "type": "integer", "minimum": 0 },
+            "autoDel": { "type": "boolean" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "nav_pop" },
+            "anim": { "type": "string" },
+            "time": { "type": "integer", "minimum": 0 },
+            "delay": { "type": "integer", "minimum": 0 }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "route"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "nav_replace" },
+            "route": { "type": "string", "minLength": 1 },
+            "anim": { "type": "string" },
+            "time": { "type": "integer", "minimum": 0 },
+            "delay": { "type": "integer", "minimum": 0 },
+            "autoDel": { "type": "boolean" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "route"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "nav_reset" },
+            "route": { "type": "string", "minLength": 1 },
+            "anim": { "type": "string" },
+            "time": { "type": "integer", "minimum": 0 },
+            "delay": { "type": "integer", "minimum": 0 },
+            "autoDel": { "type": "boolean" }
+          }
+        },
+        {
+          "type": "object",
           "required": ["type", "target", "text"],
           "additionalProperties": false,
           "properties": {

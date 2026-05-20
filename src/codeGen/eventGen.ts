@@ -5,6 +5,9 @@ import type {
     EventDef,
     Action,
     NavigateAction,
+    NavPushAction,
+    NavReplaceAction,
+    NavResetAction,
     PageSwipeFlow
 } from "../types/embf";
 import { widgetVar, screenVar, toIdentifier } from "./naming";
@@ -91,6 +94,32 @@ function emitAction(project: EmbfProject, page: Page, action: Action, v9: boolea
     switch (action.type) {
         case "navigate":
             return emitNavigateStatement(project, action as NavigateAction, v9);
+        case "nav_push": {
+            const push = action as NavPushAction;
+            return emitNavigateStatement(
+                project,
+                { target: push.route, anim: push.anim, time: push.time, delay: push.delay, autoDel: push.autoDel },
+                v9
+            );
+        }
+        case "nav_pop":
+            return `/* nav_pop: navigation stack codegen postponed — wire ui_nav_pop() manually or use navigate */`;
+        case "nav_replace": {
+            const r = action as NavReplaceAction;
+            return emitNavigateStatement(
+                project,
+                { target: r.route, anim: r.anim, time: r.time, delay: r.delay, autoDel: r.autoDel },
+                v9
+            );
+        }
+        case "nav_reset": {
+            const r = action as NavResetAction;
+            return emitNavigateStatement(
+                project,
+                { target: r.route, anim: r.anim, time: r.time, delay: r.delay, autoDel: r.autoDel },
+                v9
+            );
+        }
         case "set_text": {
             // Escape the string
             const escaped = action.text

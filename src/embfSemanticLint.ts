@@ -74,6 +74,20 @@ function lintAction(
             }
             break;
         }
+        case "nav_push":
+        case "nav_replace":
+        case "nav_reset": {
+            const route = action.route;
+            if (!pageIds.has(route)) {
+                issues.push({
+                    message: `Event on "${compId}" (${evt.trigger}): ${action.type} route is not a page id: "${route}"`,
+                    range: firstTargetSpan(text, route)
+                });
+            }
+            break;
+        }
+        case "nav_pop":
+            break;
         case "set_text":
         case "set_value":
         case "set_checked":

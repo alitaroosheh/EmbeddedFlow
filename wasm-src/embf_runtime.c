@@ -513,6 +513,21 @@ void embf_obj_set_hidden(lv_obj_t *obj, int hidden)
     }
 }
 
+/** Absolute on-screen bounds in `out_xywh[4]` = { x, y, w, h } (preview HTML overlays). */
+EMSCRIPTEN_KEEPALIVE
+void embf_obj_get_screen_coords(lv_obj_t *obj, int *out_xywh)
+{
+    if (!obj || !out_xywh) {
+        return;
+    }
+    lv_area_t area;
+    lv_obj_get_coords(obj, &area);
+    out_xywh[0] = (int)area.x1;
+    out_xywh[1] = (int)area.y1;
+    out_xywh[2] = (int)lv_area_get_width(&area);
+    out_xywh[3] = (int)lv_area_get_height(&area);
+}
+
 EMSCRIPTEN_KEEPALIVE
 void embf_obj_set_style_font_size(lv_obj_t *obj, int size)
 {

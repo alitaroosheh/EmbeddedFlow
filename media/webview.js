@@ -265,6 +265,8 @@ let objPtrToId = new Map();
  * @type {Map<string, number>}
  */
 let idToObjPtr = new Map();
+/** Reused WASM heap buffer for `embf_obj_get_screen_coords` (4 × int32). */
+let imageOverlayBoundsBuf = 0;
 
 /**
  * Cached pointer values for embf_poll_* result slots.
@@ -422,7 +424,7 @@ async function handleLoad(payload) {
     }
 
     buildUiFromProject(currentProject, currentPageIndex);
-    syncImagePreviewOverlays();
+    scheduleImageOverlaySync();
 
     resizeDesignOverlay();
     setDesignPointerMode();
@@ -533,6 +535,8 @@ function applyPreviewLayout() {
             displayWrapper.style.webkitClipPath = "";
         }
     }
+
+    scheduleImageOverlaySync();
 }
 
 function initPreviewLayoutObserver() {
@@ -1809,6 +1813,73 @@ function collectImageComponents(components, out) {
     }
 }
 
+/**
+ * Bounds for HTML image overlay: prefer LVGL on-screen coords from WASM (matches placeholder box).
+ * @param {object} page
+ * @param {string} componentId
+ * @returns {{ x: number, y: number, width: number, height: number } | null}
+ */
+function resolveImageOverlayBounds(page, componentId) {
+    const ptr = idToObjPtr.get(componentId);
+    const wasm = WasmModule;
+    if (
+        wasmReady &&
+        wasm &&
+        ptr &&
+        typeof wasm._embf_obj_get_screen_coords === "function" &&
+        typeof wasm._malloc === "function"
+    ) {
+        if (!imageOverlayBoundsBuf) {
+            imageOverlayBoundsBuf = wasm._malloc(16);
+        }
+        if (imageOverlayBoundsBuf) {
+            if (typeof wasm._embf_main_loop === "function") {
+                wasm._embf_main_loop();
+            }
+            wasm._embf_obj_get_screen_coords(ptr, imageOverlayBoundsBuf);
+            const base = imageOverlayBoundsBuf >> 2;
+            const x = wasm.HEAP32[base];
+            const y = wasm.HEAP32[base + 1];
+            const w = wasm.HEAP32[base + 2];
+            const h = wasm.HEAP32[base + 3];
+            if (
+                w > 0 &&
+                h > 0 &&
+                x >= -4 &&
+                y >= -4 &&
+                x < displayWidth + 4 &&
+                y < displayHeight + 4
+            ) {
+                return { x, y, width: w, height: h };
+            }
+        }
+    }
+    return getAbsBounds(page, componentId);
+}
+
+/** Resolve preview URI for an image widget `src` (project.images id or inferred file). */
+function resolveImageAssetUri(src) {
+    const id = String(src ?? "").trim();
+    if (!id) {
+        return "";
+    }
+    if (imageAssetUris[id]) {
+        return imageAssetUris[id];
+    }
+    const entry = currentProject?.images?.find(e => e.id === id);
+    if (entry && imageAssetUris[entry.id]) {
+        return imageAssetUris[entry.id];
+    }
+    return "";
+}
+
+/** After layout / page build, sync overlays once LVGL has settled. */
+function scheduleImageOverlaySync() {
+    requestAnimationFrame(() => {
+        syncImagePreviewOverlays();
+    });
+}
+
 /** Draw project image files over the WASM canvas (WASM has no embedded assets). */
 function syncImagePreviewOverlays() {
     if (!imagePreviewLayer || !currentProject) {
@@ -1822,13 +1893,14 @@ function syncImagePreviewOverlays() {
     /** @type {object[]} */
     const images = [];
     collectImageComponents(page.components, images);
+    const z = previewZoom;
     for (const comp of images) {
         const src = String(comp.src ?? "").trim();
-        const uri = src ? imageAssetUris[src] : "";
+        const uri = resolveImageAssetUri(src);
         if (!uri) {
             continue;
         }
-        const b = getAbsBounds(page, comp.id);
+        const b = resolveImageOverlayBounds(page, comp.id);
         if (!b) {
             continue;
         }
@@ -1837,10 +1909,10 @@ function syncImagePreviewOverlays() {
         img.alt = src;
         img.dataset.componentId = comp.id;
         img.style.pointerEvents = "none";
-        img.style.left = `${Math.max(0, Math.round(b.x))}px`;
-        img.style.top = `${Math.max(0, Math.round(b.y))}px`;
-        img.style.width = `${Math.max(1, Math.round(b.width))}px`;
-        img.style.height = `${Math.max(1, Math.round(b.height))}px`;
+        img.style.left = `${Math.max(0, Math.round(b.x * z))}px`;
+        img.style.top = `${Math.max(0, Math.round(b.y * z))}px`;
+        img.style.width = `${Math.max(1, Math.round(b.width * z))}px`;
+        img.style.height = `${Math.max(1, Math.round(b.height * z))}px`;
         imagePreviewLayer.appendChild(img);
     }
 }
@@ -2786,8 +2858,12 @@ function wireImageInspectorActions() {
     }
 
     let pickerCloseTimer = null;
+    let pickerSuppressOpen = false;
 
     const showDropdown = () => {
+        if (pickerSuppressOpen) {
+            return;
+        }
         renderImageAssetDropdown(dropdown, input.value, input.value.trim());
         dropdown.hidden = false;
         input.setAttribute("aria-expanded", "true");
@@ -2805,23 +2881,33 @@ function wireImageInspectorActions() {
         pickerCloseTimer = setTimeout(() => {
             pickerCloseTimer = null;
             hideDropdown();
-        }, 150);
+        }, 180);
     };
 
     const pickAsset = id => {
-        input.value = id;
-        hideDropdown();
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-        input.focus();
-    };
-
-    input.addEventListener("focus", () => {
         if (pickerCloseTimer) {
             clearTimeout(pickerCloseTimer);
             pickerCloseTimer = null;
         }
-        showDropdown();
-    });
+        pickerSuppressOpen = true;
+        input.value = id;
+        hideDropdown();
+        commitInspector();
+        if (currentProject && selectedComponentOrder.length === 1) {
+            const page = currentProject.pages[currentPageIndex];
+            const comp = page
+                ? findComponentById(page.components, selectedComponentOrder[0])
+                : null;
+            if (comp && comp.type === "image") {
+                comp.src = id;
+            }
+            scheduleImageOverlaySync();
+        }
+        queueMicrotask(() => {
+            pickerSuppressOpen = false;
+            input.focus();
+        });
+    };
 
     input.addEventListener("input", () => {
         showDropdown();
@@ -2836,13 +2922,23 @@ function wireImageInspectorActions() {
             hideDropdown();
             return;
         }
-        if (e.key === "ArrowDown" && dropdown.hidden) {
-            showDropdown();
+        if (e.key === "ArrowDown") {
+            if (dropdown.hidden) {
+                showDropdown();
+            }
             e.preventDefault();
+            return;
+        }
+        if (e.key === "Enter" && !dropdown.hidden) {
+            const first = dropdown.querySelector(".image-asset-option");
+            if (first instanceof HTMLElement && first.dataset.assetId) {
+                e.preventDefault();
+                pickAsset(first.dataset.assetId);
+            }
         }
     });
 
-    dropdown.addEventListener("mousedown", e => {
+    dropdown.addEventListener("pointerdown", e => {
         const opt = e.target instanceof Element ? e.target.closest(".image-asset-option") : null;
         if (!opt || !(opt instanceof HTMLElement)) {
             return;
@@ -5008,6 +5104,7 @@ function navigateToPageIndex(idx) {
     renderInspector();
     renderPageList();
     renderToolbarWidgetSelect();
+    scheduleImageOverlaySync();
 }
 
 function updatePageSidebarActions() {

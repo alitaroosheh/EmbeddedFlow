@@ -314,9 +314,7 @@ export class EmbfPreviewPanel {
             toWebviewUri: abs =>
                 this._panel.webview.asWebviewUri(vscode.Uri.file(abs)).toString()
         });
-        if (imageAssets.length > 0) {
-            payload.imageAssets = imageAssets;
-        }
+        payload.imageAssets = imageAssets;
 
         this.postToWebview({
             type: "load",
@@ -1615,6 +1613,7 @@ export class EmbfPreviewPanel {
             position: relative;
             flex: 1;
             min-width: 0;
+            z-index: 1;
         }
         #inspector-form .image-src-combobox input[type="text"] {
             width: 100%;
@@ -1625,7 +1624,7 @@ export class EmbfPreviewPanel {
             left: 0;
             right: 0;
             top: calc(100% + 2px);
-            z-index: 50;
+            z-index: 200;
             max-height: 160px;
             overflow-y: auto;
             background: #2d2d2d;
@@ -1757,9 +1756,10 @@ export class EmbfPreviewPanel {
         }
         #image-preview-layer img {
             position: absolute;
-            object-fit: contain;
+            object-fit: fill;
             image-rendering: pixelated;
             pointer-events: none;
+            box-sizing: border-box;
         }
         #design-overlay {
             position: absolute;

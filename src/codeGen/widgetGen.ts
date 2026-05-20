@@ -275,6 +275,15 @@ function emitContainer(v: string, c: ContainerComponent, parent: string, pageId:
         `    lv_obj_t *${v} = lv_obj_create(${parent});`
     ];
 
+    if (!c.styles?.bgColor && (c.styles?.bgOpacity === undefined || c.styles.bgOpacity === 0)) {
+        lines.push(
+            `    lv_obj_set_style_pad_all(${v}, 0, LV_PART_MAIN);`,
+            `    lv_obj_set_style_border_width(${v}, 0, LV_PART_MAIN);`,
+            `    lv_obj_set_style_bg_opa(${v}, LV_OPA_TRANSP, LV_PART_MAIN);`,
+            `    lv_obj_add_flag(${v}, LV_OBJ_FLAG_OVERFLOW_VISIBLE);`
+        );
+    }
+
     if (c.layout === "flex") {
         const flowMap: Record<string, string> = {
             row:         "LV_FLEX_FLOW_ROW",
@@ -302,6 +311,14 @@ function emitPanel(v: string, c: PanelComponent, parent: string, pageId: string,
     const lines = [
         `    lv_obj_t *${v} = lv_obj_create(${parent});`
     ];
+    if (!c.styles?.bgColor && (c.styles?.bgOpacity === undefined || c.styles.bgOpacity === 0)) {
+        lines.push(
+            `    lv_obj_set_style_pad_all(${v}, 0, LV_PART_MAIN);`,
+            `    lv_obj_set_style_border_width(${v}, 0, LV_PART_MAIN);`,
+            `    lv_obj_set_style_bg_opa(${v}, LV_OPA_TRANSP, LV_PART_MAIN);`,
+            `    lv_obj_add_flag(${v}, LV_OBJ_FLAG_OVERFLOW_VISIBLE);`
+        );
+    }
     for (const child of c.children ?? []) {
         lines.push(...emitComponent(pageId, child, v, v9));
     }

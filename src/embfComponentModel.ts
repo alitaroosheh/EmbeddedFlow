@@ -677,6 +677,27 @@ function findSiblingPlacement(
     return null;
 }
 
+/**
+ * Extra margin outside widget width/height when building a group box.
+ * LVGL draws slider knobs and similar parts outside the logical widget rect.
+ */
+function componentOutsetPadding(type: string): { l: number; t: number; r: number; b: number } {
+    switch (type) {
+        case "slider":
+        case "bar":
+            return { l: 14, t: 6, r: 14, b: 6 };
+        case "switch":
+            return { l: 10, t: 4, r: 10, b: 4 };
+        case "arc":
+            return { l: 8, t: 8, r: 8, b: 8 };
+        case "dropdown":
+        case "roller":
+            return { l: 2, t: 2, r: 2, b: 4 };
+        default:
+            return { l: 0, t: 0, r: 0, b: 0 };
+    }
+}
+
 /** Same parent (same sibling list) widgets → one `container` wrapping them. Child order follows ascending z-index in that list. */
 export function combineWidgetsOnPage(
     project: EmbfProject,
@@ -728,10 +749,30 @@ export function combineWidgetsOnPage(
     const pax = parentLoc.parentAbsX;
     const pay = parentLoc.parentAbsY;
 
-    const minAx = Math.min(...snaps.map(s => s.ax));
-    const minAy = Math.min(...snaps.map(s => s.ay));
-    const maxRx = Math.max(...snaps.map(s => s.ax + s.w));
-    const maxBy = Math.max(...snaps.map(s => s.ay + s.h));
+    const minAx = Math.min(
+        ...snaps.map(s => {
+            const p = componentOutsetPadding(s.clone.type);
+            return s.ax - p.l;
+        })
+    );
+    const minAy = Math.min(
+        ...snaps.map(s => {
+            const p = componentOutsetPadding(s.clone.type);
+            return s.ay - p.t;
+        })
+    );
+    const maxRx = Math.max(
+        ...snaps.map(s => {
+            const p = componentOutsetPadding(s.clone.type);
+            return s.ax + s.w + p.r;
+        })
+    );
+    const maxBy = Math.max(
+        ...snaps.map(s => {
+            const p = componentOutsetPadding(s.clone.type);
+            return s.ay + s.h + p.b;
+        })
+    );
 
     const idSet = new Set(uniq);
     const insertOriginalIndex = Math.min(...sorted.map(p => p.pla!.index));

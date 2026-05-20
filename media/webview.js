@@ -1497,6 +1497,51 @@ function idsInMarqueeRect(page, rect) {
     return chosen;
 }
 
+/** Match `componentOutsetPadding` in embfComponentModel (LVGL draws outside widget box). */
+function componentOutsetPadding(type) {
+    switch (type) {
+        case "slider":
+        case "bar":
+            return { l: 14, t: 6, r: 14, b: 6 };
+        case "switch":
+            return { l: 10, t: 4, r: 10, b: 4 };
+        case "arc":
+            return { l: 8, t: 8, r: 8, b: 8 };
+        case "dropdown":
+        case "roller":
+            return { l: 2, t: 2, r: 2, b: 4 };
+        default:
+            return { l: 0, t: 0, r: 0, b: 0 };
+    }
+}
+
+/** Union of group children + knob/switch outset (for overlay and hit tests). */
+function groupVisualBounds(comp, absX, absY) {
+    const kids = comp.children ?? [];
+    if (!kids.length) {
+        return { x: absX, y: absY, width: comp.width, height: comp.height };
+    }
+    let left = absX + comp.width;
+    let top = absY + comp.height;
+    let right = absX;
+    let bottom = absY;
+    for (const ch of kids) {
+        const p = componentOutsetPadding(ch.type);
+        const cx = absX + ch.x;
+        const cy = absY + ch.y;
+        left = Math.min(left, cx - p.l);
+        top = Math.min(top, cy - p.t);
+        right = Math.max(right, cx + ch.width + p.r);
+        bottom = Math.max(bottom, cy + ch.height + p.b);
+    }
+    return {
+        x: left,
+        y: top,
+        width: Math.max(1, right - left),
+        height: Math.max(1, bottom - top)
+    };
+}
+
 function getAbsBounds(page, componentId) {
     /** @param {object[]} components @param {number} parentX @param {number} parentY */
     function walk(components, parentX, parentY) {
@@ -1504,6 +1549,9 @@ function getAbsBounds(page, componentId) {
             const ax = parentX + c.x;
             const ay = parentY + c.y;
             if (c.id === componentId) {
+                if (c.type === "container" || c.type === "panel") {
+                    return groupVisualBounds(c, ax, ay);
+                }
                 return { x: ax, y: ay, width: c.width, height: c.height };
             }
             if (c.children?.length) {

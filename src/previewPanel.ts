@@ -102,7 +102,8 @@ export type WebviewToHostMessage =
           type: "removePageSwipeFlow";
           sourcePageIndex: number;
           direction: string;
-      };
+      }
+    | { type: "generateCode" };
 
 export interface WebviewLoadPayload {
     project: EmbfProject;
@@ -138,6 +139,8 @@ export class EmbfPreviewPanel {
     static readonly viewType = "embeddedflow.preview";
 
     private static _panels = new Map<string, EmbfPreviewPanel>();
+    /** Last preview panel that had focus (for Generate C Code when no .embf editor tab is active). */
+    private static _lastActiveEmbfPath: string | undefined;
 
     private readonly _panel: vscode.WebviewPanel;
     private readonly _extensionUri: vscode.Uri;
@@ -190,6 +193,42 @@ export class EmbfPreviewPanel {
         return EmbfPreviewPanel._panels.get(filePath);
     }
 
+    /** Open preview paths (for codegen / commands when the preview has focus). */
+    static getOpenEmbfPaths(): string[] {
+        return [...EmbfPreviewPanel._panels.keys()];
+    }
+
+    /**
+     * Resolve which `.embf` file to use for codegen when the command is not invoked from an editor tab.
+     */
+    static async resolveEmbfPathForCodegen(): Promise<string | undefined> {
+        const paths = EmbfPreviewPanel.getOpenEmbfPaths();
+        if (paths.length === 0) {
+            return undefined;
+        }
+        if (paths.length === 1) {
+            return paths[0];
+        }
+        if (
+            EmbfPreviewPanel._lastActiveEmbfPath &&
+            EmbfPreviewPanel._panels.has(EmbfPreviewPanel._lastActiveEmbfPath)
+        ) {
+            return EmbfPreviewPanel._lastActiveEmbfPath;
+        }
+        const pick = await vscode.window.showQuickPick(
+            paths.map(fp => ({
+                label: path.basename(fp),
+                description: path.dirname(fp),
+                detail: fp
+            })),
+            {
+                title: "Generate C Code — select project",
+                placeHolder: "Multiple UI previews are open"
+            }
+        );
+        return pick?.detail;
+    }
+
     private constructor(
         panel: vscode.WebviewPanel,
         filePath: string,
@@ -202,6 +241,17 @@ export class EmbfPreviewPanel {
         this._panel.webview.html = this._buildHtml();
 
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
+
+        EmbfPreviewPanel._lastActiveEmbfPath = filePath;
+        this._panel.onDidChangeViewState(
+            e => {
+                if (e.webviewPanel.active) {
+                    EmbfPreviewPanel._lastActiveEmbfPath = this._filePath;
+                }
+            },
+            null,
+            this._disposables
+        );
 
         this._panel.webview.onDidReceiveMessage(
             (msg: WebviewToHostMessage) => this._onWebviewMessage(msg),
@@ -294,7 +344,12 @@ export class EmbfPreviewPanel {
     }
 
     private _onWebviewMessage(msg: WebviewToHostMessage): void {
-        if (msg.type === "log") {
+        if (msg.type === "generateCode") {
+            void vscode.commands.executeCommand(
+                "embeddedflow.generateCode",
+                vscode.Uri.file(this._filePath)
+            );
+        } else if (msg.type === "log") {
             embeddedFlowLog("webview", msg.level, msg.text);
         } else if (msg.type === "ready") {
             embeddedFlowLog("webview", "info", "preview webview ready");
@@ -1553,6 +1608,97 @@ export class EmbfPreviewPanel {
             line-height: 1.35;
             word-break: break-all;
         }
+        #inspector-form .image-src-combobox {
+            position: relative;
+            flex: 1;
+            min-width: 0;
+        }
+        #inspector-form .image-src-combobox input[type="text"] {
+            width: 100%;
+            box-sizing: border-box;
+        }
+        #inspector-form .image-asset-dropdown {
+            position: absolute;
+            left: 0;
+            right: 0;
+            top: calc(100% + 2px);
+            z-index: 50;
+            max-height: 160px;
+            overflow-y: auto;
+            background: #2d2d2d;
+            border: 1px solid #555;
+            border-radius: 4px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+        }
+        #inspector-form .image-asset-dropdown[hidden] {
+            display: none !important;
+        }
+        #inspector-form .image-asset-dropdown-empty {
+            padding: 8px 10px;
+            font-size: 11px;
+            color: #888;
+        }
+        #inspector-form .image-asset-option {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+            padding: 4px 8px;
+            border: none;
+            background: transparent;
+            color: #ddd;
+            font-size: 11px;
+            font-family: inherit;
+            text-align: left;
+            cursor: pointer;
+        }
+        #inspector-form .image-asset-option:hover,
+        #inspector-form .image-asset-option:focus {
+            background: #094771;
+            color: #fff;
+            outline: none;
+        }
+        #inspector-form .image-asset-option[aria-selected="true"] {
+            background: #0e639c;
+            color: #fff;
+        }
+        #inspector-form .image-asset-thumb {
+            width: 22px;
+            height: 22px;
+            flex-shrink: 0;
+            object-fit: contain;
+            image-rendering: pixelated;
+            background: #1e1e1e;
+            border: 1px solid #444;
+            border-radius: 2px;
+        }
+        #inspector-form .image-asset-thumb-placeholder {
+            width: 22px;
+            height: 22px;
+            flex-shrink: 0;
+            background: #1e1e1e;
+            border: 1px dashed #555;
+            border-radius: 2px;
+        }
+        #inspector-form .image-asset-option-text {
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+        }
+        #inspector-form .image-asset-option-id {
+            font-weight: 600;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        #inspector-form .image-asset-option-path {
+            font-size: 10px;
+            color: #888;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
         #inspector-delete {
             flex-shrink: 0;
             margin: 0 12px 12px;
@@ -1674,6 +1820,7 @@ export class EmbfPreviewPanel {
             Design
         </label>
         <label for="preview-zoom">Zoom:</label>
+        <button type="button" class="tb-btn" id="btn-generate-code" title="Generate C UI files for this project">Generate C Code</button>
         <select id="preview-zoom" title="Preview scale only — device resolution stays in .embf">
             <option value="auto" selected>Auto</option>
             <option value="0.1">10%</option>
@@ -1685,6 +1832,8 @@ export class EmbfPreviewPanel {
             <option value="3">300%</option>
             <option value="4">400%</option>
         </select>
+        <label for="toolbar-widget-select">Widget:</label>
+        <select id="toolbar-widget-select" title="Select a widget on the current page"></select>
         <span id="status">Waiting for project…</span>
         </div>
     </div>
@@ -1739,6 +1888,10 @@ export class EmbfPreviewPanel {
     dispose(): void {
         this.clearInspectorReloadDebounce();
         EmbfPreviewPanel._panels.delete(this._filePath);
+        if (EmbfPreviewPanel._lastActiveEmbfPath === this._filePath) {
+            const remaining = EmbfPreviewPanel.getOpenEmbfPaths();
+            EmbfPreviewPanel._lastActiveEmbfPath = remaining[0];
+        }
         this._webviewReady = false;
         this._pendingMessage = null;
         this._panel.dispose();

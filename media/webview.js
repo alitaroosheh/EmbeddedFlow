@@ -71,8 +71,12 @@ const inspectorForm = document.getElementById("inspector-form");
 const inspectorDelete = document.getElementById("inspector-delete");
 const btnUndo = document.getElementById("btn-undo");
 const btnRedo = document.getElementById("btn-redo");
+const btnGenerateCode = document.getElementById("btn-generate-code");
 const previewZoomSelect = /** @type {HTMLSelectElement | null} */ (
     document.getElementById("preview-zoom")
+);
+const toolbarWidgetSelect = /** @type {HTMLSelectElement | null} */ (
+    document.getElementById("toolbar-widget-select")
 );
 const displayWrapper = document.getElementById("display-wrapper");
 const imagePreviewLayer = document.getElementById("image-preview-layer");
@@ -197,6 +201,7 @@ let previewDarkOverride = null;
 
 /** Skip duplicate rebuild when `pageSelect.value` is set from code (navigate). */
 let pageSelectProgrammatic = false;
+let pageWidgetPickerProgrammatic = false;
 
 /** While true, the main loop must not blit WASM (JS drives the transition frames). */
 let previewJsTransition = false;
@@ -315,6 +320,11 @@ function postRedo() {
 
 if (btnUndo) {
     btnUndo.addEventListener("click", () => postUndo());
+    if (btnGenerateCode) {
+        btnGenerateCode.addEventListener("click", () => {
+            vscode.postMessage({ type: "generateCode" });
+        });
+    }
 }
 if (btnRedo) {
     btnRedo.addEventListener("click", () => postRedo());
@@ -425,6 +435,7 @@ async function handleLoad(payload) {
     }
     drawDesignOverlay();
     renderInspector();
+    renderToolbarWidgetSelect();
     } catch (e) {
         showError(`Preview error: ${e.message ?? e}`);
         log("error", `handleLoad: ${e}`);
@@ -1370,6 +1381,7 @@ function dispatchAction(action, eventValue, currentPage) {
                 drawDesignOverlay();
                 renderInspector();
                 renderPageList();
+                renderToolbarWidgetSelect();
                 renderFlowList();
             } finally {
                 pageSelectProgrammatic = false;
@@ -1927,6 +1939,19 @@ function flatComponentsList(components) {
         out.push(c);
         if (c.children?.length) {
             out.push(...flatComponentsList(c.children));
+        }
+    }
+    return out;
+}
+
+/** @param {object[]} components @param {number} [depth] @returns {Array<{ comp: object, depth: number }>} */
+function flatComponentsListWithDepth(components, depth = 0) {
+    /** @type {Array<{ comp: object, depth: number }>} */
+    const out = [];
+    for (const c of components ?? []) {
+        out.push({ comp: c, depth });
+        if (c.children?.length) {
+            out.push(...flatComponentsListWithDepth(c.children, depth + 1));
         }
     }
     return out;
@@ -2594,6 +2619,7 @@ function selectPageInspector() {
     marqueeState = null;
     drawDesignOverlay();
     renderInspector();
+    syncToolbarWidgetSelect();
 }
 
 function setSelection(componentId) {
@@ -2604,6 +2630,7 @@ function setSelection(componentId) {
     marqueeState = null;
     drawDesignOverlay();
     renderInspector();
+    syncToolbarWidgetSelect();
 }
 
 function wirePageInspectorActions() {
@@ -2620,6 +2647,23 @@ function wirePageInspectorActions() {
     }
 }
 
+/** @returns {{ id: string, path: string, uri: string }[]} */
+function listProjectImageAssets() {
+    const out = [];
+    for (const entry of currentProject?.images ?? []) {
+        const id = String(entry?.id ?? "").trim();
+        if (!id) {
+            continue;
+        }
+        out.push({
+            id,
+            path: String(entry?.path ?? "").trim(),
+            uri: imageAssetUris[id] ?? ""
+        });
+    }
+    return out;
+}
+
 function imageSrcInspectorHtml(comp) {
     const src = String(comp.src ?? "");
     const entry =
@@ -2627,34 +2671,181 @@ function imageSrcInspectorHtml(comp) {
     const pathHint = entry?.path ?? "";
     const hint = pathHint
         ? `File: ${pathHint}`
-        : "Browse to add a PNG/JPEG/BMP to project.images and link this widget.";
+        : "Type an asset id or use Browse to register a PNG/JPEG/BMP in project.images[].";
     return (
         `<div class="field"><label>Image source (asset id)</label>` +
         `<div class="inspector-path-row">` +
-        `<input type="text" name="src" value="${esc(src)}" autocomplete="off" spellcheck="false" placeholder="e.g. logo" />` +
+        `<div class="image-src-combobox">` +
+        `<input type="text" name="src" value="${esc(src)}" autocomplete="off" spellcheck="false" placeholder="Type id…" aria-autocomplete="list" aria-expanded="false" />` +
+        `<div class="image-asset-dropdown" hidden role="listbox"></div>` +
+        `</div>` +
         `<button type="button" class="tb-btn-small btn-browse-image-src" data-component-id="${esc(comp.id)}">Browse...</button>` +
         `</div>` +
         `<p class="inspector-field-hint">${esc(hint)}</p></div>`
     );
 }
 
-function wireImageInspectorActions() {
-    const btn = inspectorForm?.querySelector(".btn-browse-image-src");
-    if (!(btn instanceof HTMLButtonElement) || btn.dataset.wired) {
+function filterImageAssetsByPrefix(query) {
+    const q = query.trim().toLowerCase();
+    const all = listProjectImageAssets();
+    if (!q) {
+        return all;
+    }
+    return all.filter(
+        a => a.id.toLowerCase().startsWith(q) || a.path.toLowerCase().startsWith(q)
+    );
+}
+
+function renderImageAssetDropdown(dropdown, query, activeId) {
+    if (!dropdown) {
         return;
     }
-    btn.dataset.wired = "1";
-    btn.addEventListener("click", e => {
-        e.preventDefault();
-        const componentId = btn.getAttribute("data-component-id");
-        if (!componentId) {
+    const matches = filterImageAssetsByPrefix(query);
+    dropdown.innerHTML = "";
+    if (matches.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "image-asset-dropdown-empty";
+        empty.textContent = query.trim()
+            ? "No matching assets — try Browse…"
+            : "No assets yet — use Browse…";
+        dropdown.appendChild(empty);
+        return;
+    }
+    for (const asset of matches) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "image-asset-option";
+        btn.setAttribute("role", "option");
+        btn.dataset.assetId = asset.id;
+        if (asset.id === activeId) {
+            btn.setAttribute("aria-selected", "true");
+        }
+        if (asset.uri) {
+            const img = document.createElement("img");
+            img.className = "image-asset-thumb";
+            img.src = asset.uri;
+            img.alt = "";
+            btn.appendChild(img);
+        } else {
+            const ph = document.createElement("span");
+            ph.className = "image-asset-thumb-placeholder";
+            ph.setAttribute("aria-hidden", "true");
+            btn.appendChild(ph);
+        }
+        const text = document.createElement("span");
+        text.className = "image-asset-option-text";
+        const idLine = document.createElement("span");
+        idLine.className = "image-asset-option-id";
+        idLine.textContent = asset.id;
+        text.appendChild(idLine);
+        if (asset.path) {
+            const pathLine = document.createElement("span");
+            pathLine.className = "image-asset-option-path";
+            pathLine.textContent = asset.path;
+            text.appendChild(pathLine);
+        }
+        btn.appendChild(text);
+        dropdown.appendChild(btn);
+    }
+}
+
+function wireImageInspectorActions() {
+    const browseBtn = inspectorForm?.querySelector(".btn-browse-image-src");
+    if (browseBtn instanceof HTMLButtonElement && !browseBtn.dataset.wired) {
+        browseBtn.dataset.wired = "1";
+        browseBtn.addEventListener("click", e => {
+            e.preventDefault();
+            const componentId = browseBtn.getAttribute("data-component-id");
+            if (!componentId) {
+                return;
+            }
+            vscode.postMessage({
+                type: "pickImageSource",
+                pageIndex: currentPageIndex,
+                componentId
+            });
+        });
+    }
+
+    const combobox = inspectorForm?.querySelector(".image-src-combobox");
+    if (!(combobox instanceof HTMLElement) || combobox.dataset.wired) {
+        return;
+    }
+    combobox.dataset.wired = "1";
+
+    const input = combobox.querySelector('input[name="src"]');
+    const dropdown = combobox.querySelector(".image-asset-dropdown");
+    if (!(input instanceof HTMLInputElement) || !(dropdown instanceof HTMLElement)) {
+        return;
+    }
+
+    let pickerCloseTimer = null;
+
+    const showDropdown = () => {
+        renderImageAssetDropdown(dropdown, input.value, input.value.trim());
+        dropdown.hidden = false;
+        input.setAttribute("aria-expanded", "true");
+    };
+
+    const hideDropdown = () => {
+        dropdown.hidden = true;
+        input.setAttribute("aria-expanded", "false");
+    };
+
+    const scheduleHideDropdown = () => {
+        if (pickerCloseTimer) {
+            clearTimeout(pickerCloseTimer);
+        }
+        pickerCloseTimer = setTimeout(() => {
+            pickerCloseTimer = null;
+            hideDropdown();
+        }, 150);
+    };
+
+    const pickAsset = id => {
+        input.value = id;
+        hideDropdown();
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.focus();
+    };
+
+    input.addEventListener("focus", () => {
+        if (pickerCloseTimer) {
+            clearTimeout(pickerCloseTimer);
+            pickerCloseTimer = null;
+        }
+        showDropdown();
+    });
+
+    input.addEventListener("input", () => {
+        showDropdown();
+    });
+
+    input.addEventListener("blur", () => {
+        scheduleHideDropdown();
+    });
+
+    input.addEventListener("keydown", e => {
+        if (e.key === "Escape") {
+            hideDropdown();
             return;
         }
-        vscode.postMessage({
-            type: "pickImageSource",
-            pageIndex: currentPageIndex,
-            componentId
-        });
+        if (e.key === "ArrowDown" && dropdown.hidden) {
+            showDropdown();
+            e.preventDefault();
+        }
+    });
+
+    dropdown.addEventListener("mousedown", e => {
+        const opt = e.target instanceof Element ? e.target.closest(".image-asset-option") : null;
+        if (!opt || !(opt instanceof HTMLElement)) {
+            return;
+        }
+        e.preventDefault();
+        const id = opt.dataset.assetId;
+        if (id) {
+            pickAsset(id);
+        }
     });
 }
 
@@ -4810,6 +5001,7 @@ function navigateToPageIndex(idx) {
     drawDesignOverlay();
     renderInspector();
     renderPageList();
+    renderToolbarWidgetSelect();
 }
 
 function updatePageSidebarActions() {
@@ -4823,6 +5015,53 @@ function updatePageSidebarActions() {
     if (btnPageAdd instanceof HTMLButtonElement) {
         btnPageAdd.disabled = !currentProject;
     }
+}
+
+function syncToolbarWidgetSelect() {
+    if (!toolbarWidgetSelect) {
+        return;
+    }
+    pageWidgetPickerProgrammatic = true;
+    if (!inspectorShowingPage && selectedComponentOrder.length === 1) {
+        const id = selectedComponentOrder[0];
+        const hasOption = [...toolbarWidgetSelect.options].some(o => o.value === id);
+        toolbarWidgetSelect.value = hasOption ? id : "";
+    } else {
+        toolbarWidgetSelect.value = "";
+    }
+    pageWidgetPickerProgrammatic = false;
+}
+
+function renderToolbarWidgetSelect() {
+    if (!toolbarWidgetSelect) {
+        return;
+    }
+    if (!currentProject) {
+        toolbarWidgetSelect.innerHTML = "";
+        const empty = document.createElement("option");
+        empty.value = "";
+        empty.textContent = "—";
+        toolbarWidgetSelect.appendChild(empty);
+        toolbarWidgetSelect.disabled = true;
+        return;
+    }
+    const page = currentProject.pages[currentPageIndex];
+    const flat = flatComponentsListWithDepth(page?.components);
+    toolbarWidgetSelect.innerHTML = "";
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = flat.length ? "Select widget…" : "No widgets";
+    toolbarWidgetSelect.appendChild(placeholder);
+    for (const { comp, depth } of flat) {
+        const opt = document.createElement("option");
+        opt.value = comp.id;
+        const indent = depth > 0 ? "\u00a0\u00a0".repeat(depth) : "";
+        const typeLabel = comp.type || "widget";
+        opt.textContent = `${indent}${typeLabel} — ${comp.id}`;
+        toolbarWidgetSelect.appendChild(opt);
+    }
+    toolbarWidgetSelect.disabled = flat.length === 0;
+    syncToolbarWidgetSelect();
 }
 
 function renderPageList() {
@@ -4884,6 +5123,20 @@ if (pageSelect) {
         }
         const idx = parseInt(pageSelect.value, 10) || 0;
         navigateToPageIndex(idx);
+    });
+}
+
+if (toolbarWidgetSelect) {
+    toolbarWidgetSelect.addEventListener("change", () => {
+        if (pageWidgetPickerProgrammatic || !currentProject) {
+            return;
+        }
+        const compId = toolbarWidgetSelect.value;
+        if (!compId) {
+            selectPageInspector();
+            return;
+        }
+        setSelection(compId);
     });
 }
 

@@ -46,9 +46,11 @@ export function activate(context: vscode.ExtensionContext): void {
     // ── Command: Generate C Code ──────────────────────────────────────────────
     context.subscriptions.push(
         vscode.commands.registerCommand("embeddedflow.generateCode", async (uri?: vscode.Uri) => {
-            const filePath = resolveFilePath(uri);
+            const filePath = await resolveCodegenEmbfPath(uri);
             if (!filePath) {
-                vscode.window.showErrorMessage("EmbeddedFlow: No .embf file is active.");
+                vscode.window.showErrorMessage(
+                    "EmbeddedFlow: Open a .embf file or UI preview, then run Generate C Code."
+                );
                 return;
             }
             await runCodeGen(filePath);
@@ -245,13 +247,22 @@ export function deactivate(): void {
 
 function resolveFilePath(uri?: vscode.Uri): string | undefined {
     if (uri?.fsPath.toLowerCase().endsWith(".embf")) {
-        return uri.fsPath;
+        return path.normalize(uri.fsPath);
     }
     const doc = vscode.window.activeTextEditor?.document;
-    if (doc?.fileName.endsWith(".embf")) {
-        return doc.fileName;
+    if (doc?.fileName.toLowerCase().endsWith(".embf")) {
+        return path.normalize(doc.fileName);
     }
     return undefined;
+}
+
+/** `.embf` path for codegen: explicit URI, active editor tab, or open UI preview. */
+async function resolveCodegenEmbfPath(uri?: vscode.Uri): Promise<string | undefined> {
+    const fromUriOrEditor = resolveFilePath(uri);
+    if (fromUriOrEditor) {
+        return fromUriOrEditor;
+    }
+    return EmbfPreviewPanel.resolveEmbfPathForCodegen();
 }
 
 async function openPreviewResolved(extensionUri: vscode.Uri, uri?: vscode.Uri): Promise<void> {

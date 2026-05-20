@@ -63,7 +63,8 @@
       },
       {
         "command": "embeddedflow.newProject",
-        "title": "embeddedflow: New Project"
+        "title": "embeddedflow: New Project",
+        "icon": "$(new-file)"
       },
       {
         "command": "embeddedflow.generateCode",
@@ -77,7 +78,25 @@
       }
     ],
     "menus": {
+      "commandPalette": [
+        {
+          "command": "embeddedflow.newProject"
+        },
+        {
+          "command": "embeddedflow.openPreview"
+        },
+        {
+          "command": "embeddedflow.generateCode"
+        },
+        {
+          "command": "embeddedflow.showOutput"
+        }
+      ],
       "editor/title": [
+        {
+          "command": "embeddedflow.newProject",
+          "group": "navigation"
+        },
         {
           "command": "embeddedflow.openPreview",
           "when": "resourceExtname == .embf",
@@ -95,6 +114,15 @@
         }
       ],
       "explorer/context": [
+        {
+          "command": "embeddedflow.newProject",
+          "when": "explorerResourceIsFolder",
+          "group": "embeddedflow@1"
+        },
+        {
+          "command": "embeddedflow.newProject",
+          "group": "embeddedflow@1"
+        },
         {
           "command": "embeddedflow.openPreview",
           "when": "resourceExtname == .embf",

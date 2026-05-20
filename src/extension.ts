@@ -10,6 +10,7 @@ import { ensureCodegenOutputPath } from "./embfCodegenSetup";
 import { registerEmbeddedFlowOutput, embeddedFlowLog } from "./outputLog";
 import { resolveEmbfForPreview } from "./embfPreviewResolve";
 import { readEmbfText } from "./embfHistory";
+import { runNewProjectWizard } from "./embfNewProject";
 
 // Map from .embf file path → file watcher
 const watchers = new Map<string, fs.FSWatcher>();
@@ -499,80 +500,17 @@ async function runCodeGen(filePath: string): Promise<void> {
 }
 
 async function createNewProject(extensionUri: vscode.Uri): Promise<void> {
-    const folderUri = await vscode.window.showOpenDialog({
-        canSelectFiles: false,
-        canSelectFolders: true,
-        canSelectMany: false,
-        openLabel: "Select project folder"
-    });
-    if (!folderUri || folderUri.length === 0) {
-        return;
-    }
-
-    const name = await vscode.window.showInputBox({
-        prompt: "Project name",
-        value: "MyDisplay",
-        validateInput: v => (v.trim() ? null : "Name cannot be empty")
-    });
-    if (!name) {
-        return;
-    }
-
-    const lvglVersion = await vscode.window.showQuickPick(
-        ["9.5.0", "9.4.0", "9.3.0", "9.2.2", "8.4.0"],
-        { placeHolder: "Select LVGL version" }
-    );
-    if (!lvglVersion) {
-        return;
-    }
-
-    const filePath = path.join(folderUri[0].fsPath, `${name}.embf`);
-
-    const template: EmbfProject = {
-        version: "1.0",
-        project: {
-            name,
-            lvglVersion: lvglVersion as EmbfProject["project"]["lvglVersion"],
-            description: ""
-        },
-        display: {
-            width: 320,
-            height: 240,
-            bitDepth: 16,
-            colorFormat: "RGB565",
-            orientation: "landscape",
-            direction: "ltr",
-            dpi: 100
-        },
-        theme: {
-            dark: false
-        },
-        pages: [
-            {
-                id: "page_main",
-                name: "Main",
-                components: [
-                    {
-                        id: "lbl_hello",
-                        type: "label",
-                        x: 10,
-                        y: 10,
-                        width: 200,
-                        height: 30,
-                        text: "Hello, EmbeddedFlow!"
-                    }
-                ]
-            }
-        ]
-    };
-
-    try {
-        fs.writeFileSync(filePath, JSON.stringify(template, null, 2), "utf-8");
-    } catch (e: any) {
-        vscode.window.showErrorMessage(`Failed to create project: ${e.message}`);
+    const filePath = await runNewProjectWizard();
+    if (!filePath) {
         return;
     }
 
     const doc = await vscode.workspace.openTextDocument(filePath);
     await vscode.window.showTextDocument(doc);
+    if (shouldAutoOpenPreview()) {
+        openPreview(filePath, extensionUri);
+    }
+    vscode.window.showInformationMessage(
+        `embeddedflow: created ${path.basename(filePath)}`
+    );
 }

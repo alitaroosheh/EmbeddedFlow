@@ -72,6 +72,7 @@ const inspectorDelete = document.getElementById("inspector-delete");
 const btnUndo = document.getElementById("btn-undo");
 const btnRedo = document.getElementById("btn-redo");
 const btnGenerateCode = document.getElementById("btn-generate-code");
+const btnNewProject = document.getElementById("btn-new-project");
 const previewZoomSelect = /** @type {HTMLSelectElement | null} */ (
     document.getElementById("preview-zoom")
 );
@@ -325,6 +326,11 @@ if (btnUndo) {
             vscode.postMessage({ type: "generateCode" });
         });
     }
+}
+if (btnNewProject) {
+    btnNewProject.addEventListener("click", () => {
+        vscode.postMessage({ type: "newProject" });
+    });
 }
 if (btnRedo) {
     btnRedo.addEventListener("click", () => postRedo());

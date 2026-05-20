@@ -103,7 +103,8 @@ export type WebviewToHostMessage =
           sourcePageIndex: number;
           direction: string;
       }
-    | { type: "generateCode" };
+    | { type: "generateCode" }
+    | { type: "newProject" };
 
 export interface WebviewLoadPayload {
     project: EmbfProject;
@@ -349,6 +350,8 @@ export class EmbfPreviewPanel {
                 "embeddedflow.generateCode",
                 vscode.Uri.file(this._filePath)
             );
+        } else if (msg.type === "newProject") {
+            void vscode.commands.executeCommand("embeddedflow.newProject");
         } else if (msg.type === "log") {
             embeddedFlowLog("webview", msg.level, msg.text);
         } else if (msg.type === "ready") {
@@ -1811,6 +1814,7 @@ export class EmbfPreviewPanel {
     <div id="toolbar-shell">
         <button type="button" id="btn-toggle-toolbar" class="dock-toggle dock-toggle-toolbar" aria-expanded="true" title="Hide toolbar">▲ Hide toolbar</button>
         <div id="toolbar">
+        <button type="button" class="tb-btn" id="btn-new-project" title="Create a new .embf project file">New Project</button>
         <label>Page:</label>
         <select id="page-select"></select>
         <button type="button" class="tb-btn" id="btn-undo" disabled title="Undo (Ctrl+Z)">Undo</button>

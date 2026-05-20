@@ -4,7 +4,7 @@ import type {
     CheckboxComponent, DropdownComponent, RollerComponent, TextareaComponent,
     LineComponent, ContainerComponent, PanelComponent, ImageComponent
 } from "../types/embf";
-import { widgetVar } from "./naming";
+import { toIdentifier, widgetVar } from "./naming";
 import { emitStyleCalls } from "./styleGen";
 
 /**
@@ -116,9 +116,10 @@ function emitButton(v: string, c: ButtonComponent, parent: string, pageId: strin
 function emitImage(v: string, c: ImageComponent, parent: string, v9: boolean): string[] {
     const createFn = v9 ? "lv_image_create" : "lv_img_create";
     const setFn    = v9 ? "lv_image_set_src"  : "lv_img_set_src";
+    const imgSym   = `ui_img_${toIdentifier(c.src)}`;
     return [
         `    lv_obj_t *${v} = ${createFn}(${parent});`,
-        `    ${setFn}(${v}, &ui_img_${c.src});`
+        `    ${setFn}(${v}, &${imgSym});`
     ];
 }
 

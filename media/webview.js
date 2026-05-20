@@ -23,6 +23,7 @@
  *   { type: "bulkPatchWidgets", pageIndex: number, updates: [{ componentId, patch }, ...] }
  *   { type: "updatePage", pageIndex: number, patch: object }
  *   { type: "pickCodegenOutputFolder", pageIndex: number }
+ *   { type: "pickImageSource", pageIndex: number, componentId: string }
  *   { type: "deleteWidget", pageIndex: number, componentId: string }
  *   { type: "bulkDeleteWidgets", pageIndex: number, componentIds: string[] }
  *   { type: "combineWidgets", pageIndex: number, componentIds: string[] } — sibling widgets → one container
@@ -74,6 +75,7 @@ const previewZoomSelect = /** @type {HTMLSelectElement | null} */ (
     document.getElementById("preview-zoom")
 );
 const displayWrapper = document.getElementById("display-wrapper");
+const imagePreviewLayer = document.getElementById("image-preview-layer");
 const toolbarShell = document.getElementById("toolbar-shell");
 const btnToggleToolbar = document.getElementById("btn-toggle-toolbar");
 const propertyInspector = document.getElementById("property-inspector");
@@ -120,6 +122,9 @@ let wasmReady = false;
 let displayWidth = 0;
 /** @type {number} */
 let displayHeight = 0;
+/** @type {Record<string, string>} image asset id → webview URI from host */
+let imageAssetUris = {};
+
 /** Circular panel clip when `project.display.round` is true — preview `#display-wrapper` only. */
 let displayRound = false;
 
@@ -222,6 +227,12 @@ let inspectorShowingPage = false;
 let dragState = null;
 
 /**
+ * Pointer down on a widget before movement exceeds threshold (selection only until then).
+ * @type {{ pointerX: number; pointerY: number; items: { id: string; startAbsX: number; startAbsY: number; width: number; height: number }[] } | null}
+ */
+let pendingDrag = null;
+
+/**
  * Rubber-band selection on empty overlay (logical display coords).
  * @type {{ ox: number; oy: number; x: number; y: number; shift: boolean; ctrl: boolean } | null}
  */
@@ -229,6 +240,9 @@ let marqueeState = null;
 
 /** At least one axis must exceed this delta (logical px) to count as marquee vs empty click */
 const MARQUEE_DRAG_THRESHOLD = 5;
+
+/** Movement (logical px) before a pointer down becomes a drag instead of a click */
+const DESIGN_DRAG_THRESHOLD = 3;
 
 /** Design-mode magnetic snap: align edges/centers when within this distance (logical px). */
 const DESIGN_SNAP_THRESHOLD = 8;
@@ -326,6 +340,7 @@ async function handleLoad(payload) {
     displayWidth = payload.displayWidth;
     displayHeight = payload.displayHeight;
     dragState = null;
+    pendingDrag = null;
     marqueeState = null;
 
     /** Same WASM URI + running module → JSON-only rebalance (inspector debounced refresh): skip shimmer. */
@@ -381,7 +396,17 @@ async function handleLoad(payload) {
     cancelPreviewTransition();
     clearPageScreenCache();
 
+    imageAssetUris = {};
+    if (Array.isArray(payload.imageAssets)) {
+        for (const a of payload.imageAssets) {
+            if (a && typeof a.id === "string" && typeof a.uri === "string") {
+                imageAssetUris[a.id] = a.uri;
+            }
+        }
+    }
+
     buildUiFromProject(currentProject, currentPageIndex);
+    syncImagePreviewOverlays();
 
     resizeDesignOverlay();
     setDesignPointerMode();
@@ -1329,6 +1354,7 @@ function dispatchAction(action, eventValue, currentPage) {
             selectedComponentOrder = [];
             inspectorShowingPage = false;
             dragState = null;
+            pendingDrag = null;
             marqueeState = null;
             pageSelectProgrammatic = true;
             try {
@@ -1406,6 +1432,7 @@ if (designModeCheck) {
             selectedComponentOrder = [];
             inspectorShowingPage = false;
             dragState = null;
+            pendingDrag = null;
             marqueeState = null;
         } else {
             canvasSwipeTrack = null;
@@ -1434,29 +1461,49 @@ function resizeDesignOverlay() {
 }
 
 /**
- * Hit-test topmost component at display coordinates (children use parent-relative x/y).
+ * Hit-test component at display coordinates (parent-relative x/y).
+ * When several widgets overlap, prefer `image` then the smallest area (most specific target).
  * @returns {{ comp: object, absX: number, absY: number } | null}
  */
 function hitTestAt(page, px, py) {
-    /** @param {object[]} components @param {number} parentX @param {number} parentY */
-    function walk(components, parentX, parentY) {
-        for (let i = components.length - 1; i >= 0; i--) {
-            const c = components[i];
-            const ax = parentX + c.x;
-            const ay = parentY + c.y;
-            if (px >= ax && px < ax + c.width && py >= ay && py < ay + c.height) {
+    /** @type {{ comp: object, absX: number, absY: number, area: number, depth: number }[]} */
+    const hits = [];
+
+    /** @param {object[]} components @param {number} parentX @param {number} parentY @param {number} depth */
+    function walk(components, parentX, parentY, depth) {
+        for (const c of components ?? []) {
+            if (c.hidden) {
+                continue;
+            }
+            const ax = parentX + (Number(c.x) || 0);
+            const ay = parentY + (Number(c.y) || 0);
+            const w = Math.max(1, Number(c.width) || 1);
+            const h = Math.max(1, Number(c.height) || 1);
+            if (px >= ax && px < ax + w && py >= ay && py < ay + h) {
+                hits.push({ comp: c, absX: ax, absY: ay, area: w * h, depth });
                 if (c.children?.length) {
-                    const inner = walk(c.children, ax, ay);
-                    if (inner) {
-                        return inner;
-                    }
+                    walk(c.children, ax, ay, depth + 1);
                 }
-                return { comp: c, absX: ax, absY: ay };
             }
         }
+    }
+    walk(page.components ?? [], 0, 0, 0);
+    if (hits.length === 0) {
         return null;
     }
-    return walk(page.components ?? [], 0, 0);
+    hits.sort((a, b) => {
+        const ai = a.comp.type === "image" ? 0 : 1;
+        const bi = b.comp.type === "image" ? 0 : 1;
+        if (ai !== bi) {
+            return ai - bi;
+        }
+        if (a.area !== b.area) {
+            return a.area - b.area;
+        }
+        return b.depth - a.depth;
+    });
+    const best = hits[0];
+    return { comp: best.comp, absX: best.absX, absY: best.absY };
 }
 
 /** @returns {{ id: string; ax: number; ay: number; width: number; height: number }[]} */
@@ -1730,6 +1777,54 @@ function drawSnapGuides(guides) {
         }
     }
     designCtx.restore();
+}
+
+/** @param {object[]} components @param {object[]} out */
+function collectImageComponents(components, out) {
+    for (const c of components ?? []) {
+        if (c.type === "image") {
+            out.push(c);
+        }
+        if (c.children?.length) {
+            collectImageComponents(c.children, out);
+        }
+    }
+}
+
+/** Draw project image files over the WASM canvas (WASM has no embedded assets). */
+function syncImagePreviewOverlays() {
+    if (!imagePreviewLayer || !currentProject) {
+        return;
+    }
+    imagePreviewLayer.innerHTML = "";
+    const page = currentProject.pages[currentPageIndex];
+    if (!page) {
+        return;
+    }
+    /** @type {object[]} */
+    const images = [];
+    collectImageComponents(page.components, images);
+    for (const comp of images) {
+        const src = String(comp.src ?? "").trim();
+        const uri = src ? imageAssetUris[src] : "";
+        if (!uri) {
+            continue;
+        }
+        const b = getAbsBounds(page, comp.id);
+        if (!b) {
+            continue;
+        }
+        const img = document.createElement("img");
+        img.src = uri;
+        img.alt = src;
+        img.dataset.componentId = comp.id;
+        img.style.pointerEvents = "none";
+        img.style.left = `${Math.max(0, Math.round(b.x))}px`;
+        img.style.top = `${Math.max(0, Math.round(b.y))}px`;
+        img.style.width = `${Math.max(1, Math.round(b.width))}px`;
+        img.style.height = `${Math.max(1, Math.round(b.height))}px`;
+        imagePreviewLayer.appendChild(img);
+    }
 }
 
 function drawDesignOverlay() {
@@ -2485,6 +2580,7 @@ function clearInspectorSelection() {
     selectedComponentOrder = [];
     inspectorShowingPage = false;
     dragState = null;
+    pendingDrag = null;
     marqueeState = null;
     drawDesignOverlay();
     renderInspector();
@@ -2494,6 +2590,7 @@ function selectPageInspector() {
     inspectorShowingPage = true;
     selectedComponentOrder = [];
     dragState = null;
+    pendingDrag = null;
     marqueeState = null;
     drawDesignOverlay();
     renderInspector();
@@ -2503,6 +2600,7 @@ function setSelection(componentId) {
     inspectorShowingPage = false;
     selectedComponentOrder = componentId ? [componentId] : [];
     dragState = null;
+    pendingDrag = null;
     marqueeState = null;
     drawDesignOverlay();
     renderInspector();
@@ -2520,6 +2618,44 @@ function wirePageInspectorActions() {
             });
         });
     }
+}
+
+function imageSrcInspectorHtml(comp) {
+    const src = String(comp.src ?? "");
+    const entry =
+        currentProject?.images?.find(e => e.id === src) ?? null;
+    const pathHint = entry?.path ?? "";
+    const hint = pathHint
+        ? `File: ${pathHint}`
+        : "Browse to add a PNG/JPEG/BMP to project.images and link this widget.";
+    return (
+        `<div class="field"><label>Image source (asset id)</label>` +
+        `<div class="inspector-path-row">` +
+        `<input type="text" name="src" value="${esc(src)}" autocomplete="off" spellcheck="false" placeholder="e.g. logo" />` +
+        `<button type="button" class="tb-btn-small btn-browse-image-src" data-component-id="${esc(comp.id)}">Browse...</button>` +
+        `</div>` +
+        `<p class="inspector-field-hint">${esc(hint)}</p></div>`
+    );
+}
+
+function wireImageInspectorActions() {
+    const btn = inspectorForm?.querySelector(".btn-browse-image-src");
+    if (!(btn instanceof HTMLButtonElement) || btn.dataset.wired) {
+        return;
+    }
+    btn.dataset.wired = "1";
+    btn.addEventListener("click", e => {
+        e.preventDefault();
+        const componentId = btn.getAttribute("data-component-id");
+        if (!componentId) {
+            return;
+        }
+        vscode.postMessage({
+            type: "pickImageSource",
+            pageIndex: currentPageIndex,
+            componentId
+        });
+    });
 }
 
 /**
@@ -3116,7 +3252,7 @@ function widgetTypeSpecificFieldsHtml(type, m) {
             html += mixText("label", "Label text", /** @type {unknown} */ (m.label));
             break;
         case "image":
-            html += mixText("src", "Source / path", /** @type {unknown} */ (m.src));
+            html += mixText("src", "Asset id", /** @type {unknown} */ (m.src));
             break;
         case "slider":
             html +=
@@ -3547,13 +3683,18 @@ function renderInspector() {
         }
     }
     html += `<div class="inspector-group-title">${esc(comp.type)}</div>`;
-    html += widgetTypeSpecificFieldsHtml(comp.type, typeModelFromComp(comp));
+    if (comp.type === "image") {
+        html += imageSrcInspectorHtml(comp);
+    } else {
+        html += widgetTypeSpecificFieldsHtml(comp.type, typeModelFromComp(comp));
+    }
     html += inspectorAppearancesSection(comp);
 
     inspectorForm.innerHTML = html;
     inspectorSyncing = false;
 
     refreshMixedCheckboxes(inspectorForm);
+    wireImageInspectorActions();
 
     if (inspectorFocusSnap) {
         requestAnimationFrame(() => {
@@ -4236,6 +4377,7 @@ function setupDesignOverlay() {
                 selectedComponentOrder = [hit.comp.id];
                 inspectorShowingPage = false;
                 dragState = null;
+                pendingDrag = null;
                 marqueeState = null;
                 drawDesignOverlay();
                 renderInspector();
@@ -4269,6 +4411,7 @@ function setupDesignOverlay() {
             }
             inspectorShowingPage = false;
             dragState = null;
+            pendingDrag = null;
             marqueeState = null;
             drawDesignOverlay();
             renderInspector();
@@ -4303,16 +4446,14 @@ function setupDesignOverlay() {
 
         marqueeState = null;
 
-        dragState = {
+        pendingDrag = {
             pointerX: x,
             pointerY: y,
-            dx: 0,
-            dy: 0,
-            snapGuides: [],
             items: /** @type {{ id: string; startAbsX: number; startAbsY: number; width: number; height: number }[]} */ (
                 dragItems
             )
         };
+        dragState = null;
         drawDesignOverlay();
         renderInspector();
         e.preventDefault();
@@ -4321,6 +4462,22 @@ function setupDesignOverlay() {
     designOverlay.addEventListener("pointermove", e => {
         if (!designMode) {
             return;
+        }
+        if (pendingDrag && !dragState) {
+            const { x, y } = overlayCoords(e);
+            const dx = x - pendingDrag.pointerX;
+            const dy = y - pendingDrag.pointerY;
+            if (Math.abs(dx) > DESIGN_DRAG_THRESHOLD || Math.abs(dy) > DESIGN_DRAG_THRESHOLD) {
+                dragState = {
+                    pointerX: pendingDrag.pointerX,
+                    pointerY: pendingDrag.pointerY,
+                    dx: 0,
+                    dy: 0,
+                    snapGuides: [],
+                    items: pendingDrag.items
+                };
+                pendingDrag = null;
+            }
         }
         if (marqueeState && !dragState) {
             const { x, y } = overlayCoords(e);
@@ -4429,14 +4586,19 @@ function setupDesignOverlay() {
             return;
         }
 
+        pendingDrag = null;
+
         if (!dragState || !currentProject) {
+            drawDesignOverlay();
+            renderInspector();
             releaseCaptureSafe();
+            e.preventDefault();
             return;
         }
         const { x, y } = overlayCoords(e);
         const dx = x - dragState.pointerX;
         const dy = y - dragState.pointerY;
-        const moved = Math.abs(dx) > 2 || Math.abs(dy) > 2;
+        const moved = Math.abs(dx) > DESIGN_DRAG_THRESHOLD || Math.abs(dy) > DESIGN_DRAG_THRESHOLD;
         if (moved) {
             const moves = dragState.items.map(it => ({
                 componentId: it.id,
@@ -4448,9 +4610,6 @@ function setupDesignOverlay() {
                 pageIndex: currentPageIndex,
                 moves
             });
-        } else {
-            // Design mode captures the overlay; forward a short tap so widget events (e.g. navigate) run.
-            forwardPointerTapToLvgl(x, y);
         }
         dragState = null;
         drawDesignOverlay();
@@ -4461,6 +4620,7 @@ function setupDesignOverlay() {
 
     designOverlay.addEventListener("pointercancel", e => {
         dragState = null;
+        pendingDrag = null;
         marqueeState = null;
         drawDesignOverlay();
         renderInspector();
@@ -4643,8 +4803,10 @@ function navigateToPageIndex(idx) {
     selectedComponentOrder = [];
     inspectorShowingPage = true;
     dragState = null;
+    pendingDrag = null;
     marqueeState = null;
     buildUiFromProject(currentProject, next);
+    syncImagePreviewOverlays();
     drawDesignOverlay();
     renderInspector();
     renderPageList();

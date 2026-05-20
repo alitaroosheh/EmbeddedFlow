@@ -171,6 +171,14 @@ function validateEmbf(data: unknown): EmbfProject {
 
     validatePagesDeep(obj["pages"] as unknown[]);
 
+    const images = obj["images"];
+    if (images !== undefined) {
+        if (!Array.isArray(images)) {
+            throw new EmbfParseError("'images' must be an array when present");
+        }
+        images.forEach((entry, i) => validateImageDefDeep(entry, `images[${i}]`));
+    }
+
     const lib = obj["componentLibrary"];
     if (lib !== undefined) {
         if (!Array.isArray(lib)) {
@@ -180,6 +188,19 @@ function validateEmbf(data: unknown): EmbfProject {
     }
 
     return data as EmbfProject;
+}
+
+function validateImageDefDeep(entry: unknown, path: string): void {
+    if (typeof entry !== "object" || entry === null) {
+        throw new EmbfParseError(`${path} must be an object`);
+    }
+    const o = entry as Record<string, unknown>;
+    if (typeof o["id"] !== "string" || !o["id"].trim()) {
+        throw new EmbfParseError(`${path}.id must be a non-empty string`);
+    }
+    if (typeof o["path"] !== "string" || !o["path"].trim()) {
+        throw new EmbfParseError(`${path}.path must be a non-empty string`);
+    }
 }
 
 function validateLibraryEntryDeep(entry: unknown, path: string): void {
@@ -743,7 +764,9 @@ export function getEffectiveDisplaySize(
 
 export function watchEmbf(
     filePath: string,
-    onChange: (project: EmbfProject | EmbfParseError) => void
+    onChange: (project: EmbfProject | EmbfParseError) => void,
+    /** Defaults to disk; pass `readEmbfText` from the extension for live editor buffers. */
+    readContent: () => string = () => fs.readFileSync(filePath, "utf-8")
 ): fs.FSWatcher {
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -760,7 +783,7 @@ export function watchEmbf(
             debounceTimer = setTimeout(() => {
                 debounceTimer = null;
                 try {
-                    onChange(parseEmbf(filePath));
+                    onChange(parseEmbfSource(readContent()));
                 } catch (e) {
                     onChange(e instanceof EmbfParseError ? e : new EmbfParseError(String(e)));
                 }

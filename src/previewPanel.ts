@@ -20,6 +20,9 @@ import {
     removeLibraryEntryInEmbfFile,
     saveGroupToLibraryInEmbfFile
 } from "./embfComponentLibraryEdit";
+import { assignImageFileToWidgetInEmbfFile } from "./embfImageEdit";
+import { buildImagePreviewAssets } from "./embfImagePreview";
+import { supportedImageExtensions } from "./resources";
 import { readEmbfProject } from "./embfProjectWrite";
 import { formatOutputPathForStorage, resolveCodegenOutputDir } from "./codeGen/outputDir";
 import { undoEmbfEdit, redoEmbfEdit, getEmbfHistoryState } from "./embfUndoRedo";
@@ -54,6 +57,7 @@ export type WebviewToHostMessage =
       }
     | { type: "updatePage"; pageIndex: number; patch: Record<string, unknown> }
     | { type: "pickCodegenOutputFolder"; pageIndex: number }
+    | { type: "pickImageSource"; pageIndex: number; componentId: string }
     | { type: "deleteWidget"; pageIndex: number; componentId: string }
     | { type: "bulkDeleteWidgets"; pageIndex: number; componentIds: string[] }
     | {
@@ -119,6 +123,8 @@ export interface WebviewLoadPayload {
     suppressLoadingSpinner?: boolean;
     /** Absolute path where Generate C Code writes files (from project.outputPath / settings). */
     codegenOutputResolved?: string;
+    /** Resolved image files for preview overlays (`id` → webview URI). */
+    imageAssets?: { id: string; uri: string; path: string }[];
 }
 
 export interface SendProjectOptions {
@@ -155,6 +161,15 @@ export class EmbfPreviewPanel {
             return existing;
         }
 
+        const embfDir = path.dirname(filePath);
+        const resourceRoots = [
+            vscode.Uri.joinPath(extensionUri, "media"),
+            vscode.Uri.file(embfDir)
+        ];
+        for (const folder of vscode.workspace.workspaceFolders ?? []) {
+            resourceRoots.push(folder.uri);
+        }
+
         const panel = vscode.window.createWebviewPanel(
             EmbfPreviewPanel.viewType,
             `Preview: ${path.basename(filePath)}`,
@@ -162,7 +177,7 @@ export class EmbfPreviewPanel {
             {
                 enableScripts: true,
                 retainContextWhenHidden: true,
-                localResourceRoots: [vscode.Uri.joinPath(extensionUri, "media")]
+                localResourceRoots: resourceRoots
             }
         );
 
@@ -242,6 +257,15 @@ export class EmbfPreviewPanel {
             this._filePath,
             workspaceCodegenOutputSetting()
         );
+        const imageAssets = buildImagePreviewAssets(project, this._filePath, {
+            workspaceOutputDirectory: workspaceCodegenOutputSetting(),
+            extraSearchRoots: (vscode.workspace.workspaceFolders ?? []).map(f => f.uri.fsPath),
+            toWebviewUri: abs =>
+                this._panel.webview.asWebviewUri(vscode.Uri.file(abs)).toString()
+        });
+        if (imageAssets.length > 0) {
+            payload.imageAssets = imageAssets;
+        }
 
         this.postToWebview({
             type: "load",
@@ -251,6 +275,18 @@ export class EmbfPreviewPanel {
 
     sendError(message: string): void {
         this.postToWebview({ type: "error", message });
+    }
+
+    /** Reload from the open .embf editor buffer (or disk); keeps the current preview page. */
+    refreshFromEmbfSource(): void {
+        try {
+            const project = readEmbfProject(this._filePath);
+            this.sendProject(project, { suppressLoadingSpinner: true });
+        } catch (e) {
+            const m = e instanceof EmbfParseError ? e.message : String(e);
+            this.sendError(m);
+            embeddedFlowLog("preview", "warn", `refresh from editor: ${m}`);
+        }
     }
 
     updateTitle(fileName: string): void {
@@ -413,6 +449,13 @@ export class EmbfPreviewPanel {
                 return;
             }
             void this._pickCodegenOutputFolder(pageIndex);
+        } else if (msg.type === "pickImageSource") {
+            const pageIndex = Number(msg.pageIndex);
+            const componentId = String(msg.componentId ?? "").trim();
+            if (!Number.isInteger(pageIndex) || pageIndex < 0 || !componentId) {
+                return;
+            }
+            void this._pickImageSource(pageIndex, componentId);
         } else if (msg.type === "deleteWidget") {
             const pageIndex = Number(msg.pageIndex);
             const componentId = String(msg.componentId ?? "").trim();
@@ -628,6 +671,34 @@ export class EmbfPreviewPanel {
                     this.sendHistoryState();
                 }
             });
+        }
+    }
+
+    private async _pickImageSource(pageIndex: number, componentId: string): Promise<void> {
+        const embfDir = path.dirname(this._filePath);
+        const imgExt = supportedImageExtensions().map(e => e.replace(/^\./, ""));
+        const picked = await vscode.window.showOpenDialog({
+            canSelectFiles: true,
+            canSelectFolders: false,
+            canSelectMany: false,
+            defaultUri: vscode.Uri.file(embfDir),
+            filters: { Images: imgExt },
+            title: "Select image file",
+            openLabel: "Select image"
+        });
+        if (!picked?.length) {
+            return;
+        }
+
+        const res = await assignImageFileToWidgetInEmbfFile(
+            this._filePath,
+            pageIndex,
+            componentId,
+            picked[0].fsPath
+        );
+        if (res.ok) {
+            this.reloadPreviewNow(pageIndex, { selectedComponentId: componentId });
+            this.sendHistoryState();
         }
     }
 
@@ -1450,6 +1521,38 @@ export class EmbfPreviewPanel {
             border: none;
             border-radius: 2px;
         }
+        #inspector-form .inspector-path-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        #inspector-form .inspector-path-row input[type="text"] {
+            flex: 1;
+            min-width: 0;
+            width: auto;
+        }
+        #inspector-form .inspector-path-row .tb-btn-small {
+            flex-shrink: 0;
+            font-size: 11px;
+            padding: 4px 8px;
+            background: #3c3c3c;
+            color: #ccc;
+            border: 1px solid #555;
+            border-radius: 3px;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        #inspector-form .inspector-path-row .tb-btn-small:hover {
+            background: #4a4a4a;
+            color: #fff;
+        }
+        #inspector-form .inspector-field-hint {
+            font-size: 10px;
+            color: #888;
+            margin: -2px 0 8px;
+            line-height: 1.35;
+            word-break: break-all;
+        }
         #inspector-delete {
             flex-shrink: 0;
             margin: 0 12px 12px;
@@ -1490,13 +1593,32 @@ export class EmbfPreviewPanel {
         }
         #lvgl-canvas {
             display: block;
+            position: relative;
+            z-index: 0;
+        }
+        #image-preview-layer {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1;
+            overflow: hidden;
+        }
+        #image-preview-layer img {
+            position: absolute;
+            object-fit: contain;
+            image-rendering: pixelated;
+            pointer-events: none;
         }
         #design-overlay {
             position: absolute;
-            top: 0;
-            left: 0;
+            inset: 0;
             display: block;
             cursor: default;
+            z-index: 10;
+            touch-action: none;
         }
         #toolbar input[type="checkbox"] {
             margin: 0 4px 0 0;
@@ -1513,6 +1635,8 @@ export class EmbfPreviewPanel {
             font-family: monospace;
             white-space: pre-wrap;
             overflow: auto;
+            z-index: 21;
+            pointer-events: auto;
         }
         #loading-overlay {
             position: absolute;
@@ -1524,6 +1648,8 @@ export class EmbfPreviewPanel {
             color: #888;
             font-size: 12px;
             gap: 8px;
+            z-index: 20;
+            pointer-events: none;
         }
         .spinner {
             width: 16px; height: 16px;
@@ -1582,6 +1708,7 @@ export class EmbfPreviewPanel {
         <div id="canvas-container">
         <div id="display-wrapper">
             <canvas id="lvgl-canvas"></canvas>
+            <div id="image-preview-layer" aria-hidden="true"></div>
             <canvas id="design-overlay"></canvas>
             <div id="error-overlay"></div>
             <div id="loading-overlay">

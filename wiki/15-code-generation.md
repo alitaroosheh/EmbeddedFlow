@@ -11,7 +11,7 @@ firmware build (ESP-IDF, STM32 HAL, Zephyr, Arduino, bare-metal, etc.).
 - [ ] Per-screen: `ui_<page_id>.h` + `ui_<page_id>.c`
 - [ ] `ui_styles.h` + `ui_styles.c` — all named styles
 - [ ] `ui_fonts.h` + `ui_fonts.c` — font declarations and includes
-- [ ] `ui_images/` — converted image `.c` files (one per image asset)
+- [x] `ui_img_<id>.c` — converted image sources in the same folder as `ui.h` (no subfolder)
 - [ ] `lv_conf.h` — tailored to the project (correct color depth, enabled fonts, enabled widgets)
 - [ ] `CMakeLists.txt` stub — ready to include in a CMake project
 - [ ] `idf_component.yml` — ESP-IDF component manifest

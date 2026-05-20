@@ -7,8 +7,10 @@ import {
     generateRootHeader,
     generateRootSource,
     generateLvConf,
-    generateDisplayHeader
+    generateDisplayHeader,
+    isLvglV9
 } from "./pageGen";
+import { convertProjectImages } from "../resources";
 
 export { resolveCodegenOutputDir } from "./outputDir";
 export {
@@ -22,6 +24,8 @@ export interface CodeGenResult {
     /** Files written: path → content */
     files: Map<string, string>;
     outputDir: string;
+    /** Non-fatal image conversion issues (missing files, unsupported format, etc.). */
+    imageWarnings: string[];
 }
 
 /**
@@ -39,6 +43,10 @@ export function generateCode(
     const dir = outputDir;
     const files = new Map<string, string>();
 
+    // Auto-convert project.images[] → ui_img_*.c in the output folder (same as ui.h)
+    const imageResult = convertProjectImages(project, embfPath, dir);
+    const lvglV9 = isLvglV9(project);
+
     files.set(path.join(dir, "ui_display.h"), generateDisplayHeader(project));
 
     // Per-page files
@@ -53,12 +61,31 @@ export function generateCode(
         );
     }
 
-    // Root files
-    files.set(path.join(dir, "ui.h"),      generateRootHeader(project));
-    files.set(path.join(dir, "ui.c"),      generateRootSource(project));
+    const imageSymbols = imageResult.assets.map(a => ({
+        symbolName: a.symbolName,
+        lvglV9
+    }));
+
+    files.set(
+        path.join(dir, "ui.h"),
+        generateRootHeader(project, {
+            imageSymbols: imageSymbols.length > 0 ? imageSymbols : undefined
+        })
+    );
+    files.set(path.join(dir, "ui.c"), generateRootSource(project));
     files.set(path.join(dir, "lv_conf.h"), generateLvConf(project));
 
-    return { files, outputDir: dir };
+    for (const [relPath, content] of imageResult.files) {
+        files.set(path.join(dir, relPath), content);
+    }
+
+    const imageWarnings = [...imageResult.errors];
+    for (const g of imageResult.inferred) {
+        imageWarnings.push(
+            `images[${g.id}]: converted from widget src "${g.path}" — add to project.images[] in .embf to persist`
+        );
+    }
+    return { files, outputDir: dir, imageWarnings };
 }
 
 /**
@@ -71,6 +98,7 @@ export function writeGeneratedFiles(result: CodeGenResult): string[] {
 
     const written: string[] = [];
     for (const [filePath, content] of result.files) {
+        fs.mkdirSync(path.dirname(filePath), { recursive: true });
         fs.writeFileSync(filePath, content, "utf-8");
         written.push(filePath);
     }

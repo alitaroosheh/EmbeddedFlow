@@ -5,10 +5,11 @@ import { EmbfPreviewPanel } from "./previewPanel";
 import { EmbfParseError, parseEmbf, parseEmbfSource, watchEmbf } from "./embfParser";
 import { lintEmbfProject } from "./embfSemanticLint";
 import { EmbfProject } from "./types/embf";
-import { generateCode, resolveCodegenOutputDir, writeGeneratedFiles } from "./codeGen/index";
+import { generateCode, resolveCodegenOutputDir, writeGeneratedFiles, type CodeGenResult } from "./codeGen/index";
 import { ensureCodegenOutputPath } from "./embfCodegenSetup";
 import { registerEmbeddedFlowOutput, embeddedFlowLog } from "./outputLog";
 import { resolveEmbfForPreview } from "./embfPreviewResolve";
+import { readEmbfText } from "./embfHistory";
 
 // Map from .embf file path → file watcher
 const watchers = new Map<string, fs.FSWatcher>();
@@ -18,6 +19,8 @@ const embfLintDebounceMs = 400;
 const embfLintTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const liveGenDebounceMs = 600;
 const liveGenTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const previewRefreshDebounceMs = 280;
+const previewRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 export function activate(context: vscode.ExtensionContext): void {
     const embfOutput = vscode.window.createOutputChannel("embeddedflow");
@@ -116,6 +119,11 @@ export function activate(context: vscode.ExtensionContext): void {
                     clearTimeout(liveT);
                     liveGenTimers.delete(doc.uri.fsPath);
                 }
+                const prevT = previewRefreshTimers.get(doc.uri.fsPath);
+                if (prevT) {
+                    clearTimeout(prevT);
+                    previewRefreshTimers.delete(doc.uri.fsPath);
+                }
             }
         })
     );
@@ -137,7 +145,30 @@ export function activate(context: vscode.ExtensionContext): void {
                     updateEmbfDiagnostics(doc);
                 }, embfLintDebounceMs)
             );
+
+            schedulePreviewRefreshFromEditor(doc);
         })
+    );
+}
+
+function schedulePreviewRefreshFromEditor(doc: vscode.TextDocument): void {
+    if (doc.uri.scheme !== "file" || !doc.fileName.toLowerCase().endsWith(".embf")) {
+        return;
+    }
+    const fp = doc.uri.fsPath;
+    if (!EmbfPreviewPanel.getPanel(fp)) {
+        return;
+    }
+    const prev = previewRefreshTimers.get(fp);
+    if (prev) {
+        clearTimeout(prev);
+    }
+    previewRefreshTimers.set(
+        fp,
+        setTimeout(() => {
+            previewRefreshTimers.delete(fp);
+            EmbfPreviewPanel.getPanel(fp)?.refreshFromEmbfSource();
+        }, previewRefreshDebounceMs)
     );
 }
 
@@ -204,6 +235,10 @@ export function deactivate(): void {
         clearTimeout(t);
     }
     liveGenTimers.clear();
+    for (const t of previewRefreshTimers.values()) {
+        clearTimeout(t);
+    }
+    previewRefreshTimers.clear();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -241,7 +276,7 @@ function openPreview(filePath: string, extensionUri: vscode.Uri): void {
     // Parse immediately so the panel can show the current state
     let project: EmbfProject | EmbfParseError;
     try {
-        project = parseEmbf(filePath);
+        project = parseEmbfSource(readEmbfText(filePath));
     } catch (e) {
         project = e instanceof EmbfParseError ? e : new EmbfParseError(String(e));
     }
@@ -260,7 +295,9 @@ function openPreview(filePath: string, extensionUri: vscode.Uri): void {
 
     // Set up file watcher if not already watching
     if (!watchers.has(filePath)) {
-        const watcher = watchEmbf(filePath, result => {
+        const watcher = watchEmbf(
+            filePath,
+            result => {
             const p = EmbfPreviewPanel.getPanel(filePath);
             if (!p) {
                 // Panel was closed — stop watching
@@ -274,7 +311,9 @@ function openPreview(filePath: string, extensionUri: vscode.Uri): void {
             } else {
                 p.sendProject(result);
             }
-        });
+        },
+            () => readEmbfText(filePath)
+        );
         watchers.set(filePath, watcher);
     }
 }
@@ -336,6 +375,7 @@ async function runLiveCodeGen(filePath: string): Promise<void> {
 
     const outDir = resolveCodegenOutputDir(project, filePath, workspaceCodegenOutputSetting());
     const result = generateCode(project, filePath, outDir);
+    logCodegenImageWarnings(result, project);
     try {
         const written = writeGeneratedFiles(result);
         const rel = path.relative(path.dirname(filePath), result.outputDir);
@@ -351,6 +391,28 @@ async function runLiveCodeGen(filePath: string): Promise<void> {
     } catch (e: any) {
         embeddedFlowLog("live", "error", e.message ?? String(e));
         vscode.window.showErrorMessage(`EmbeddedFlow (live generate): ${e.message}`);
+    }
+}
+
+function logCodegenImageWarnings(result: CodeGenResult, project?: import("./types/embf").EmbfProject): void {
+    for (const w of result.imageWarnings) {
+        embeddedFlowLog("codegen", "warn", `image: ${w}`);
+    }
+    const wroteImageSources = [...result.files.keys()].some(k => /[/\\]ui_img_.*\.c$/i.test(k));
+    if (!wroteImageSources && (project?.images?.length ?? 0) > 0) {
+        embeddedFlowLog(
+            "codegen",
+            "warn",
+            "project.images[] is set but no ui_img_*.c was generated (check file paths next to the .embf)"
+        );
+        void vscode.window.showWarningMessage(
+            "EmbeddedFlow: image conversion produced no ui_img_*.c files — missing or unreadable sources. See Output → EmbeddedFlow."
+        );
+    }
+    if (result.imageWarnings.length > 0) {
+        void vscode.window.showWarningMessage(
+            `EmbeddedFlow: ${result.imageWarnings.length} image(s) could not be converted. See Output → EmbeddedFlow.`
+        );
     }
 }
 
@@ -375,6 +437,7 @@ async function runCodeGen(filePath: string): Promise<void> {
     project = setup.project;
     const outputDir = setup.outputDir;
     const result = generateCode(project, filePath, outputDir);
+    logCodegenImageWarnings(result, project);
 
     // Confirm if output directory already exists and has files
     if (fs.existsSync(outputDir) && fs.readdirSync(outputDir).some(f => f.endsWith(".c") || f.endsWith(".h"))) {

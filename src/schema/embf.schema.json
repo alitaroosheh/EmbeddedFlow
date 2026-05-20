@@ -99,9 +99,31 @@
       "type": "array",
       "minItems": 1,
       "items": { "$ref": "#/definitions/page" }
+    },
+    "componentLibrary": {
+      "type": "array",
+      "description": "Reusable grouped widgets (saved container/panel subtrees)",
+      "items": { "$ref": "#/definitions/componentLibraryEntry" }
     }
   },
   "definitions": {
+    "componentLibraryEntry": {
+      "type": "object",
+      "required": ["id", "name", "width", "height", "root"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "width": { "type": "number", "minimum": 1 },
+        "height": { "type": "number", "minimum": 1 },
+        "root": {
+          "oneOf": [
+            { "$ref": "#/definitions/containerComponent" },
+            { "$ref": "#/definitions/panelComponent" }
+          ]
+        }
+      }
+    },
     "page": {
       "type": "object",
       "required": ["id", "name", "components"],

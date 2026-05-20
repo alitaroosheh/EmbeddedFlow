@@ -6,6 +6,15 @@ export type TextDirection = "ltr" | "rtl";
 /** How generated C code includes LVGL (platform include paths differ). */
 export type LvglIncludePath = "lvgl.h" | "lvgl/lvgl.h";
 
+/** Reusable grouped widget saved in the project (insert copies onto a page). */
+export interface ComponentLibraryEntry {
+    id: string;
+    name: string;
+    width: number;
+    height: number;
+    root: ContainerComponent | PanelComponent;
+}
+
 export interface EmbfProject {
     version: "1.0";
     project: ProjectMeta;
@@ -14,6 +23,8 @@ export interface EmbfProject {
     fonts?: FontDef[];
     images?: ImageDef[];
     pages: Page[];
+    /** User-defined reusable groups (container/panel subtrees). */
+    componentLibrary?: ComponentLibraryEntry[];
 }
 
 export interface ProjectMeta {

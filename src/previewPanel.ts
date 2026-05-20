@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as path from "path";
 import { EmbfProject } from "./types/embf";
-import { buildWidgetPaletteHtml } from "./embfPaletteIcons";
+import { buildComponentsSidebarHtml } from "./embfPaletteIcons";
 import { buildSidebarPanelViewsHtml, buildSidebarRailHtml } from "./sidebarCategories";
 import { EmbfParseError, getEffectiveDisplaySize } from "./embfParser";
 import {
@@ -15,6 +15,11 @@ import {
     updatePageInEmbfFile,
     updateWidgetInEmbfFile
 } from "./embfComponentEdit";
+import {
+    insertLibraryComponentInEmbfFile,
+    removeLibraryEntryInEmbfFile,
+    saveGroupToLibraryInEmbfFile
+} from "./embfComponentLibraryEdit";
 import { readEmbfProject } from "./embfProjectWrite";
 import { formatOutputPathForStorage, resolveCodegenOutputDir } from "./codeGen/outputDir";
 import { undoEmbfEdit, redoEmbfEdit, getEmbfHistoryState } from "./embfUndoRedo";
@@ -57,6 +62,9 @@ export type WebviewToHostMessage =
           componentIds: string[];
       }
     | { type: "ungroupWidget"; pageIndex: number; componentId: string }
+    | { type: "saveGroupToLibrary"; pageIndex: number; componentId: string }
+    | { type: "insertLibraryComponent"; pageIndex: number; libraryId: string }
+    | { type: "removeLibraryEntry"; libraryId: string }
     | { type: "undo"; pageIndex: number; selectedComponentId?: string; selectedComponentIds?: string[] }
     | { type: "redo"; pageIndex: number; selectedComponentId?: string; selectedComponentIds?: string[] }
     | { type: "addPage" }
@@ -458,6 +466,41 @@ export class EmbfPreviewPanel {
             void ungroupWidgetInEmbfFile(this._filePath, pageIndex, componentId).then(res => {
                 if (res.ok) {
                     this.reloadPreviewNow(pageIndex, { selectedComponentIds: res.liftedIds });
+                    this.sendHistoryState();
+                }
+            });
+        } else if (msg.type === "saveGroupToLibrary") {
+            const pageIndex = Number(msg.pageIndex);
+            const componentId = String(msg.componentId ?? "").trim();
+            if (!Number.isInteger(pageIndex) || pageIndex < 0 || !componentId) {
+                return;
+            }
+            void saveGroupToLibraryInEmbfFile(this._filePath, pageIndex, componentId).then(res => {
+                if (res.ok) {
+                    this.reloadPreviewNow(pageIndex, { selectedComponentId: componentId });
+                    this.sendHistoryState();
+                }
+            });
+        } else if (msg.type === "insertLibraryComponent") {
+            const pageIndex = Number(msg.pageIndex);
+            const libraryId = String(msg.libraryId ?? "").trim();
+            if (!Number.isInteger(pageIndex) || pageIndex < 0 || !libraryId) {
+                return;
+            }
+            void insertLibraryComponentInEmbfFile(this._filePath, pageIndex, libraryId).then(res => {
+                if (res.ok) {
+                    this.reloadPreviewNow(pageIndex, { selectedComponentId: res.componentId });
+                    this.sendHistoryState();
+                }
+            });
+        } else if (msg.type === "removeLibraryEntry") {
+            const libraryId = String(msg.libraryId ?? "").trim();
+            if (!libraryId) {
+                return;
+            }
+            void removeLibraryEntryInEmbfFile(this._filePath, libraryId).then(ok => {
+                if (ok) {
+                    this.reloadPreviewNow(this._inspectorReloadPageIndex);
                     this.sendHistoryState();
                 }
             });
@@ -890,6 +933,9 @@ export class EmbfPreviewPanel {
             overflow: hidden;
             transition: width 0.15s ease;
         }
+        #sidebar-panel.panel-medium {
+            width: 116px;
+        }
         #sidebar-panel.wide {
             width: 168px;
         }
@@ -921,9 +967,62 @@ export class EmbfPreviewPanel {
         #sidebar-panel-components {
             display: flex;
             flex-direction: column;
-            align-items: center;
+            align-items: stretch;
             gap: 4px;
             padding: 8px 6px;
+        }
+        #sidebar-panel-components .palette-standard {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+        }
+        .palette-section-label {
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #888;
+            margin: 10px 2px 4px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+        .library-palette-list {
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 4px;
+            width: 100%;
+        }
+        .library-palette-empty {
+            font-size: 10px;
+            color: #777;
+            text-align: center;
+            line-height: 1.35;
+            padding: 4px 2px 8px;
+        }
+        #sidebar-panel-components .palette-item-library {
+            width: 100%;
+            height: auto;
+            min-height: 52px;
+            flex-direction: column;
+            gap: 4px;
+            padding: 6px 4px;
+            justify-content: center;
+        }
+        #sidebar-panel-components .palette-item-library svg {
+            flex-shrink: 0;
+            width: 32px;
+            height: 32px;
+        }
+        #sidebar-panel-components .palette-library-label {
+            font-size: 10px;
+            line-height: 1.2;
+            max-width: 100%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            pointer-events: none;
         }
         .page-sidebar-actions {
             display: flex;
@@ -1475,7 +1574,7 @@ export class EmbfPreviewPanel {
                 <div id="sidebar-panel">
                     <div id="sidebar-panel-header"><span id="sidebar-panel-title">Components</span></div>
                     <div id="sidebar-panel-body">
-                        ${buildSidebarPanelViewsHtml(buildWidgetPaletteHtml())}
+                        ${buildSidebarPanelViewsHtml(buildComponentsSidebarHtml())}
                     </div>
                 </div>
             </div>

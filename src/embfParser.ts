@@ -171,7 +171,42 @@ function validateEmbf(data: unknown): EmbfProject {
 
     validatePagesDeep(obj["pages"] as unknown[]);
 
+    const lib = obj["componentLibrary"];
+    if (lib !== undefined) {
+        if (!Array.isArray(lib)) {
+            throw new EmbfParseError("'componentLibrary' must be an array when present");
+        }
+        lib.forEach((entry, i) => validateLibraryEntryDeep(entry, `componentLibrary[${i}]`));
+    }
+
     return data as EmbfProject;
+}
+
+function validateLibraryEntryDeep(entry: unknown, path: string): void {
+    if (typeof entry !== "object" || entry === null) {
+        throw new EmbfParseError(`${path} must be an object`);
+    }
+    const o = entry as Record<string, unknown>;
+    if (typeof o["id"] !== "string" || !o["id"].trim()) {
+        throw new EmbfParseError(`${path}.id must be a non-empty string`);
+    }
+    if (typeof o["name"] !== "string" || !o["name"].trim()) {
+        throw new EmbfParseError(`${path}.name must be a non-empty string`);
+    }
+    for (const key of ["width", "height"] as const) {
+        if (!isFiniteNumber(o[key]) || o[key] < 1) {
+            throw new EmbfParseError(`${path}.${key} must be a positive number`);
+        }
+    }
+    const root = o["root"];
+    if (typeof root !== "object" || root === null) {
+        throw new EmbfParseError(`${path}.root must be an object`);
+    }
+    const rt = (root as Record<string, unknown>)["type"];
+    if (rt !== "container" && rt !== "panel") {
+        throw new EmbfParseError(`${path}.root.type must be container or panel`);
+    }
+    validateComponentDeep(root, `${path}.root`);
 }
 
 function isFiniteNumber(n: unknown): n is number {

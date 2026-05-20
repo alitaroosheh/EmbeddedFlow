@@ -27,6 +27,9 @@
  *   { type: "bulkDeleteWidgets", pageIndex: number, componentIds: string[] }
  *   { type: "combineWidgets", pageIndex: number, componentIds: string[] } — sibling widgets → one container
  *   { type: "ungroupWidget", pageIndex: number, componentId: string } — container/panel → children lifted to parent
+ *   { type: "saveGroupToLibrary", pageIndex: number, componentId: string }
+ *   { type: "insertLibraryComponent", pageIndex: number, libraryId: string }
+ *   { type: "removeLibraryEntry", libraryId: string }
  *   { type: "undo", pageIndex: number, selectedComponentIds?: string[] }
  *   { type: "redo", pageIndex: number, selectedComponentIds?: string[] }
  *
@@ -84,6 +87,7 @@ const SIDEBAR_PANEL_LABELS = {
     flow: "Flow"
 };
 const SIDEBAR_PANEL_WIDE = new Set(["pages", "flow"]);
+const SIDEBAR_PANEL_MEDIUM = "components";
 const flowKind = /** @type {HTMLSelectElement | null} */ (document.getElementById("flow-kind"));
 const flowFromPage = /** @type {HTMLSelectElement | null} */ (document.getElementById("flow-from-page"));
 const flowComponentFields = document.getElementById("flow-component-fields");
@@ -349,6 +353,7 @@ async function handleLoad(payload) {
             : currentPageIndex;
     populatePageSelect(pages);
     currentPageIndex = Math.min(Math.max(0, requestedPage), Math.max(0, pages.length - 1));
+    refreshLibraryPalette();
     renderPageList();
     populateFlowForm();
     renderFlowList();
@@ -675,6 +680,7 @@ function setSidebarCategory(categoryId, persist = true) {
     }
     if (sidebarPanel) {
         sidebarPanel.classList.toggle("wide", SIDEBAR_PANEL_WIDE.has(categoryId));
+        sidebarPanel.classList.toggle("panel-medium", categoryId === SIDEBAR_PANEL_MEDIUM);
     }
     if (categoryId === "pages") {
         renderPageList();
@@ -2229,6 +2235,38 @@ function multiInspectorLayoutActsHtml() {
     );
 }
 
+const LIBRARY_PALETTE_ICON =
+    `<svg viewBox="0 0 20 20" aria-hidden="true"><rect x="4" y="5" width="12" height="10" rx="1" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="2 2"/><rect x="7" y="8" width="6" height="4" rx="0.5" fill="currentColor" opacity="0.35"/></svg>`;
+
+function refreshLibraryPalette() {
+    const list = document.getElementById("library-palette-list");
+    if (!list) {
+        return;
+    }
+    const lib = currentProject?.componentLibrary;
+    if (!Array.isArray(lib) || lib.length === 0) {
+        list.innerHTML =
+            `<div class="library-palette-empty">Combine widgets, then use <strong>Save to library</strong> in the inspector.</div>`;
+        return;
+    }
+    list.innerHTML = lib
+        .map(e => {
+            const name = esc(String(e.name ?? e.id));
+            const id = esc(String(e.id));
+            const w = Number(e.width) || 0;
+            const h = Number(e.height) || 0;
+            const size = `${w}×${h}`;
+            return (
+                `<button type="button" class="palette-item palette-item-library" data-library="${id}" ` +
+                `title="${name} (${esc(size)})" aria-label="Insert ${name}">` +
+                LIBRARY_PALETTE_ICON +
+                `<span class="palette-library-label">${name}</span>` +
+                `</button>`
+            );
+        })
+        .join("");
+}
+
 function renderMultiInspectorHtml(ids) {
     const list = ids.map(esc).join(", ");
     return (
@@ -2295,6 +2333,18 @@ function applyLayoutAct(act) {
         }
         vscode.postMessage({
             type: "ungroupWidget",
+            pageIndex: currentPageIndex,
+            componentId: ids[0]
+        });
+        return;
+    }
+    if (act === "save-group-to-library") {
+        if (ids.length !== 1) {
+            log("warn", "Select a single container or panel to save to the library.");
+            return;
+        }
+        vscode.postMessage({
+            type: "saveGroupToLibrary",
             pageIndex: currentPageIndex,
             componentId: ids[0]
         });
@@ -3492,6 +3542,7 @@ function renderInspector() {
                 `<div class="inspector-group-title">Group</div>` +
                 `<div class="inspector-layout-grid">` +
                 layoutToolbarButton("ungroup-widget", "Ungroup") +
+                layoutToolbarButton("save-group-to-library", "Save to library") +
                 `</div>`;
         }
     }
@@ -4680,6 +4731,18 @@ if (sidebarPanelComponents) {
         if (!(t instanceof Element)) {
             return;
         }
+        const libBtn = t.closest("[data-library]");
+        if (libBtn && currentProject) {
+            const libraryId = libBtn.getAttribute("data-library");
+            if (libraryId) {
+                vscode.postMessage({
+                    type: "insertLibraryComponent",
+                    pageIndex: currentPageIndex,
+                    libraryId
+                });
+            }
+            return;
+        }
         const btn = t.closest("[data-widget]");
         if (!btn || !currentProject) {
             return;
@@ -4689,6 +4752,27 @@ if (sidebarPanelComponents) {
             return;
         }
         vscode.postMessage({ type: "addWidget", pageIndex: currentPageIndex, widgetType });
+    });
+    sidebarPanelComponents.addEventListener("contextmenu", e => {
+        const t = e.target;
+        if (!(t instanceof Element)) {
+            return;
+        }
+        const libBtn = t.closest("[data-library]");
+        if (!libBtn || !currentProject) {
+            return;
+        }
+        const libraryId = libBtn.getAttribute("data-library");
+        if (!libraryId) {
+            return;
+        }
+        e.preventDefault();
+        const entry = currentProject.componentLibrary?.find(x => x.id === libraryId);
+        const label = entry?.name ?? libraryId;
+        if (!confirm(`Remove "${label}" from My components?`)) {
+            return;
+        }
+        vscode.postMessage({ type: "removeLibraryEntry", libraryId });
     });
 }
 

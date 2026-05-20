@@ -21,7 +21,8 @@ export const SIDEBAR_CATEGORIES: SidebarCategory[] = [
         id: "components",
         label: "Components",
         title: "Add widgets to the current page",
-        iconSvg: ICON_COMPONENTS
+        iconSvg: ICON_COMPONENTS,
+        widePanel: true
     },
     {
         id: "pages",
@@ -49,12 +50,12 @@ ${c.iconSvg}
     ).join("\n");
 }
 
-export function buildSidebarPanelViewsHtml(widgetPaletteHtml: string): string {
+export function buildSidebarPanelViewsHtml(componentsPanelHtml: string): string {
     return SIDEBAR_CATEGORIES.map(c => {
         if (c.id === "components") {
             const hidden = c.id === DEFAULT_SIDEBAR_CATEGORY ? "" : " hidden";
             return `<div id="sidebar-panel-${c.id}" class="sidebar-panel-view" data-sidebar-panel="${c.id}" role="tabpanel"${hidden}>
-${widgetPaletteHtml}
+${componentsPanelHtml}
 </div>`;
         }
         if (c.id === "pages") {

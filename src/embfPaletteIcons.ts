@@ -24,6 +24,8 @@ export function widgetPaletteIconSvg(type: ComponentType): string {
     return ICONS[type];
 }
 
+const LIBRARY_GROUP_ICON = `<svg viewBox="0 0 20 20" aria-hidden="true"><rect x="4" y="5" width="12" height="10" rx="1" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="2 2"/><rect x="7" y="8" width="6" height="4" rx="0.5" fill="currentColor" opacity="0.35"/></svg>`;
+
 /** HTML for the vertical widget palette sidebar. */
 export function buildWidgetPaletteHtml(): string {
     return WIDGET_PALETTE_ORDER.map(
@@ -31,4 +33,26 @@ export function buildWidgetPaletteHtml(): string {
             ${widgetPaletteIconSvg(w)}
         </button>`
     ).join("\n");
+}
+
+/** Standard palette + empty My components list (filled by webview on load). */
+export function buildComponentsSidebarHtml(): string {
+    return (
+        `<div id="palette-standard" class="palette-standard">` +
+        buildWidgetPaletteHtml() +
+        `</div>` +
+        `<div class="palette-section-label" id="library-palette-label">My components</div>` +
+        `<div id="library-palette-list" class="library-palette-list" aria-label="Custom components"></div>`
+    );
+}
+
+export function libraryPaletteButtonHtml(entryId: string, displayName: string, sizeLabel: string): string {
+    const title = `${displayName} (${sizeLabel})`;
+    return (
+        `<button type="button" class="palette-item palette-item-library" data-library="${entryId}" ` +
+        `title="${title}" aria-label="Insert ${displayName}">` +
+        LIBRARY_GROUP_ICON +
+        `<span class="palette-library-label">${displayName}</span>` +
+        `</button>`
+    );
 }

@@ -75,17 +75,28 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
+      - name: Check VSCE_PAT secret
+        run: |
+          if [ -z "${{ secrets.VSCE_PAT }}" ]; then
+            echo "::error::Secret VSCE_PAT is not set."
+            echo "Add a Marketplace PAT (Manage scope) as repository secret VSCE_PAT."
+            echo "See docs/MARKETPLACE_RELEASE.md"
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Require tag on release branch
         run: |
-          git fetch origin release
-          if ! git merge-base --is-ancestor "${GITHUB_SHA}" "origin/release"; then
-            echo "::error::Tag ${GITHUB_REF_NAME} must point to a commit on branch 'release'."
+          git fetch --no-tags origin "refs/heads/release:refs/remotes/origin/release"
+          git rev-parse --verify refs/remotes/origin/release >/dev/null
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" "refs/remotes/origin/release"; then
+            echo "::error::Tag ${GITHUB_REF_NAME} (${GITHUB_SHA}) must point to a commit on branch 'release' (tip: $(git rev-parse refs/remotes/origin/release))."
             exit 1
           fi
+          echo "Tag is on release branch."
 
       - uses: actions/setup-node@v4
         with:
@@ -116,12 +127,7 @@ jobs:
       - name: Publish to VS Code Marketplace
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: |
-          if [ -z "$VSCE_PAT" ]; then
-            echo "::error::Secret VSCE_PAT is not set. Add a Marketplace PAT in repository secrets."
-            exit 1
-          fi
-          npx --yes @vscode/vsce@latest publish --no-dependencies -p "$VSCE_PAT"
+        run: npx --yes @vscode/vsce@latest publish --no-dependencies -p "$VSCE_PAT"
 
       - name: Package VSIX for GitHub Release
         run: npx --yes @vscode/vsce@latest package --no-dependencies

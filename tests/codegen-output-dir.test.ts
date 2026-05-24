@@ -20,6 +20,12 @@ describe("resolveCodegenOutputDir", () => {
         expect(resolveCodegenOutputDir(p, embfPath, "")).toBe(path.normalize("C:\\build\\ui_out"));
     });
 
+    it("uses project.outputPath when set (posix absolute)", () => {
+        const p = minimalProject();
+        p.project.outputPath = "/var/build/ui_out";
+        expect(resolveCodegenOutputDir(p, embfPath, "")).toBe(path.normalize("/var/build/ui_out"));
+    });
+
     it("falls back to workspace setting when outputPath omitted", () => {
         const p = minimalProject();
         expect(resolveCodegenOutputDir(p, embfPath, "out")).toBe(

@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { resolveCodegenOutputDir } from "./codeGen/outputDir";
 import { resolveImagesToConvert } from "./resources/collectImages";
-import { isSupportedImagePath, supportedImageExtensions } from "./resources/bitmapReader";
+import { isSupportedImagePath, supportedImageExtensions } from "./resources/imageFormats";
 import type { EmbfProject } from "./types/embf";
 
 export interface ImagePreviewAsset {

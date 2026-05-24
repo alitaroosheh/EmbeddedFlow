@@ -10,7 +10,7 @@ import { ensureCodegenOutputPath } from "./embfCodegenSetup";
 import { registerEmbeddedFlowOutput, embeddedFlowLog } from "./outputLog";
 import { resolveEmbfForPreview } from "./embfPreviewResolve";
 import { readEmbfText } from "./embfHistory";
-import { runNewProjectWizard } from "./embfNewProject";
+import { runCreateNewProjectFlow } from "./embfNewProject";
 
 // Map from .embf file path → file watcher
 const watchers = new Map<string, fs.FSWatcher>();
@@ -30,22 +30,20 @@ export function activate(context: vscode.ExtensionContext): void {
 
     context.subscriptions.push(embfDiagnostics);
 
-    // ── Command: Open Preview ─────────────────────────────────────────────────
+    // Register commands first — if later setup throws, palette commands still work.
+    const runNewProjectCmd = async () => {
+        await runCreateNewProjectFlow(filePath => {
+            if (shouldAutoOpenPreview()) {
+                openPreview(filePath, context.extensionUri);
+            }
+        });
+    };
     context.subscriptions.push(
         vscode.commands.registerCommand("embeddedflow.openPreview", async (uri?: vscode.Uri) => {
             await openPreviewResolved(context.extensionUri, uri);
-        })
-    );
-
-    // ── Command: New Project ──────────────────────────────────────────────────
-    context.subscriptions.push(
-        vscode.commands.registerCommand("embeddedflow.newProject", async () => {
-            await createNewProject(context.extensionUri);
-        })
-    );
-
-    // ── Command: Generate C Code ──────────────────────────────────────────────
-    context.subscriptions.push(
+        }),
+        vscode.commands.registerCommand("embeddedflow.newProject", runNewProjectCmd),
+        vscode.commands.registerCommand("embeddedflow.newproject", runNewProjectCmd),
         vscode.commands.registerCommand("embeddedflow.generateCode", async (uri?: vscode.Uri) => {
             const filePath = await resolveCodegenEmbfPath(uri);
             if (!filePath) {
@@ -55,10 +53,7 @@ export function activate(context: vscode.ExtensionContext): void {
                 return;
             }
             await runCodeGen(filePath);
-        })
-    );
-
-    context.subscriptions.push(
+        }),
         vscode.commands.registerCommand("embeddedflow.showOutput", () => {
             embfOutput.show(true);
         })
@@ -499,18 +494,3 @@ async function runCodeGen(filePath: string): Promise<void> {
     }
 }
 
-async function createNewProject(extensionUri: vscode.Uri): Promise<void> {
-    const filePath = await runNewProjectWizard();
-    if (!filePath) {
-        return;
-    }
-
-    const doc = await vscode.workspace.openTextDocument(filePath);
-    await vscode.window.showTextDocument(doc);
-    if (shouldAutoOpenPreview()) {
-        openPreview(filePath, extensionUri);
-    }
-    vscode.window.showInformationMessage(
-        `embeddedflow: created ${path.basename(filePath)}`
-    );
-}

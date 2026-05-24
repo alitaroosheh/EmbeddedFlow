@@ -112,3 +112,24 @@ export async function runNewProjectWizard(): Promise<string | undefined> {
 
     return filePath;
 }
+
+/**
+ * Run the wizard, open the new `.embf` in an editor, then optional hook (e.g. open preview).
+ */
+export async function runCreateNewProjectFlow(
+    onCreated?: (filePath: string) => void | Promise<void>
+): Promise<void> {
+    const filePath = await runNewProjectWizard();
+    if (!filePath) {
+        return;
+    }
+
+    const doc = await vscode.workspace.openTextDocument(filePath);
+    await vscode.window.showTextDocument(doc);
+    if (onCreated) {
+        await onCreated(filePath);
+    }
+    vscode.window.showInformationMessage(
+        `embeddedflow: created ${path.basename(filePath)}`
+    );
+}

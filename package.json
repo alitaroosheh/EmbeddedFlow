@@ -3,7 +3,7 @@
   "publisher": "erminity",
   "displayName": "embeddedflow (an LVGL Design tool)",
   "description": "Design embedded UIs in .embf projects — live LVGL preview, visual editor, and C code generation.",
-  "version": "0.3.0",
+  "version": "0.3.2",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -28,10 +28,12 @@
     "wasm"
   ],
   "activationEvents": [
+    "onStartupFinished",
     "onLanguage:embf",
     "workspaceContains:**/*.embf",
-    "onCommand:embeddedflow.openPreview",
     "onCommand:embeddedflow.newProject",
+    "onCommand:embeddedflow.newproject",
+    "onCommand:embeddedflow.openPreview",
     "onCommand:embeddedflow.generateCode",
     "onCommand:embeddedflow.showOutput"
   ],
@@ -63,6 +65,11 @@
       },
       {
         "command": "embeddedflow.newProject",
+        "title": "embeddedflow: New Project",
+        "icon": "$(new-file)"
+      },
+      {
+        "command": "embeddedflow.newproject",
         "title": "embeddedflow: New Project",
         "icon": "$(new-file)"
       },
@@ -186,6 +193,7 @@
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
+    "package": "vsce package",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "test": "vitest run",

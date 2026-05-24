@@ -3,19 +3,11 @@ import * as path from "path";
 import jpeg from "jpeg-js";
 import { readBmpFile } from "./bmpReader";
 import { readPngFile, type RgbaBitmap } from "./pngReader";
+import { isSupportedImagePath, supportedImageExtensions } from "./imageFormats";
 
 export type { RgbaBitmap } from "./pngReader";
 export { bitmapHasAlpha } from "./pngReader";
-
-const SUPPORTED = new Set([".png", ".jpg", ".jpeg", ".bmp"]);
-
-export function isSupportedImagePath(filePath: string): boolean {
-    return SUPPORTED.has(path.extname(filePath).toLowerCase());
-}
-
-export function supportedImageExtensions(): string[] {
-    return [".png", ".jpg", ".jpeg", ".bmp"];
-}
+export { isSupportedImagePath, supportedImageExtensions };
 
 function readJpegFile(filePath: string): RgbaBitmap {
     const raw = fs.readFileSync(filePath);

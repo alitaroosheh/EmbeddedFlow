@@ -4,7 +4,6 @@ src/**
 tests/**
 wiki/**
 wasm-src/**
-node_modules/**
 .git/**
 **/*.map
 **/*.ts

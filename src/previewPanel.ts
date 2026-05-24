@@ -22,8 +22,9 @@ import {
 } from "./embfComponentLibraryEdit";
 import { assignImageFileToWidgetInEmbfFile } from "./embfImageEdit";
 import { buildImagePreviewAssets } from "./embfImagePreview";
-import { supportedImageExtensions } from "./resources";
+import { supportedImageExtensions } from "./resources/imageFormats";
 import { readEmbfProject } from "./embfProjectWrite";
+import { runCreateNewProjectFlow } from "./embfNewProject";
 import { formatOutputPathForStorage, resolveCodegenOutputDir } from "./codeGen/outputDir";
 import { undoEmbfEdit, redoEmbfEdit, getEmbfHistoryState } from "./embfUndoRedo";
 import { appendWidgetToEmbfFile } from "./embfWidgetInsert";
@@ -342,6 +343,18 @@ export class EmbfPreviewPanel {
         this._panel.title = `Preview: ${fileName}`;
     }
 
+    private async _runNewProjectFromPreview(): Promise<void> {
+        await runCreateNewProjectFlow(async filePath => {
+            const panel = EmbfPreviewPanel.createOrShow(filePath, this._extensionUri);
+            try {
+                panel.sendProject(readEmbfProject(filePath));
+            } catch (e) {
+                const m = e instanceof EmbfParseError ? e.message : String(e);
+                panel.sendError(m);
+            }
+        });
+    }
+
     private _onWebviewMessage(msg: WebviewToHostMessage): void {
         if (msg.type === "generateCode") {
             void vscode.commands.executeCommand(
@@ -349,7 +362,7 @@ export class EmbfPreviewPanel {
                 vscode.Uri.file(this._filePath)
             );
         } else if (msg.type === "newProject") {
-            void vscode.commands.executeCommand("embeddedflow.newProject");
+            void this._runNewProjectFromPreview();
         } else if (msg.type === "log") {
             embeddedFlowLog("webview", msg.level, msg.text);
         } else if (msg.type === "ready") {

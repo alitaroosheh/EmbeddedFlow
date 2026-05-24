@@ -1047,6 +1047,46 @@ function collectIdsOnProject(project: EmbfProject): Set<string> {
 }
 
 /** Insert cloned subtrees at page root (paste); returns new ids. */
+export type ZOrderAction = "front" | "back" | "forward" | "backward";
+
+/** Change draw order within the parent’s `children` / page root list (LVGL later siblings on top). */
+export function reorderComponentZOrderOnPage(
+    page: Page,
+    componentId: string,
+    action: ZOrderAction
+): boolean {
+    const id = componentId.trim();
+    if (!id) {
+        return false;
+    }
+    const loc = locateParentEntry(page.components, id, 0, 0);
+    if (!loc) {
+        return false;
+    }
+    const { list, index } = loc;
+    const [comp] = list.splice(index, 1);
+    if (!comp) {
+        return false;
+    }
+    let insertAt = index;
+    switch (action) {
+        case "front":
+            insertAt = list.length;
+            break;
+        case "back":
+            insertAt = 0;
+            break;
+        case "forward":
+            insertAt = Math.min(index + 1, list.length);
+            break;
+        case "backward":
+            insertAt = Math.max(0, index - 1);
+            break;
+    }
+    list.splice(insertAt, 0, comp);
+    return true;
+}
+
 export function pasteComponentsOnPage(
     page: Page,
     project: EmbfProject,

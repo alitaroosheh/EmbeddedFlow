@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.5
+
+- Marketplace keywords: LVGL, UI, ESP32, STM32, Embedded.
+- Design editor: palette drag-drop, search, resize handles, grid snap, widget tree, z-order, copy/paste, Alt+duplicate.
+- Preview: theme toggle, bezel, FPS, page fade in run mode; Settings sidebar.
+- Codegen outputs only `.c` / `.h` (no CMake or platform manifests).
+- New project display presets; parser accepts missing `version` as 1.0.
+
 ## 0.3.4
 
 - Expanded README with full feature documentation and recent-release summary.

@@ -17,7 +17,8 @@ export { buildNewComponent, collectAllComponentIds } from "./embfWidgetFactory";
 export async function appendWidgetToEmbfFile(
     filePath: string,
     pageIndex: number,
-    widgetType: string
+    widgetType: string,
+    at?: { x?: number; y?: number }
 ): Promise<boolean> {
     const t = widgetType.trim().toLowerCase();
     if (!isPaletteWidgetType(t)) {
@@ -42,6 +43,16 @@ export async function appendWidgetToEmbfFile(
     const next = cloneEmbfProject(project);
     const page = next.pages[pageIndex];
     const comp = buildNewComponent(next, page, t);
+    if (at) {
+        const ax = at.x;
+        const ay = at.y;
+        if (typeof ax === "number" && Number.isFinite(ax)) {
+            comp.x = Math.max(0, Math.round(ax));
+        }
+        if (typeof ay === "number" && Number.isFinite(ay)) {
+            comp.y = Math.max(0, Math.round(ay));
+        }
+    }
     page.components.push(comp);
 
     const ok = await writeEmbfProject(filePath, next);

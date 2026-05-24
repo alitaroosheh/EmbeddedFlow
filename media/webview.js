@@ -85,6 +85,20 @@ const toolbarWidgetSelect = /** @type {HTMLSelectElement | null} */ (
 const designGridCheck = /** @type {HTMLInputElement | null} */ (document.getElementById("design-grid"));
 const btnThemeToggle = document.getElementById("btn-theme-toggle");
 const widgetTreeEl = document.getElementById("widget-tree");
+const paletteSearch = /** @type {HTMLInputElement | null} */ (document.getElementById("palette-search"));
+const previewBezelCheck = /** @type {HTMLInputElement | null} */ (document.getElementById("preview-bezel"));
+const fpsLabel = document.getElementById("fps-label");
+const insertWidgetPicker = document.getElementById("insert-widget-picker");
+const btnOpenProjectSettings = document.getElementById("btn-open-project-settings");
+
+const PALETTE_DRAG_MIME = "application/x-embeddedflow-widget";
+
+/** @type {number} */
+let fpsAccumMs = 0;
+/** @type {number} */
+let fpsFrameCount = 0;
+/** @type {number} */
+let fpsLastTs = 0;
 const displayWrapper = document.getElementById("display-wrapper");
 const imagePreviewLayer = document.getElementById("image-preview-layer");
 const toolbarShell = document.getElementById("toolbar-shell");
@@ -99,7 +113,7 @@ const SIDEBAR_PANEL_LABELS = {
     pages: "Pages",
     flow: "Flow"
 };
-const SIDEBAR_PANEL_WIDE = new Set(["pages", "flow"]);
+const SIDEBAR_PANEL_WIDE = new Set(["pages", "flow", "settings", "hierarchy"]);
 const SIDEBAR_PANEL_MEDIUM = "components";
 const flowKind = /** @type {HTMLSelectElement | null} */ (document.getElementById("flow-kind"));
 const flowFromPage = /** @type {HTMLSelectElement | null} */ (document.getElementById("flow-from-page"));
@@ -377,6 +391,7 @@ async function handleLoad(payload) {
     codegenOutputResolved =
         typeof payload.codegenOutputResolved === "string" ? payload.codegenOutputResolved : "";
     displayRound = !!(currentProject?.display && currentProject.display.round === true);
+    syncPreviewBezel();
     previewDarkOverride = null;
     displayWidth = payload.displayWidth;
     displayHeight = payload.displayHeight;
@@ -1318,6 +1333,7 @@ function loop() {
 
         // Drain the LVGL event queue and dispatch actions
         drainEventQueue();
+        updateFpsCounter();
 
         // Read pixel buffer and blit to canvas
         let bufAddr = 0;
@@ -2731,6 +2747,145 @@ function layoutToolbarButton(act, label) {
     return `<button type="button" class="layout-act-btn tb-btn-small" data-layout-act="${esc(act)}">${esc(label)}</button>`;
 }
 
+function zOrderInspectorHtml() {
+    return (
+        `<div class="inspector-group-title">Draw order</div>` +
+        `<div class="inspector-layout-grid">` +
+        layoutToolbarButton("z-back", "To back") +
+        layoutToolbarButton("z-backward", "Backward") +
+        layoutToolbarButton("z-forward", "Forward") +
+        layoutToolbarButton("z-front", "To front") +
+        `</div>`
+    );
+}
+
+function updateFpsCounter() {
+    const now = performance.now();
+    if (!fpsLastTs) {
+        fpsLastTs = now;
+    }
+    const dt = now - fpsLastTs;
+    fpsLastTs = now;
+    fpsAccumMs += dt;
+    fpsFrameCount += 1;
+    if (fpsAccumMs >= 400 && fpsLabel) {
+        const fps = Math.round((1000 * fpsFrameCount) / fpsAccumMs);
+        fpsLabel.textContent = `${fps} FPS`;
+        fpsAccumMs = 0;
+        fpsFrameCount = 0;
+    }
+}
+
+function syncPreviewBezel() {
+    if (!canvasContainer || !displayWrapper) {
+        return;
+    }
+    const on = !!(previewBezelCheck && previewBezelCheck.checked);
+    canvasContainer.classList.toggle("show-bezel", on);
+    if (displayRound) {
+        displayWrapper.classList.toggle("round-bezel", on);
+    }
+}
+
+const INSERT_WIDGET_TYPES = [
+    "label",
+    "button",
+    "slider",
+    "switch",
+    "bar",
+    "arc",
+    "checkbox",
+    "dropdown",
+    "roller",
+    "textarea",
+    "line",
+    "image",
+    "container",
+    "panel",
+    "spinner"
+];
+
+function ensureInsertWidgetPickerPopulated() {
+    if (!insertWidgetPicker || insertWidgetPicker.dataset.populated) {
+        return;
+    }
+    insertWidgetPicker.dataset.populated = "1";
+    insertWidgetPicker.innerHTML = "";
+    for (const t of INSERT_WIDGET_TYPES) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "picker-item";
+        btn.textContent = t;
+        btn.dataset.widget = t;
+        btn.addEventListener("click", () => {
+            const ox = Number(insertWidgetPicker.dataset.ox);
+            const oy = Number(insertWidgetPicker.dataset.oy);
+            hideInsertWidgetPicker();
+            vscode.postMessage({
+                type: "addWidget",
+                pageIndex: currentPageIndex,
+                widgetType: t,
+                x: Number.isFinite(ox) ? ox : undefined,
+                y: Number.isFinite(oy) ? oy : undefined
+            });
+        });
+        insertWidgetPicker.appendChild(btn);
+    }
+}
+
+/** @param {number} px @param {number} py */
+function showInsertWidgetPicker(px, py) {
+    if (!insertWidgetPicker || !canvasContainer) {
+        return;
+    }
+    ensureInsertWidgetPickerPopulated();
+    insertWidgetPicker.dataset.ox = String(px);
+    insertWidgetPicker.dataset.oy = String(py);
+    const cr = canvasContainer.getBoundingClientRect();
+    const z = previewZoom;
+    insertWidgetPicker.style.left = `${Math.max(0, px * z)}px`;
+    insertWidgetPicker.style.top = `${Math.max(0, py * z)}px`;
+    insertWidgetPicker.classList.add("open");
+    insertWidgetPicker.hidden = false;
+}
+
+function hideInsertWidgetPicker() {
+    if (!insertWidgetPicker) {
+        return;
+    }
+    insertWidgetPicker.classList.remove("open");
+    insertWidgetPicker.hidden = true;
+}
+
+function filterPaletteSearch() {
+    if (!paletteSearch) {
+        return;
+    }
+    const q = paletteSearch.value.trim().toLowerCase();
+    const root = document.getElementById("palette-standard");
+    if (!root) {
+        return;
+    }
+    for (const btn of root.querySelectorAll("[data-widget]")) {
+        if (!(btn instanceof HTMLElement)) {
+            continue;
+        }
+        const w = btn.getAttribute("data-widget") ?? "";
+        const hide = q.length > 0 && !w.includes(q);
+        btn.classList.toggle("palette-hidden", hide);
+    }
+}
+
+function postAddWidgetAt(widgetType, x, y) {
+    vscode.postMessage({
+        type: "addWidget",
+        pageIndex: currentPageIndex,
+        widgetType,
+        x: Math.max(0, Math.round(x)),
+        y: Math.max(0, Math.round(y))
+    });
+}
+
 function multiInspectorLayoutActsHtml() {
     return (
         `<div class="inspector-group-title">Align together</div>` +
@@ -2884,6 +3039,25 @@ function applyLayoutAct(act) {
     }
     if (act === "exit-group-edit") {
         exitGroupEditMode(true);
+        return;
+    }
+    if (act === "z-front" || act === "z-back" || act === "z-forward" || act === "z-backward") {
+        if (ids.length !== 1) {
+            log("warn", "Select one widget to change draw order.");
+            return;
+        }
+        const map = {
+            "z-front": "front",
+            "z-back": "back",
+            "z-forward": "forward",
+            "z-backward": "backward"
+        };
+        vscode.postMessage({
+            type: "reorderWidget",
+            pageIndex: currentPageIndex,
+            componentId: ids[0],
+            action: map[act]
+        });
         return;
     }
     if (act === "save-group-to-library") {
@@ -4322,6 +4496,7 @@ function renderInspector() {
         height: comp.height,
         hidden: !!comp.hidden
     });
+    html += zOrderInspectorHtml();
     {
         const ch = comp.children;
         if (
@@ -5105,6 +5280,23 @@ function setupDesignOverlay() {
             }
         }
 
+        if (e.altKey && e.detail < 2) {
+            const hitAlt = hitTestAt(page, x, y);
+            if (hitAlt) {
+                const altId = groupEditContainerId
+                    ? hitAlt.comp.id
+                    : unitedSelectionId(page.components, hitAlt.comp.id);
+                vscode.postMessage({
+                    type: "duplicateWidgets",
+                    pageIndex: currentPageIndex,
+                    componentIds: [altId]
+                });
+                releaseCap();
+                e.preventDefault();
+                return;
+            }
+        }
+
         let hit = hitTestAt(page, x, y);
 
         if (
@@ -5140,6 +5332,12 @@ function setupDesignOverlay() {
         }
 
         if (!hit) {
+            if (e.detail >= 2) {
+                showInsertWidgetPicker(x, y);
+                releaseCap();
+                e.preventDefault();
+                return;
+            }
             marqueeState = {
                 ox: x,
                 oy: y,
@@ -5437,6 +5635,29 @@ function setupDesignOverlay() {
         e.preventDefault();
     });
 
+    designOverlay.addEventListener("dragover", e => {
+        if (!designMode) {
+            return;
+        }
+        if (e.dataTransfer?.types.includes(PALETTE_DRAG_MIME)) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "copy";
+        }
+    });
+    designOverlay.addEventListener("drop", e => {
+        if (!designMode || !currentProject) {
+            return;
+        }
+        const widgetType = e.dataTransfer?.getData(PALETTE_DRAG_MIME);
+        if (!widgetType) {
+            return;
+        }
+        e.preventDefault();
+        const { x, y } = overlayCoords(e);
+        hideInsertWidgetPicker();
+        postAddWidgetAt(widgetType, x, y);
+    });
+
     designOverlay.addEventListener("pointercancel", e => {
         dragState = null;
         pendingDrag = null;
@@ -5626,7 +5847,14 @@ function navigateToPageIndex(idx) {
     dragState = null;
     pendingDrag = null;
     marqueeState = null;
-    buildUiFromProject(currentProject, next);
+    resizeState = null;
+    hideInsertWidgetPicker();
+    if (wasmReady && WasmModule) {
+        const navOpts = designMode ? undefined : { anim: "fade_in", time: 220 };
+        switchToPage(currentProject, next, navOpts);
+    } else {
+        buildUiFromProject(currentProject, next);
+    }
     syncImagePreviewOverlays();
     drawDesignOverlay();
     renderInspector();
@@ -5849,7 +6077,50 @@ if (toolbarWidgetSelect) {
     });
 }
 
+if (paletteSearch) {
+    paletteSearch.addEventListener("input", () => filterPaletteSearch());
+}
+
+if (previewBezelCheck) {
+    previewBezelCheck.addEventListener("change", () => syncPreviewBezel());
+}
+
+if (btnOpenProjectSettings) {
+    btnOpenProjectSettings.addEventListener("click", () => {
+        selectPageInspector();
+        if (propertyInspector?.classList.contains("collapsed") && btnToggleInspector) {
+            propertyInspector.classList.remove("collapsed");
+            btnToggleInspector.setAttribute("aria-expanded", "true");
+        }
+    });
+}
+
+document.addEventListener("click", e => {
+    if (!(e.target instanceof Element) || !insertWidgetPicker?.classList.contains("open")) {
+        return;
+    }
+    if (!e.target.closest("#insert-widget-picker")) {
+        hideInsertWidgetPicker();
+    }
+});
+
 if (sidebarPanelComponents) {
+    sidebarPanelComponents.addEventListener("dragstart", e => {
+        const t = e.target;
+        if (!(t instanceof Element)) {
+            return;
+        }
+        const btn = t.closest("[data-widget]");
+        if (!btn || !(btn instanceof HTMLElement)) {
+            return;
+        }
+        const widgetType = btn.getAttribute("data-widget");
+        if (!widgetType || !e.dataTransfer) {
+            return;
+        }
+        e.dataTransfer.setData(PALETTE_DRAG_MIME, widgetType);
+        e.dataTransfer.effectAllowed = "copy";
+    });
     sidebarPanelComponents.addEventListener("click", e => {
         const t = e.target;
         if (!(t instanceof Element)) {

@@ -12,7 +12,9 @@ import {
     bulkDeleteComponentsOnPage,
     duplicateComponentsOnPage,
     pasteComponentsOnPage,
-    ungroupContainerOnPage
+    reorderComponentZOrderOnPage,
+    ungroupContainerOnPage,
+    type ZOrderAction
 } from "./embfComponentModel";
 import { cloneEmbfProject } from "./embfWidgetFactory";
 import { embeddedFlowLog } from "./outputLog";
@@ -211,6 +213,28 @@ export async function duplicateWidgetsInEmbfFile(
         );
     }
     return ok ? newIds : [];
+}
+
+export async function reorderWidgetInEmbfFile(
+    filePath: string,
+    pageIndex: number,
+    componentId: string,
+    action: ZOrderAction
+): Promise<boolean> {
+    const id = componentId.trim();
+    if (!id) {
+        return false;
+    }
+    const ok = await persistPageEdit(
+        filePath,
+        pageIndex,
+        page => reorderComponentZOrderOnPage(page, id, action),
+        () => vscode.window.showErrorMessage(`EmbeddedFlow: component "${id}" not found on this page.`)
+    );
+    if (ok) {
+        embeddedFlowLog("widgets", "info", `z-order ${action} "${id}" (${path.basename(filePath)})`);
+    }
+    return ok;
 }
 
 export async function pasteWidgetsInEmbfFile(

@@ -13,6 +13,7 @@ import {
     duplicateWidgetsInEmbfFile,
     moveWidgetInEmbfFile,
     pasteWidgetsInEmbfFile,
+    reorderWidgetInEmbfFile,
     ungroupWidgetInEmbfFile,
     updatePageInEmbfFile,
     updateWidgetInEmbfFile
@@ -45,7 +46,19 @@ export type HostToWebviewMessage =
 export type WebviewToHostMessage =
     | { type: "ready" }
     | { type: "log"; level: "info" | "warn" | "error"; text: string }
-    | { type: "addWidget"; pageIndex: number; widgetType: string }
+    | {
+          type: "addWidget";
+          pageIndex: number;
+          widgetType: string;
+          x?: number;
+          y?: number;
+      }
+    | {
+          type: "reorderWidget";
+          pageIndex: number;
+          componentId: string;
+          action: "front" | "back" | "forward" | "backward";
+      }
     | { type: "moveWidget"; pageIndex: number; componentId: string; x: number; y: number }
     | {
           type: "bulkMoveWidgets";
@@ -412,12 +425,38 @@ export class EmbfPreviewPanel {
             if (!Number.isInteger(pageIndex) || pageIndex < 0 || !widgetType) {
                 return;
             }
-            void appendWidgetToEmbfFile(this._filePath, pageIndex, widgetType).then(ok => {
+            const x = Number(msg.x);
+            const y = Number(msg.y);
+            const at =
+                Number.isFinite(x) && Number.isFinite(y)
+                    ? { x, y }
+                    : undefined;
+            void appendWidgetToEmbfFile(this._filePath, pageIndex, widgetType, at).then(ok => {
                 if (ok) {
                     this.reloadPreviewNow(pageIndex);
                     this.sendHistoryState();
                 }
             });
+        } else if (msg.type === "reorderWidget") {
+            const pageIndex = Number(msg.pageIndex);
+            const componentId = String(msg.componentId ?? "").trim();
+            const action = msg.action;
+            if (
+                !Number.isInteger(pageIndex) ||
+                pageIndex < 0 ||
+                !componentId ||
+                !["front", "back", "forward", "backward"].includes(action)
+            ) {
+                return;
+            }
+            void reorderWidgetInEmbfFile(this._filePath, pageIndex, componentId, action).then(
+                ok => {
+                    if (ok) {
+                        this.reloadPreviewNow(pageIndex, { selectedComponentIds: [componentId] });
+                        this.sendHistoryState();
+                    }
+                }
+            );
         } else if (msg.type === "moveWidget") {
             const pageIndex = Number(msg.pageIndex);
             const componentId = String(msg.componentId ?? "").trim();
@@ -1447,6 +1486,79 @@ export class EmbfPreviewPanel {
             height: 20px;
             pointer-events: none;
         }
+        .palette-search {
+            width: 100%;
+            margin: 6px 0 8px;
+            padding: 5px 8px;
+            font-size: 12px;
+            background: #2d2d2d;
+            color: #ddd;
+            border: 1px solid #555;
+            border-radius: 3px;
+            box-sizing: border-box;
+        }
+        .palette-item.palette-hidden {
+            display: none;
+        }
+        .settings-panel-hint {
+            font-size: 12px;
+            color: #aaa;
+            line-height: 1.45;
+            margin: 8px 10px 12px;
+        }
+        .settings-panel-hint code {
+            color: #9cdcfe;
+        }
+        #sidebar-panel-settings .tb-btn-small {
+            margin: 0 10px 12px;
+        }
+        #canvas-container.show-bezel {
+            padding: 16px;
+        }
+        #canvas-container.show-bezel #display-wrapper {
+            box-shadow:
+                0 0 0 10px #252526,
+                0 0 0 12px #3c3c3c,
+                0 12px 32px rgba(0, 0, 0, 0.45);
+            border-radius: 6px;
+        }
+        #insert-widget-picker {
+            display: none;
+            position: absolute;
+            z-index: 30;
+            background: #252526;
+            border: 1px solid #555;
+            border-radius: 4px;
+            padding: 6px;
+            max-width: 200px;
+            max-height: 240px;
+            overflow: auto;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+        }
+        #insert-widget-picker.open {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 4px;
+        }
+        #insert-widget-picker .picker-item {
+            padding: 6px;
+            border: none;
+            background: #333;
+            color: #ccc;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 10px;
+        }
+        #insert-widget-picker .picker-item:hover {
+            background: #094771;
+            color: #fff;
+        }
+        #fps-label {
+            font-size: 11px;
+            color: #888;
+            min-width: 52px;
+            text-align: right;
+        }
         #property-inspector {
             flex: 0 0 220px;
             width: 220px;
@@ -1930,6 +2042,11 @@ export class EmbfPreviewPanel {
         </select>
         <label for="toolbar-widget-select">Widget:</label>
         <select id="toolbar-widget-select" title="Select a widget on the current page"></select>
+        <label title="Frame around the display in preview only">
+            <input type="checkbox" id="preview-bezel" />
+            Bezel
+        </label>
+        <span id="fps-label" title="Preview frame rate">— FPS</span>
         <span id="status">Waiting for project…</span>
         </div>
     </div>
@@ -1951,6 +2068,7 @@ export class EmbfPreviewPanel {
             </div>
         </aside>
         <div id="canvas-container">
+        <div id="insert-widget-picker" role="menu" aria-label="Insert widget" hidden></div>
         <div id="display-wrapper">
             <canvas id="lvgl-canvas"></canvas>
             <div id="image-preview-layer" aria-hidden="true"></div>

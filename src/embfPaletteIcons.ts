@@ -29,15 +29,17 @@ const LIBRARY_GROUP_ICON = `<svg viewBox="0 0 20 20" aria-hidden="true"><rect x=
 /** HTML for the vertical widget palette sidebar. */
 export function buildWidgetPaletteHtml(): string {
     return WIDGET_PALETTE_ORDER.map(
-        w => `<button type="button" class="palette-item" data-widget="${w}" title="${w}" aria-label="Add ${w}">
-            ${widgetPaletteIconSvg(w)}
-        </button>`
+        w =>
+            `<button type="button" class="palette-item" draggable="true" data-widget="${w}" title="${w} (drag onto canvas)" aria-label="Add ${w}">` +
+            widgetPaletteIconSvg(w) +
+            `</button>`
     ).join("\n");
 }
 
 /** Standard palette + empty My components list (filled by webview on load). */
 export function buildComponentsSidebarHtml(): string {
     return (
+        `<input type="search" id="palette-search" class="palette-search" placeholder="Search widgets…" autocomplete="off" spellcheck="false" />` +
         `<div id="palette-standard" class="palette-standard">` +
         buildWidgetPaletteHtml() +
         `</div>` +

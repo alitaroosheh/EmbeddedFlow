@@ -74,8 +74,12 @@ function validateEmbf(data: unknown): EmbfProject {
 
     const obj = data as Record<string, unknown>;
 
-    if (obj["version"] !== "1.0") {
-        throw new EmbfParseError(`Unsupported version "${obj["version"]}". Expected "1.0"`);
+    if (obj["version"] === undefined || obj["version"] === null) {
+        obj["version"] = "1.0";
+    } else if (obj["version"] !== "1.0") {
+        throw new EmbfParseError(
+            `Unsupported version "${obj["version"]}". Expected "1.0". Open the file in a text editor and set "version": "1.0", or wait for a future migration.`
+        );
     }
 
     const project = obj["project"];

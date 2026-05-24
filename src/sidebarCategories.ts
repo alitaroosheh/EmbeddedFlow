@@ -18,6 +18,8 @@ const ICON_FLOW = `<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="5" cy
 
 const ICON_TREE = `<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4h4v4H4V4zm0 6h4v4H4v-4zm8-6h4v4h-4V4zm0 6h4v4h-4v-4z" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>`;
 
+const ICON_SETTINGS = `<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="2.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M10 2v2M10 16v2M2 10h2M16 10h2M4.2 4.2l1.4 1.4M14.4 14.4l1.4 1.4M4.2 15.8l1.4-1.4M14.4 5.6l1.4-1.4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>`;
+
 export const SIDEBAR_CATEGORIES: SidebarCategory[] = [
     {
         id: "components",
@@ -38,6 +40,13 @@ export const SIDEBAR_CATEGORIES: SidebarCategory[] = [
         label: "Tree",
         title: "Widget hierarchy on the current page",
         iconSvg: ICON_TREE,
+        widePanel: true
+    },
+    {
+        id: "settings",
+        label: "Settings",
+        title: "Project, display, and codegen settings",
+        iconSvg: ICON_SETTINGS,
         widePanel: true
     },
     {
@@ -80,6 +89,12 @@ ${componentsPanelHtml}
 <button type="button" class="tb-btn-small" id="btn-page-rename" title="Rename selected page">Rename</button>
 </div>
 <ul id="page-list" class="page-list" aria-label="Project pages"></ul>
+</div>`;
+        }
+        if (c.id === "settings") {
+            return `<div id="sidebar-panel-${c.id}" class="sidebar-panel-view sidebar-panel-view-settings" data-sidebar-panel="${c.id}" role="tabpanel" hidden>
+<p class="settings-panel-hint">Edit project name, LVGL version, display size, theme, and codegen output. Changes apply to the whole <code>.embf</code> file.</p>
+<button type="button" class="tb-btn-small" id="btn-open-project-settings">Open in Properties panel</button>
 </div>`;
         }
         if (c.id === "flow") {

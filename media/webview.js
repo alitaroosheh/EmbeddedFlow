@@ -36,7 +36,8 @@
  *
  * Design overlay UX: rubber-band marquee on empty-canvas drag (replace selection; Shift = union;
  * Ctrl/Cmd = toggle hits vs selection). Movement below threshold: plain ⇒ page inspector; with modifiers ⇒ noop.
- * Double-click a widget: select the deepest widget at that point (drill into groups).
+ * Grouped widgets (container/panel with children): single click selects the whole group; double-click or
+ * inspector “Edit contents” enters group-edit mode to select/move children independently (Esc or Done to exit).
  */
 
 // ── VSCode API ────────────────────────────────────────────────────────────────
@@ -222,6 +223,10 @@ let designMode = true;
 /** Multi-select order (last clicked is “primary” for single-widget inspector). */
 /** @type {string[]} */
 let selectedComponentOrder = [];
+
+/** When set, design overlay edits children inside this container/panel (Esc / Done to exit). */
+/** @type {string | null} */
+let groupEditContainerId = null;
 
 /** When true, inspector edits the active page / project theme instead of a widget. */
 let inspectorShowingPage = false;
@@ -1966,6 +1971,18 @@ function drawDesignOverlay() {
         }
     }
 
+    if (groupEditContainerId) {
+        const gb = getAbsBounds(page, groupEditContainerId);
+        if (gb) {
+            designCtx.save();
+            designCtx.strokeStyle = "rgba(255, 160, 0, 0.92)";
+            designCtx.lineWidth = 2;
+            designCtx.setLineDash([6, 4]);
+            designCtx.strokeRect(gb.x + 0.5, gb.y + 0.5, gb.width, gb.height);
+            designCtx.restore();
+        }
+    }
+
     if (marqueeState) {
         const norm = normalizedMarqueeRect(marqueeState);
         if (norm.w > 0 || norm.h > 0) {
@@ -2007,6 +2024,129 @@ function findComponentById(components, id) {
         }
     }
     return null;
+}
+
+/** @param {object | null | undefined} c */
+function isGroupComponent(c) {
+    return (
+        !!c &&
+        (c.type === "container" || c.type === "panel") &&
+        Array.isArray(c.children) &&
+        c.children.length > 0
+    );
+}
+
+/** Innermost container/panel that owns `targetId`, or the group id if `targetId` is the group. */
+/** @param {object[]} components */
+function findEnclosingGroupId(components, targetId) {
+    /** @type {string | null} */
+    let result = null;
+    /** @param {object[]} comps @param {string | null} parentGroupId */
+    function walk(comps, parentGroupId) {
+        for (const c of comps ?? []) {
+            if (c.id === targetId) {
+                result = isGroupComponent(c) ? c.id : parentGroupId;
+                return true;
+            }
+            if (c.children?.length) {
+                const pg = isGroupComponent(c) ? c.id : parentGroupId;
+                if (walk(c.children, pg)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+    walk(components, null);
+    return result;
+}
+
+/** @param {object[]} components */
+function isDescendantOf(components, descendantId, ancestorId) {
+    if (descendantId === ancestorId) {
+        return true;
+    }
+    const ancestor = findComponentById(components, ancestorId);
+    if (!ancestor?.children?.length) {
+        return false;
+    }
+    /** @param {object[]} comps */
+    function walk(comps) {
+        for (const c of comps ?? []) {
+            if (c.id === descendantId) {
+                return true;
+            }
+            if (c.children?.length && walk(c.children)) {
+                return true;
+            }
+        }
+        return false;
+    }
+    return walk(ancestor.children);
+}
+
+/** Page-level selection: whole group when not in group-edit mode. */
+/** @param {object[]} components */
+function unitedSelectionId(components, componentId) {
+    return findEnclosingGroupId(components, componentId) ?? componentId;
+}
+
+/** @param {object[]} components @param {string[]} ids */
+function collapseToUnitedSelection(components, ids) {
+    /** @type {string[]} */
+    const out = [];
+    const seen = new Set();
+    for (const id of ids) {
+        const u = unitedSelectionId(components, id);
+        if (!seen.has(u)) {
+            seen.add(u);
+            out.push(u);
+        }
+    }
+    return out;
+}
+
+function groupEditBannerHtml() {
+    if (!groupEditContainerId || !currentProject) {
+        return "";
+    }
+    const page = currentProject.pages[currentPageIndex];
+    const g = page ? findComponentById(page.components, groupEditContainerId) : null;
+    const label = g?.id ?? groupEditContainerId;
+    return (
+        `<div class="inspector-group-edit-banner" style="margin:0 0 12px;padding:8px 10px;background:rgba(255,160,0,0.12);border:1px solid rgba(255,160,0,0.45);border-radius:4px;font-size:12px;line-height:1.4">` +
+        `Editing group <strong>${esc(label)}</strong> — children can be selected independently. ` +
+        `Press <kbd>Esc</kbd> or Done when finished.` +
+        `</div>` +
+        `<div class="inspector-layout-grid" style="margin-bottom:12px">` +
+        layoutToolbarButton("exit-group-edit", "Done editing group") +
+        `</div>`
+    );
+}
+
+function exitGroupEditMode(keepGroupSelected = true) {
+    const was = groupEditContainerId;
+    groupEditContainerId = null;
+    if (keepGroupSelected && was) {
+        selectedComponentOrder = [was];
+        inspectorShowingPage = false;
+    }
+    drawDesignOverlay();
+    renderInspector();
+    renderToolbarWidgetSelect();
+}
+
+/** @param {string} groupId @param {string | null} [childId] */
+function enterGroupEditMode(groupId, childId) {
+    groupEditContainerId = groupId;
+    inspectorShowingPage = false;
+    selectedComponentOrder = childId ? [childId] : [groupId];
+    dragState = null;
+    pendingDrag = null;
+    marqueeState = null;
+    drawDesignOverlay();
+    renderInspector();
+    renderToolbarWidgetSelect();
 }
 
 /** @param {object[]} components */
@@ -2529,11 +2669,32 @@ function applyLayoutAct(act) {
             log("warn", "Select a single container or panel to ungroup.");
             return;
         }
+        groupEditContainerId = null;
         vscode.postMessage({
             type: "ungroupWidget",
             pageIndex: currentPageIndex,
             componentId: ids[0]
         });
+        return;
+    }
+    if (act === "edit-group-contents") {
+        if (ids.length !== 1) {
+            log("warn", "Select a single widget in a group to edit its contents.");
+            return;
+        }
+        const comp = findComponentById(page.components, ids[0]);
+        const gid = isGroupComponent(comp)
+            ? comp.id
+            : findEnclosingGroupId(page.components, ids[0]);
+        if (!gid) {
+            log("warn", "Select a container, panel, or a widget inside a group.");
+            return;
+        }
+        enterGroupEditMode(gid, isGroupComponent(comp) ? null : ids[0]);
+        return;
+    }
+    if (act === "exit-group-edit") {
+        exitGroupEditMode(true);
         return;
     }
     if (act === "save-group-to-library") {
@@ -2682,6 +2843,7 @@ function applyLayoutAct(act) {
 function clearInspectorSelection() {
     selectedComponentOrder = [];
     inspectorShowingPage = false;
+    groupEditContainerId = null;
     dragState = null;
     pendingDrag = null;
     marqueeState = null;
@@ -2692,6 +2854,7 @@ function clearInspectorSelection() {
 function selectPageInspector() {
     inspectorShowingPage = true;
     selectedComponentOrder = [];
+    groupEditContainerId = null;
     dragState = null;
     pendingDrag = null;
     marqueeState = null;
@@ -2702,6 +2865,12 @@ function selectPageInspector() {
 
 function setSelection(componentId) {
     inspectorShowingPage = false;
+    if (componentId && currentProject && !groupEditContainerId) {
+        const page = currentProject.pages[currentPageIndex];
+        if (page) {
+            componentId = unitedSelectionId(page.components, componentId);
+        }
+    }
     selectedComponentOrder = componentId ? [componentId] : [];
     dragState = null;
     pendingDrag = null;
@@ -3920,9 +4089,11 @@ function renderInspector() {
 
         const inspectorFocusSnap = snapshotInspectorFocus();
         inspectorSyncing = true;
-        inspectorForm.innerHTML = homogeneous
-            ? renderHomogeneousMultiInspectorHtml(ids, comps)
-            : renderMultiInspectorHtml(ids);
+        inspectorForm.innerHTML =
+            groupEditBannerHtml() +
+            (homogeneous
+                ? renderHomogeneousMultiInspectorHtml(ids, comps)
+                : renderMultiInspectorHtml(ids));
         inspectorSyncing = false;
         refreshMixedCheckboxes(inspectorForm);
 
@@ -3952,7 +4123,8 @@ function renderInspector() {
     const inspectorFocusSnap = snapshotInspectorFocus();
 
     inspectorSyncing = true;
-    let html = `<div id="inspector-readonly"><strong>${esc(comp.id)}</strong> · ${esc(comp.type)}</div>`;
+    let html = groupEditBannerHtml();
+    html += `<div id="inspector-readonly"><strong>${esc(comp.id)}</strong> · ${esc(comp.type)}</div>`;
     html += inspectorLayoutFieldsHtml({
         x: comp.x,
         y: comp.y,
@@ -3970,6 +4142,9 @@ function renderInspector() {
             html +=
                 `<div class="inspector-group-title">Group</div>` +
                 `<div class="inspector-layout-grid">` +
+                (!groupEditContainerId
+                    ? layoutToolbarButton("edit-group-contents", "Edit contents")
+                    : "") +
                 layoutToolbarButton("ungroup-widget", "Ungroup") +
                 layoutToolbarButton("save-group-to-library", "Save to library") +
                 `</div>`;
@@ -4613,6 +4788,10 @@ document.addEventListener("keydown", e => {
         return;
     }
     if (e.key === "Escape") {
+        if (groupEditContainerId) {
+            exitGroupEditMode(true);
+            return;
+        }
         clearInspectorSelection();
         return;
     }
@@ -4652,7 +4831,7 @@ function setupDesignOverlay() {
         }
         designOverlay.setPointerCapture(e.pointerId);
         const { x, y } = overlayCoords(e);
-        const hit = hitTestAt(page, x, y);
+        let hit = hitTestAt(page, x, y);
         const additive = e.ctrlKey || e.metaKey;
         const extend = e.shiftKey;
 
@@ -4664,16 +4843,32 @@ function setupDesignOverlay() {
             }
         }
 
-        // Second click of a double-click: jump selection to the deepest widget at this point.
+        if (
+            groupEditContainerId &&
+            hit &&
+            hit.comp.id !== groupEditContainerId &&
+            !isDescendantOf(page.components, hit.comp.id, groupEditContainerId)
+        ) {
+            groupEditContainerId = null;
+            renderToolbarWidgetSelect();
+        }
+
+        // Double-click: enter group-edit mode, or select the deepest widget while editing.
         if (e.detail >= 2) {
             if (hit) {
-                selectedComponentOrder = [hit.comp.id];
-                inspectorShowingPage = false;
-                dragState = null;
-                pendingDrag = null;
-                marqueeState = null;
-                drawDesignOverlay();
-                renderInspector();
+                const gid = findEnclosingGroupId(page.components, hit.comp.id);
+                if (gid && !groupEditContainerId) {
+                    enterGroupEditMode(gid, hit.comp.id === gid ? null : hit.comp.id);
+                } else {
+                    selectedComponentOrder = [hit.comp.id];
+                    inspectorShowingPage = false;
+                    dragState = null;
+                    pendingDrag = null;
+                    marqueeState = null;
+                    drawDesignOverlay();
+                    renderInspector();
+                    syncToolbarWidgetSelect();
+                }
             }
             releaseCap();
             e.preventDefault();
@@ -4693,7 +4888,9 @@ function setupDesignOverlay() {
             return;
         }
 
-        const hid = hit.comp.id;
+        const hid = groupEditContainerId
+            ? hit.comp.id
+            : unitedSelectionId(page.components, hit.comp.id);
 
         if (additive) {
             const ix = selectedComponentOrder.indexOf(hid);
@@ -4832,7 +5029,16 @@ function setupDesignOverlay() {
                     }
                 } else {
                     const norm = normalizedMarqueeRect(m);
-                    const picks = idsInMarqueeRect(page, norm);
+                    let picks = idsInMarqueeRect(page, norm);
+                    if (groupEditContainerId) {
+                        picks = picks.filter(
+                            id =>
+                                id === groupEditContainerId ||
+                                isDescendantOf(page.components, id, groupEditContainerId)
+                        );
+                    } else {
+                        picks = collapseToUnitedSelection(page.components, picks);
+                    }
 
                     if (m.ctrl) {
                         let next = [...selectedComponentOrder];
@@ -5093,6 +5299,7 @@ function navigateToPageIndex(idx) {
         pageSelect.value = String(next);
     }
     pageSelectProgrammatic = false;
+    groupEditContainerId = null;
     selectedComponentOrder = [];
     inspectorShowingPage = true;
     dragState = null;
@@ -5149,7 +5356,13 @@ function renderToolbarWidgetSelect() {
         return;
     }
     const page = currentProject.pages[currentPageIndex];
-    const flat = flatComponentsListWithDepth(page?.components);
+    let flat = flatComponentsListWithDepth(page?.components);
+    if (groupEditContainerId) {
+        const group = findComponentById(page?.components, groupEditContainerId);
+        flat = group
+            ? [{ comp: group, depth: 0 }, ...flatComponentsListWithDepth(group.children, 1)]
+            : flat.filter(({ comp }) => comp.id === groupEditContainerId);
+    }
     toolbarWidgetSelect.innerHTML = "";
     const placeholder = document.createElement("option");
     placeholder.value = "";

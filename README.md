@@ -1,12 +1,27 @@
 # embeddedflow — LVGL UI design in VS Code
 
-Design touch UIs for embedded devices without leaving your editor. **embeddedflow** lets you lay out screens in a visual preview, wire up navigation and interactions, and export ready-to-build **C** code for **LVGL** — the graphics library used on ESP32, STM32, NXP, and many other MCUs.
+Design touch UIs for embedded devices without leaving your editor. **embeddedflow** lets you lay out screens in a visual preview, wire navigation and interactions, and export ready-to-build **C** code for **LVGL**.
+
+---
+
+## What's new (recent releases)
+
+**v0.3.4** updates marketplace documentation. **v0.3.3** improves grouped-widget design and extension packaging stability.
+
+- **Grouped widgets stay united** — Clicking any child inside a container/panel group selects the **whole group** so you move and edit it as one unit. Marquee selection and the toolbar widget picker follow the same rule.
+- **Edit group contents** — Double-click a group, use **Edit contents** in the inspector, or finish with **Esc** / **Done editing group** to adjust individual children (position, size, properties) without breaking the group.
+- **Toolbar widget picker** — Dropdown next to zoom lists widgets on the current page; choosing one selects it in the preview (scoped to the group while in group-edit mode).
+- **Image preview alignment** — Bitmap overlays line up with LVGL layout in the preview (zoom, coordinates, and overlay layering fixes).
+- **New Project** — Wizard from the command palette, editor toolbar, explorer, and preview toolbar; creates a starter `.embf` with your chosen LVGL version.
+- **Marketplace / VSIX reliability (v0.3.2+)** — Extension package ships required dependencies so commands like **New Project** and **Open Preview** register correctly after install (older builds omitted `node_modules` and failed to activate).
+
+If you installed an older Marketplace build and see **"command not found"**, install **v0.3.3** or newer and reload the window.
 
 ---
 
 ## Why embeddedflow?
 
-Building LVGL interfaces by hand means juggling object trees, styles, screen loads, and event callbacks in C. embeddedflow keeps your UI in a single **`.embf` project file**: edit visually or in JSON, see the result on a **live preview**, then generate firmware sources that match your display and LVGL version.
+Building LVGL interfaces by hand means juggling object trees, styles, screen loads, and event callbacks in C. embeddedflow keeps your UI in a single **`.embf` project file**: edit visually or in JSON, see the result in a **live LVGL preview**, then generate firmware sources that match your display and LVGL version.
 
 **You get:**
 
@@ -18,73 +33,129 @@ No separate designer app. No cloud account. Everything runs inside VS Code or Cu
 
 ---
 
-## Features
+## Features (detailed)
+
+### Project format (`.embf`)
+
+- JSON project file with schema validation and editor autocomplete
+- **Project metadata** — name, LVGL version (`8.4.0` or `9.x`), optional output path
+- **Display** — width, height, orientation, bit depth, color format, optional **round** display clip in preview
+- **Theme** — light/dark colors used by preview and codegen
+- **Pages** — multiple screens, each with its own widget tree
+- **Images** — register PNG/JPEG/BMP assets by id; reference from `image` widgets
+- **Component library** — save reusable groups; insert them from the palette
 
 ### Visual design & live preview
 
-Open **embeddedflow: Open UI Preview** on any `.embf` file. The preview runs real LVGL logic in the panel so widgets, styles, and page switches behave like on device.
+Open **embeddedflow: Open UI Preview** on any `.embf` file. The preview runs LVGL in a **WebAssembly** panel so widgets, styles, and page transitions behave close to on-device behavior.
 
-- **Design mode** — add widgets from a palette, drag to position, resize, multi-select, and edit properties in the sidebar
-- **Run mode** — tap buttons, move sliders, and test navigation as an end user would
-- **Multiple pages** — build multi-screen apps; switch pages from the toolbar or from your flows
-- **Accurate display** — set resolution, color depth, orientation, and theme colors to match your hardware
+| Mode | Purpose |
+|------|---------|
+| **Design** | Place, select, drag, resize, and edit widgets; overlay shows selection and snap guides |
+| **Run** | Interact with the UI (buttons, sliders, etc.) and test navigation / swipes like an end user |
 
-### Widget library
+**Preview toolbar**
 
-Labels, buttons, sliders, switches, bars, arcs, checkboxes, dropdowns, rollers, text areas, lines, images, containers, panels, spinners, and more — with common style properties (colors, fonts, borders, etc.).
+- Page selector and page list sidebar (add, rename, remove pages)
+- **Design** toggle
+- **Zoom** — auto-fit or fixed scale (10%–400%)
+- **Widget** dropdown — quick selection of widgets on the active page
+- **Undo / Redo** — design edits with history preserved across reloads when supported by the host
+- **New Project** — create a starter `.embf` without leaving the preview
+
+**Canvas interaction (design mode)**
+
+- Click to select; **Shift** add to selection; **Ctrl/Cmd** toggle selection
+- Rubber-band **marquee** on empty canvas (with same modifiers)
+- **Drag** to move selection; **magnetic snap** to edges and centers of other widgets
+- **Multi-select** inspector — align, distribute, match size, combine into group
+- **Delete** / **Backspace** removes selected widget(s)
+- **Escape** clears selection; in group-edit mode, exits back to the whole group
+
+**Widget palette**
+
+Add widgets from the sidebar: label, button, slider, switch, bar, arc, checkbox, dropdown, roller, textarea, line, image, container, panel, spinner.
+
+**Property inspector**
+
+- Position, size, hidden flag
+- Type-specific fields (text, ranges, options, etc.)
+- **Appearances** — styles/events where applicable
+- **Images** — asset id combobox, browse to register files into `project.images[]`
+- **Page inspector** — page name/id, codegen output folder picker, theme when nothing is selected
+
+**Groups (container / panel)**
+
+- **Combine into group** — merge multi-selected siblings into one container
+- **Ungroup** — lift children to the parent level
+- **Save to library** — reuse the group on other pages/projects
+- **United selection** — one click selects the whole group
+- **Edit contents** — edit children independently (double-click or inspector); orange outline shows group bounds while editing
 
 ### Flows & navigation
 
-Connect UI behavior without writing C first:
+Define behavior declaratively in the project JSON and edit from the **Flow** sidebar:
 
-- **Button / widget events** — e.g. click → go to another page, toggle dark theme, update another widget
-- **Page transitions** — slide and fade animations when changing screens (preview + generated firmware)
-- **Swipe gestures** — swipe left/right/top/bottom to open another page, with the same transition options
+- **Widget events** — e.g. button click → navigate to another page, set theme, or other actions
+- **Page navigation** — target page, animation (slide, fade, etc.), duration
+- **Swipe gestures** — swipe left/right/top/bottom to open a page with the same transition options
+- **Preview** — run mode follows navigation stack; back navigation where configured
+
+Generated C includes navigation and event wiring aligned with your flows (LVGL 8 and 9).
 
 ### C code generation
 
-**embeddedflow: Generate C Code** writes an `ui_output` folder (or your configured path) next to the project:
+**embeddedflow: Generate C Code** writes firmware-oriented sources (default `ui_output` next to the `.embf`, or `project.outputPath` / workspace setting):
 
-- `ui.c` / `ui.h` — application entry points
-- Per-page sources — one screen per page
-- Event handlers and navigation — stubs aligned with your flows
-- **LVGL 8 and 9** — set `project.lvglVersion` and include path to match ESP-IDF or your SDK
+- `ui.c` / `ui.h` — application entry
+- Per-page screen sources
+- Event handlers and navigation stubs matching flows
+- Respects **LVGL version** and include path from the project
 
-Optional **generate on save** keeps firmware in sync while you design.
+**Optional:** `embeddedflow.liveGenerateOnSave` regenerates on save (skips when parse/semantic errors exist).
+
+Configure in `.embf`:
+
+- `project.lvglVersion` — `8.4.0`, `9.2.2`, `9.3.0`, `9.4.0`, `9.5.0`
+- `project.lvglInclude` — e.g. `lvgl.h` vs `lvgl/lvgl.h` for ESP-IDF
 
 ### Editor integration
 
-- **JSON Schema** — autocomplete and validation while editing `.embf` as text
-- **Commands in the editor title bar** when a `.embf` file is active
-- **Sample project** — open `sample/demo.embf` to explore
+- **Language** — `.embf` with JSON schema validation (`embf.schema.json`)
+- **Commands** on editor title bar when a `.embf` file is active
+- **Explorer** — New Project, Open Preview, Generate Code on folders/files
+- **Sample** — `sample/demo.embf` included in the extension package
+- **Output log** — **embeddedflow: Show Output Log** for codegen and diagnostics
+
+### Workspace settings
+
+| Setting | Description |
+|---------|-------------|
+| `embeddedflow.defaultLvglVersion` | LVGL version for **New Project** wizard |
+| `embeddedflow.autoOpenPreview` | Open/refresh preview when opening `.embf` or on startup if a root `.embf` exists |
+| `embeddedflow.outputDirectory` | Default codegen folder when not set in the project |
+| `embeddedflow.liveGenerateOnSave` | Regenerate C on save |
+
+---
+
+## Commands
+
+| Command | What it does |
+|---------|----------------|
+| **embeddedflow: Open UI Preview** | Live LVGL canvas for the current `.embf` |
+| **embeddedflow: New Project** | Wizard: folder, name, LVGL version → new `.embf` |
+| **embeddedflow: Generate C Code** | Export C sources |
+| **embeddedflow: Show Output Log** | Extension log |
 
 ---
 
 ## Getting started
 
-1. **Install** the extension from the Marketplace (or install a `.vsix` locally).
-2. Run **embeddedflow: New Project** or open the included **sample/demo.embf**.
-3. Click **Open UI Preview** in the editor toolbar (or run the command from the Command Palette).
-4. Turn on **Design** to place and arrange widgets; turn it off to interact with the UI.
-5. When you are ready for firmware, run **embeddedflow: Generate C Code** and copy the output into your embedded project.
-
-### Useful commands
-
-| Command | What it does |
-|--------|----------------|
-| **embeddedflow: Open UI Preview** | Live LVGL canvas for the current `.embf` file |
-| **embeddedflow: New Project** | Create a starter `.embf` in your workspace |
-| **embeddedflow: Generate C Code** | Export C sources for your LVGL version |
-| **embeddedflow: Show Output Log** | Extension log for codegen and diagnostics |
-
-### Settings (optional)
-
-- **embeddedflow.defaultLvglVersion** — LVGL version for new projects (8.4.0 or 9.x)
-- **embeddedflow.autoOpenPreview** — open preview when you open a `.embf` file
-- **embeddedflow.outputDirectory** — default folder for generated C
-- **embeddedflow.liveGenerateOnSave** — regenerate C when you save the project
-
-In your `.embf` file, set `project.lvglVersion` and `project.lvglInclude` (e.g. `lvgl.h` vs `lvgl/lvgl.h`) to match your board’s LVGL port before generating code.
+1. Install from the Marketplace or install the latest `.vsix` and reload.
+2. Run **embeddedflow: New Project** or open `sample/demo.embf`.
+3. Click **Open UI Preview** (editor toolbar or Command Palette).
+4. Enable **Design** to add and arrange widgets; disable it to test interactions.
+5. Run **embeddedflow: Generate C Code** and copy output into your firmware tree.
 
 ---
 
@@ -98,9 +169,8 @@ In your `.embf` file, set `project.lvglVersion` and `project.lvglInclude` (e.g. 
 
 ## Requirements
 
-- **VS Code 1.85+** or a compatible editor (including Cursor)
-- For **using** the extension: nothing else — preview and codegen work out of the box
-- For **firmware**: your existing LVGL / ESP-IDF / SDK project to compile the generated C
+- **VS Code 1.85+** or Cursor
+- For firmware: your LVGL / ESP-IDF / SDK project to compile generated C
 
 ---
 

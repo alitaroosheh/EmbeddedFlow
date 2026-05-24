@@ -28,6 +28,7 @@ and targets all LVGL versions from 8.4 through 9.x.
 | 16 | [Build & Export](./16-build-export.md) | Export formats, platform presets |
 | 17 | [VSCode Integration](./17-vscode-integration.md) | Extension UX, panels, commands |
 | 18 | [.embf File Format](./18-embf-format.md) | Schema versioning, full spec |
+| 19 | [Code Binding & Data Model](./19-code-binding-and-data-model.md) | Bind UI to firmware C (MVVM for embedded) |
 
 ---
 

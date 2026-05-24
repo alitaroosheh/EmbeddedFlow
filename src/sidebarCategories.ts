@@ -16,6 +16,8 @@ const ICON_PAGES = `<svg viewBox="0 0 20 20" aria-hidden="true"><rect x="4" y="3
 
 const ICON_FLOW = `<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="5" cy="10" r="2.5" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="15" cy="5" r="2.5" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="15" cy="15" r="2.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M7.2 9.2 L12 6.2 M7.2 10.8 L12 13.8" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>`;
 
+const ICON_TREE = `<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4h4v4H4V4zm0 6h4v4H4v-4zm8-6h4v4h-4V4zm0 6h4v4h-4v-4z" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>`;
+
 export const SIDEBAR_CATEGORIES: SidebarCategory[] = [
     {
         id: "components",
@@ -29,6 +31,13 @@ export const SIDEBAR_CATEGORIES: SidebarCategory[] = [
         label: "Pages",
         title: "Switch between project screens",
         iconSvg: ICON_PAGES,
+        widePanel: true
+    },
+    {
+        id: "hierarchy",
+        label: "Tree",
+        title: "Widget hierarchy on the current page",
+        iconSvg: ICON_TREE,
         widePanel: true
     },
     {
@@ -56,6 +65,11 @@ export function buildSidebarPanelViewsHtml(componentsPanelHtml: string): string 
             const hidden = c.id === DEFAULT_SIDEBAR_CATEGORY ? "" : " hidden";
             return `<div id="sidebar-panel-${c.id}" class="sidebar-panel-view" data-sidebar-panel="${c.id}" role="tabpanel"${hidden}>
 ${componentsPanelHtml}
+</div>`;
+        }
+        if (c.id === "hierarchy") {
+            return `<div id="sidebar-panel-${c.id}" class="sidebar-panel-view sidebar-panel-view-hierarchy" data-sidebar-panel="${c.id}" role="tabpanel" hidden>
+<ul id="widget-tree" class="widget-tree" aria-label="Widget hierarchy"></ul>
 </div>`;
         }
         if (c.id === "pages") {

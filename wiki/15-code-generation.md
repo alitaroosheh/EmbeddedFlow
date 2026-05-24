@@ -13,8 +13,7 @@ firmware build (ESP-IDF, STM32 HAL, Zephyr, Arduino, bare-metal, etc.).
 - [ ] `ui_fonts.h` + `ui_fonts.c` — font declarations and includes
 - [x] `ui_img_<id>.c` — converted image sources in the same folder as `ui.h` (no subfolder)
 - [ ] `lv_conf.h` — tailored to the project (correct color depth, enabled fonts, enabled widgets)
-- [ ] `CMakeLists.txt` stub — ready to include in a CMake project
-- [ ] `idf_component.yml` — ESP-IDF component manifest
+- [x] No `CMakeLists.txt`, Makefiles, or platform manifests — only `.c` / `.h` (firmware project keeps its own build)
 
 ## 15.2 Naming Conventions
 

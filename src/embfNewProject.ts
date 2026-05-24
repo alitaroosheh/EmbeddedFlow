@@ -3,6 +3,7 @@ import * as path from "path";
 import * as fs from "fs";
 import { LvglVersion } from "./types/embf";
 import { buildNewProjectTemplate, sanitizeProjectFileName } from "./embfProjectTemplate";
+import { DISPLAY_PRESETS } from "./embfDisplayPresets";
 
 const LVGL_VERSIONS: LvglVersion[] = ["9.5.0", "9.4.0", "9.3.0", "9.2.2", "8.4.0"];
 
@@ -77,6 +78,21 @@ export async function runNewProjectWizard(): Promise<string | undefined> {
         return undefined;
     }
 
+    const presetPick = await vscode.window.showQuickPick(
+        DISPLAY_PRESETS.map(p => ({
+            label: p.label,
+            description: p.description,
+            preset: p
+        })),
+        {
+            placeHolder: "Display size and color format",
+            title: "New EmbeddedFlow project"
+        }
+    );
+    if (!presetPick) {
+        return undefined;
+    }
+
     const defaultLvgl = getDefaultLvglVersion();
     const lvglVersion = await vscode.window.showQuickPick(LVGL_VERSIONS, {
         placeHolder: "LVGL version for generated C code",
@@ -101,7 +117,7 @@ export async function runNewProjectWizard(): Promise<string | undefined> {
         }
     }
 
-    const template = buildNewProjectTemplate(name, lvglVersion as LvglVersion);
+    const template = buildNewProjectTemplate(name, lvglVersion as LvglVersion, presetPick.preset.display);
     try {
         fs.writeFileSync(filePath, JSON.stringify(template, null, 2), "utf-8");
     } catch (e: unknown) {

@@ -1,6 +1,6 @@
 import * as path from "path";
 import * as vscode from "vscode";
-import type { EmbfProject, Page } from "./types/embf";
+import type { Component, EmbfProject, Page } from "./types/embf";
 import {
     combineWidgetsOnPage,
     deleteComponentOnPage,
@@ -10,6 +10,8 @@ import {
     bulkSetAbsolutePositionsOnPage,
     bulkPatchComponentsOnPage,
     bulkDeleteComponentsOnPage,
+    duplicateComponentsOnPage,
+    pasteComponentsOnPage,
     ungroupContainerOnPage
 } from "./embfComponentModel";
 import { cloneEmbfProject } from "./embfWidgetFactory";
@@ -185,6 +187,53 @@ export async function bulkPatchWidgetsInEmbfFile(
         embeddedFlowLog("widgets", "info", `bulk patch ${updates.length} (${path.basename(filePath)})`);
     }
     return ok;
+}
+
+export async function duplicateWidgetsInEmbfFile(
+    filePath: string,
+    pageIndex: number,
+    componentIds: string[]
+): Promise<string[]> {
+    if (!componentIds?.length) {
+        return [];
+    }
+
+    let newIds: string[] = [];
+    const ok = await persistPageEdit(filePath, pageIndex, (page, project) => {
+        newIds = duplicateComponentsOnPage(page, project, componentIds);
+        return newIds.length > 0;
+    });
+    if (ok && newIds.length) {
+        embeddedFlowLog(
+            "widgets",
+            "info",
+            `duplicated ${newIds.length} (${path.basename(filePath)}): ${newIds.join(", ")}`
+        );
+    }
+    return ok ? newIds : [];
+}
+
+export async function pasteWidgetsInEmbfFile(
+    filePath: string,
+    pageIndex: number,
+    components: Component[]
+): Promise<string[]> {
+    if (!components?.length) {
+        return [];
+    }
+    let newIds: string[] = [];
+    const ok = await persistPageEdit(filePath, pageIndex, (page, project) => {
+        newIds = pasteComponentsOnPage(page, project, components);
+        return newIds.length > 0;
+    });
+    if (ok && newIds.length) {
+        embeddedFlowLog(
+            "widgets",
+            "info",
+            `pasted ${newIds.length} (${path.basename(filePath)})`
+        );
+    }
+    return ok ? newIds : [];
 }
 
 export async function bulkDeleteWidgetsInEmbfFile(

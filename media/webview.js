@@ -26,6 +26,8 @@
  *   { type: "pickImageSource", pageIndex: number, componentId: string }
  *   { type: "deleteWidget", pageIndex: number, componentId: string }
  *   { type: "bulkDeleteWidgets", pageIndex: number, componentIds: string[] }
+ *   { type: "duplicateWidgets", pageIndex: number, componentIds: string[] }
+ *   { type: "pasteWidgets", pageIndex: number, components: object[] }
  *   { type: "combineWidgets", pageIndex: number, componentIds: string[] } — sibling widgets → one container
  *   { type: "ungroupWidget", pageIndex: number, componentId: string } — container/panel → children lifted to parent
  *   { type: "saveGroupToLibrary", pageIndex: number, componentId: string }
@@ -80,6 +82,9 @@ const previewZoomSelect = /** @type {HTMLSelectElement | null} */ (
 const toolbarWidgetSelect = /** @type {HTMLSelectElement | null} */ (
     document.getElementById("toolbar-widget-select")
 );
+const designGridCheck = /** @type {HTMLInputElement | null} */ (document.getElementById("design-grid"));
+const btnThemeToggle = document.getElementById("btn-theme-toggle");
+const widgetTreeEl = document.getElementById("widget-tree");
 const displayWrapper = document.getElementById("display-wrapper");
 const imagePreviewLayer = document.getElementById("image-preview-layer");
 const toolbarShell = document.getElementById("toolbar-shell");
@@ -257,6 +262,19 @@ const DESIGN_DRAG_THRESHOLD = 3;
 
 /** Design-mode magnetic snap: align edges/centers when within this distance (logical px). */
 const DESIGN_SNAP_THRESHOLD = 8;
+
+/** Snap positions/sizes to this grid when #design-grid is checked. */
+const DESIGN_GRID_SIZE = 16;
+let designGridEnabled = false;
+/** @type {object[] | null} Deep-cloned components for copy/paste */
+let designClipboard = null;
+/**
+ * Resize drag (single selection): handle id + starting parent-relative box.
+ * @type {{ id: string, handle: string, startX: number, startY: number, startW: number, startH: number, pointerX: number, pointerY: number, parentAbsX: number, parentAbsY: number } | null}
+ */
+let resizeState = null;
+const RESIZE_HANDLE_PX = 7;
+const MIN_WIDGET_SIZE = 12;
 
 /**
  * Maps WASM object pointer (number) → component ID string.
@@ -449,6 +467,7 @@ async function handleLoad(payload) {
     drawDesignOverlay();
     renderInspector();
     renderToolbarWidgetSelect();
+    renderWidgetTree();
     } catch (e) {
         showError(`Preview error: ${e.message ?? e}`);
         log("error", `handleLoad: ${e}`);
@@ -1922,6 +1941,152 @@ function syncImagePreviewOverlays() {
     }
 }
 
+function snapToGrid(v) {
+    if (!designGridEnabled || DESIGN_GRID_SIZE < 2) {
+        return Math.round(v);
+    }
+    return Math.round(v / DESIGN_GRID_SIZE) * DESIGN_GRID_SIZE;
+}
+
+/** @param {object[]} components */
+function locateComponentParent(page, componentId) {
+    /** @param {object[]} comps @param {number} pax @param {number} pay */
+    function walk(comps, pax, pay) {
+        for (const c of comps ?? []) {
+            if (c.id === componentId) {
+                return { comp: c, parentAbsX: pax, parentAbsY: pay };
+            }
+            if (c.children?.length) {
+                const inner = walk(c.children, pax + c.x, pay + c.y);
+                if (inner) {
+                    return inner;
+                }
+            }
+        }
+        return null;
+    }
+    return walk(page.components ?? [], 0, 0);
+}
+
+/** @returns {string | null} */
+function hitTestResizeHandle(page, px, py, componentId) {
+    const b = getAbsBounds(page, componentId);
+    if (!b) {
+        return null;
+    }
+    const hs = RESIZE_HANDLE_PX;
+    const handles = [
+        ["nw", b.x, b.y],
+        ["n", b.x + b.width / 2, b.y],
+        ["ne", b.x + b.width, b.y],
+        ["e", b.x + b.width, b.y + b.height / 2],
+        ["se", b.x + b.width, b.y + b.height],
+        ["s", b.x + b.width / 2, b.y + b.height],
+        ["sw", b.x, b.y + b.height],
+        ["w", b.x, b.y + b.height / 2]
+    ];
+    for (const [name, hx, hy] of handles) {
+        if (Math.abs(px - hx) <= hs && Math.abs(py - hy) <= hs) {
+            return name;
+        }
+    }
+    return null;
+}
+
+function drawDesignGrid(ctx) {
+    if (!designGridEnabled) {
+        return;
+    }
+    const g = DESIGN_GRID_SIZE;
+    ctx.save();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.06)";
+    ctx.lineWidth = 1;
+    for (let x = g; x < displayWidth; x += g) {
+        ctx.beginPath();
+        ctx.moveTo(x + 0.5, 0);
+        ctx.lineTo(x + 0.5, displayHeight);
+        ctx.stroke();
+    }
+    for (let y = g; y < displayHeight; y += g) {
+        ctx.beginPath();
+        ctx.moveTo(0, y + 0.5);
+        ctx.lineTo(displayWidth, y + 0.5);
+        ctx.stroke();
+    }
+    ctx.restore();
+}
+
+function drawResizeHandles(ctx, b) {
+    const hs = 4;
+    const pts = [
+        [b.x, b.y],
+        [b.x + b.width / 2, b.y],
+        [b.x + b.width, b.y],
+        [b.x + b.width, b.y + b.height / 2],
+        [b.x + b.width, b.y + b.height],
+        [b.x + b.width / 2, b.y + b.height],
+        [b.x, b.y + b.height],
+        [b.x, b.y + b.height / 2]
+    ];
+    ctx.save();
+    ctx.fillStyle = "#ffffff";
+    ctx.strokeStyle = "#007acc";
+    ctx.lineWidth = 1;
+    for (const [hx, hy] of pts) {
+        ctx.fillRect(hx - hs, hy - hs, hs * 2, hs * 2);
+        ctx.strokeRect(hx - hs + 0.5, hy - hs + 0.5, hs * 2, hs * 2);
+    }
+    ctx.restore();
+}
+
+/**
+ * @param {string} handle
+ * @param {{ startX: number, startY: number, startW: number, startH: number, parentAbsX: number, parentAbsY: number }} st
+ * @param {number} px @param {number} py
+ */
+function boundsFromResize(handle, st, px, py) {
+    const ax0 = st.parentAbsX + st.startX;
+    const ay0 = st.parentAbsY + st.startY;
+    const ax1 = ax0 + st.startW;
+    const ay1 = ay0 + st.startH;
+    let left = ax0;
+    let top = ay0;
+    let right = ax1;
+    let bottom = ay1;
+    if (handle.includes("e")) {
+        right = px;
+    }
+    if (handle.includes("w")) {
+        left = px;
+    }
+    if (handle.includes("s")) {
+        bottom = py;
+    }
+    if (handle.includes("n")) {
+        top = py;
+    }
+    if (right - left < MIN_WIDGET_SIZE) {
+        if (handle.includes("w")) {
+            left = right - MIN_WIDGET_SIZE;
+        } else {
+            right = left + MIN_WIDGET_SIZE;
+        }
+    }
+    if (bottom - top < MIN_WIDGET_SIZE) {
+        if (handle.includes("n")) {
+            top = bottom - MIN_WIDGET_SIZE;
+        } else {
+            bottom = top + MIN_WIDGET_SIZE;
+        }
+    }
+    return {
+        x: Math.round(left - st.parentAbsX),
+        y: Math.round(top - st.parentAbsY),
+        width: Math.round(right - left),
+        height: Math.round(bottom - top)
+    };
+}
+
 function drawDesignOverlay() {
     if (!designCtx || !designOverlay) {
         return;
@@ -1934,9 +2099,27 @@ function drawDesignOverlay() {
     if (!page) {
         return;
     }
+    drawDesignGrid(designCtx);
+
     designCtx.strokeStyle = "#007acc";
     designCtx.lineWidth = 2;
     designCtx.setLineDash([4, 3]);
+
+    if (resizeState?.preview) {
+        const loc = locateComponentParent(page, resizeState.id);
+        if (loc) {
+            const abs = {
+                x: loc.parentAbsX + resizeState.preview.x,
+                y: loc.parentAbsY + resizeState.preview.y,
+                width: resizeState.preview.width,
+                height: resizeState.preview.height
+            };
+            designCtx.strokeRect(abs.x + 0.5, abs.y + 0.5, abs.width, abs.height);
+            drawResizeHandles(designCtx, abs);
+        }
+        designCtx.setLineDash([]);
+        return;
+    }
 
     if (dragState) {
         drawSnapGuides(dragState.snapGuides);
@@ -1967,6 +2150,12 @@ function drawDesignOverlay() {
             const b = getAbsBounds(page, id);
             if (b) {
                 designCtx.strokeRect(b.x + 0.5, b.y + 0.5, b.width, b.height);
+            }
+        }
+        if (selectedComponentOrder.length === 1) {
+            const b = getAbsBounds(page, selectedComponentOrder[0]);
+            if (b) {
+                drawResizeHandles(designCtx, b);
             }
         }
     }
@@ -2878,6 +3067,7 @@ function setSelection(componentId) {
     drawDesignOverlay();
     renderInspector();
     syncToolbarWidgetSelect();
+    renderWidgetTree();
 }
 
 function wirePageInspectorActions() {
@@ -4787,6 +4977,49 @@ document.addEventListener("keydown", e => {
     if (!designMode) {
         return;
     }
+    const t = e.target;
+    if (
+        t instanceof HTMLInputElement ||
+        t instanceof HTMLTextAreaElement ||
+        t instanceof HTMLSelectElement
+    ) {
+        return;
+    }
+    if ((e.ctrlKey || e.metaKey) && currentProject) {
+        const page = currentProject.pages[currentPageIndex];
+        if (e.key === "c" || e.key === "C") {
+            if (selectedComponentOrder.length && page) {
+                e.preventDefault();
+                designClipboard = selectedComponentOrder
+                    .map(id => findComponentById(page.components, id))
+                    .filter(Boolean)
+                    .map(c => JSON.parse(JSON.stringify(c)));
+            }
+            return;
+        }
+        if (e.key === "v" || e.key === "V") {
+            if (designClipboard?.length) {
+                e.preventDefault();
+                vscode.postMessage({
+                    type: "pasteWidgets",
+                    pageIndex: currentPageIndex,
+                    components: designClipboard
+                });
+            }
+            return;
+        }
+        if (e.key === "d" || e.key === "D") {
+            if (selectedComponentOrder.length) {
+                e.preventDefault();
+                vscode.postMessage({
+                    type: "duplicateWidgets",
+                    pageIndex: currentPageIndex,
+                    componentIds: [...selectedComponentOrder]
+                });
+            }
+            return;
+        }
+    }
     if (e.key === "Escape") {
         if (groupEditContainerId) {
             exitGroupEditMode(true);
@@ -4796,10 +5029,6 @@ document.addEventListener("keydown", e => {
         return;
     }
     if ((e.key === "Delete" || e.key === "Backspace") && selectedComponentOrder.length) {
-        const t = e.target;
-        if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement) {
-            return;
-        }
         e.preventDefault();
         if (selectedComponentOrder.length > 1) {
             vscode.postMessage({
@@ -4831,7 +5060,6 @@ function setupDesignOverlay() {
         }
         designOverlay.setPointerCapture(e.pointerId);
         const { x, y } = overlayCoords(e);
-        let hit = hitTestAt(page, x, y);
         const additive = e.ctrlKey || e.metaKey;
         const extend = e.shiftKey;
 
@@ -4842,6 +5070,42 @@ function setupDesignOverlay() {
                 /* ignore */
             }
         }
+
+        if (selectedComponentOrder.length === 1 && e.detail < 2) {
+            const resizeId = selectedComponentOrder[0];
+            const handle = hitTestResizeHandle(page, x, y, resizeId);
+            if (handle) {
+                const loc = locateComponentParent(page, resizeId);
+                if (loc) {
+                    resizeState = {
+                        id: resizeId,
+                        handle,
+                        startX: loc.comp.x,
+                        startY: loc.comp.y,
+                        startW: loc.comp.width,
+                        startH: loc.comp.height,
+                        pointerX: x,
+                        pointerY: y,
+                        parentAbsX: loc.parentAbsX,
+                        parentAbsY: loc.parentAbsY,
+                        preview: {
+                            x: loc.comp.x,
+                            y: loc.comp.y,
+                            width: loc.comp.width,
+                            height: loc.comp.height
+                        }
+                    };
+                    pendingDrag = null;
+                    dragState = null;
+                    marqueeState = null;
+                    drawDesignOverlay();
+                    e.preventDefault();
+                    return;
+                }
+            }
+        }
+
+        let hit = hitTestAt(page, x, y);
 
         if (
             groupEditContainerId &&
@@ -4951,6 +5215,31 @@ function setupDesignOverlay() {
 
     designOverlay.addEventListener("pointermove", e => {
         if (!designMode) {
+            return;
+        }
+        if (resizeState) {
+            const page = currentProject?.pages[currentPageIndex];
+            if (page) {
+                const { x, y } = overlayCoords(e);
+                let preview = boundsFromResize(resizeState.handle, resizeState, x, y);
+                if (designGridEnabled) {
+                    preview = {
+                        x: snapToGrid(resizeState.parentAbsX + preview.x) - resizeState.parentAbsX,
+                        y: snapToGrid(resizeState.parentAbsY + preview.y) - resizeState.parentAbsY,
+                        width: Math.max(
+                            MIN_WIDGET_SIZE,
+                            snapToGrid(preview.width)
+                        ),
+                        height: Math.max(
+                            MIN_WIDGET_SIZE,
+                            snapToGrid(preview.height)
+                        )
+                    };
+                }
+                resizeState.preview = preview;
+                drawDesignOverlay();
+            }
+            e.preventDefault();
             return;
         }
         if (pendingDrag && !dragState) {
@@ -5087,6 +5376,33 @@ function setupDesignOverlay() {
 
         pendingDrag = null;
 
+        if (resizeState && currentProject) {
+            const p = resizeState.preview;
+            if (p) {
+                vscode.postMessage({
+                    type: "bulkPatchWidgets",
+                    pageIndex: currentPageIndex,
+                    updates: [
+                        {
+                            componentId: resizeState.id,
+                            patch: {
+                                x: p.x,
+                                y: p.y,
+                                width: p.width,
+                                height: p.height
+                            }
+                        }
+                    ]
+                });
+            }
+            resizeState = null;
+            drawDesignOverlay();
+            renderInspector();
+            releaseCaptureSafe();
+            e.preventDefault();
+            return;
+        }
+
         if (!dragState || !currentProject) {
             drawDesignOverlay();
             renderInspector();
@@ -5099,11 +5415,15 @@ function setupDesignOverlay() {
         const dy = y - dragState.pointerY;
         const moved = Math.abs(dx) > DESIGN_DRAG_THRESHOLD || Math.abs(dy) > DESIGN_DRAG_THRESHOLD;
         if (moved) {
-            const moves = dragState.items.map(it => ({
-                componentId: it.id,
-                absX: Math.max(0, Math.round(it.startAbsX + dx)),
-                absY: Math.max(0, Math.round(it.startAbsY + dy))
-            }));
+            const moves = dragState.items.map(it => {
+                let absX = Math.max(0, Math.round(it.startAbsX + dx));
+                let absY = Math.max(0, Math.round(it.startAbsY + dy));
+                if (designGridEnabled) {
+                    absX = Math.max(0, snapToGrid(absX));
+                    absY = Math.max(0, snapToGrid(absY));
+                }
+                return { componentId: it.id, absX, absY };
+            });
             vscode.postMessage({
                 type: "bulkMoveWidgets",
                 pageIndex: currentPageIndex,
@@ -5121,6 +5441,7 @@ function setupDesignOverlay() {
         dragState = null;
         pendingDrag = null;
         marqueeState = null;
+        resizeState = null;
         drawDesignOverlay();
         renderInspector();
         try {
@@ -5311,7 +5632,55 @@ function navigateToPageIndex(idx) {
     renderInspector();
     renderPageList();
     renderToolbarWidgetSelect();
+    renderWidgetTree();
     scheduleImageOverlaySync();
+}
+
+function renderWidgetTree() {
+    if (!widgetTreeEl || !currentProject) {
+        return;
+    }
+    const page = currentProject.pages[currentPageIndex];
+    if (!page) {
+        widgetTreeEl.innerHTML = "";
+        return;
+    }
+    widgetTreeEl.innerHTML = "";
+    /** @param {object[]} components @param {number} depth */
+    function appendBranch(components, depth) {
+        for (const c of components ?? []) {
+            const li = document.createElement("li");
+            const btn = document.createElement("button");
+            btn.type = "button";
+            const active = selectedComponentOrder.includes(c.id);
+            btn.className = "widget-tree-btn" + (active ? " active" : "");
+            btn.dataset.componentId = c.id;
+            btn.style.paddingLeft = `${8 + depth * 12}px`;
+            const typeSpan = document.createElement("span");
+            typeSpan.className = "tree-type";
+            typeSpan.textContent = c.type || "widget";
+            btn.appendChild(typeSpan);
+            btn.appendChild(document.createTextNode(c.id));
+            btn.addEventListener("click", () => {
+                if (groupEditContainerId) {
+                    selectedComponentOrder = [c.id];
+                    inspectorShowingPage = false;
+                    drawDesignOverlay();
+                    renderInspector();
+                    syncToolbarWidgetSelect();
+                    renderWidgetTree();
+                } else {
+                    setSelection(c.id);
+                }
+            });
+            li.appendChild(btn);
+            widgetTreeEl.appendChild(li);
+            if (c.children?.length) {
+                appendBranch(c.children, depth + 1);
+            }
+        }
+    }
+    appendBranch(page.components, 0);
 }
 
 function updatePageSidebarActions() {
@@ -5405,6 +5774,30 @@ function renderPageList() {
         pageListEl.appendChild(li);
     });
     updatePageSidebarActions();
+    renderWidgetTree();
+}
+
+if (designGridCheck) {
+    designGridCheck.addEventListener("change", () => {
+        designGridEnabled = !!designGridCheck.checked;
+        drawDesignOverlay();
+    });
+}
+
+if (btnThemeToggle) {
+    btnThemeToggle.addEventListener("click", () => {
+        if (!currentProject || !wasmReady) {
+            return;
+        }
+        const nowDark =
+            previewDarkOverride !== null ? previewDarkOverride : !!currentProject.theme?.dark;
+        previewDarkOverride = !nowDark;
+        applyEmbfThemeFromProject(currentProject);
+        clearPageScreenCache();
+        buildUiFromProject(currentProject, currentPageIndex);
+        syncImagePreviewOverlays();
+        scheduleImageOverlaySync();
+    });
 }
 
 if (btnPageAdd) {

@@ -7,7 +7,20 @@ export function sanitizeProjectFileName(name: string): string {
     return safe || "MyDisplay";
 }
 
-export function buildNewProjectTemplate(name: string, lvglVersion: LvglVersion): EmbfProject {
+export function buildNewProjectTemplate(
+    name: string,
+    lvglVersion: LvglVersion,
+    display?: EmbfProject["display"]
+): EmbfProject {
+    const disp = display ?? {
+        width: 320,
+        height: 240,
+        bitDepth: 16 as const,
+        colorFormat: "RGB565" as const,
+        orientation: "landscape" as const,
+        direction: "ltr" as const,
+        dpi: 100
+    };
     return {
         version: "1.0",
         project: {
@@ -15,15 +28,7 @@ export function buildNewProjectTemplate(name: string, lvglVersion: LvglVersion):
             lvglVersion,
             description: ""
         },
-        display: {
-            width: 320,
-            height: 240,
-            bitDepth: 16,
-            colorFormat: "RGB565",
-            orientation: "landscape",
-            direction: "ltr",
-            dpi: 100
-        },
+        display: { ...disp },
         theme: {
             dark: false
         },

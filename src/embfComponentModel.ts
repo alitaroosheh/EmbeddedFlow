@@ -921,6 +921,154 @@ export function isPageIdAvailable(project: EmbfProject, pageId: string, exceptIn
 }
 
 /** Rename display name and/or page id. Returns false if id collides or invalid. */
+function locateParentEntry(
+    components: Component[],
+    componentId: string,
+    parentAbsX: number,
+    parentAbsY: number
+): { list: Component[]; index: number; parentAbsX: number; parentAbsY: number } | null {
+    for (let i = 0; i < components.length; i++) {
+        const c = components[i];
+        if (c.id === componentId) {
+            return { list: components, index: i, parentAbsX, parentAbsY };
+        }
+        const children = getChildrenArray(c);
+        if (children?.length) {
+            const found = locateParentEntry(
+                children,
+                componentId,
+                parentAbsX + c.x,
+                parentAbsY + c.y
+            );
+            if (found) {
+                return found;
+            }
+        }
+    }
+    return null;
+}
+
+function allocateUniqueIdInSet(used: Set<string>, prefix: string): string {
+    const base = prefix.replace(/[^a-zA-Z0-9_]/g, "_").replace(/_+$/, "") || "w";
+    for (let i = 1; i < 100000; i++) {
+        const id = `${base}_${i}`;
+        if (!used.has(id)) {
+            return id;
+        }
+    }
+    return `${base}_${Date.now()}`;
+}
+
+function cloneComponentSubtree(comp: Component, used: Set<string>): Component {
+    const c = JSON.parse(JSON.stringify(comp)) as Component;
+    const stem = c.id.replace(/_\d+$/, "") || c.id;
+    c.id = allocateUniqueIdInSet(used, stem);
+    used.add(c.id);
+    const children = getChildrenArray(c);
+    if (children?.length) {
+        (c as ContainerComponent).children = children.map(ch => cloneComponentSubtree(ch, used));
+    }
+    return c;
+}
+
+/** True if `ancestorId` is on the path from root to `descendantId`. */
+export function isAncestorOnPage(page: Page, ancestorId: string, descendantId: string): boolean {
+    if (ancestorId === descendantId) {
+        return false;
+    }
+    let found = false;
+    function walk(comps: Component[], inside: boolean): boolean {
+        for (const c of comps) {
+            const here = inside || c.id === ancestorId;
+            if (c.id === descendantId) {
+                found = here;
+                return true;
+            }
+            const ch = getChildrenArray(c);
+            if (ch?.length && walk(ch, here)) {
+                return true;
+            }
+        }
+        return false;
+    }
+    walk(page.components, false);
+    return found;
+}
+
+/** Drop selected ids that are nested under another selected id. */
+export function filterRootSelectionIds(page: Page, componentIds: string[]): string[] {
+    const ids = [...new Set(componentIds.map(id => id.trim()).filter(Boolean))];
+    return ids.filter(
+        id => !ids.some(other => other !== id && isAncestorOnPage(page, other, id))
+    );
+}
+
+/**
+ * Duplicate widgets on a page (subtrees included). Inserts clones after originals with +offset.
+ * @returns New component ids in duplicate order.
+ */
+export function duplicateComponentsOnPage(
+    page: Page,
+    project: EmbfProject,
+    componentIds: string[],
+    offsetX = 10,
+    offsetY = 10
+): string[] {
+    const roots = filterRootSelectionIds(page, componentIds);
+    if (!roots.length) {
+        return [];
+    }
+    const used = collectIdsOnProject(project);
+    const newIds: string[] = [];
+    for (const id of roots) {
+        const loc = locateParentEntry(page.components, id, 0, 0);
+        if (!loc) {
+            continue;
+        }
+        const orig = loc.list[loc.index];
+        const clone = cloneComponentSubtree(orig, used);
+        clone.x = Math.round(orig.x + offsetX);
+        clone.y = Math.round(orig.y + offsetY);
+        loc.list.splice(loc.index + 1, 0, clone);
+        newIds.push(clone.id);
+    }
+    return newIds;
+}
+
+function collectIdsOnProject(project: EmbfProject): Set<string> {
+    const s = new Set<string>();
+    for (const p of project.pages) {
+        walkComponents(p.components, c => {
+            s.add(c.id);
+            return false;
+        });
+    }
+    return s;
+}
+
+/** Insert cloned subtrees at page root (paste); returns new ids. */
+export function pasteComponentsOnPage(
+    page: Page,
+    project: EmbfProject,
+    components: Component[],
+    offsetX = 10,
+    offsetY = 10
+): string[] {
+    if (!components.length) {
+        return [];
+    }
+    const used = collectIdsOnProject(project);
+    const newIds: string[] = [];
+    for (const src of components) {
+        const clone = cloneComponentSubtree(src, used);
+        clone.x = Math.round((src.x ?? 0) + offsetX);
+        clone.y = Math.round((src.y ?? 0) + offsetY);
+        page.components.push(clone);
+        newIds.push(clone.id);
+    }
+    return newIds;
+}
+
 export function renamePageOnProject(
     project: EmbfProject,
     pageIndex: number,

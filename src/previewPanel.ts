@@ -10,7 +10,9 @@ import {
     bulkPatchWidgetsInEmbfFile,
     combineWidgetsInEmbfFile,
     deleteWidgetFromEmbfFile,
+    duplicateWidgetsInEmbfFile,
     moveWidgetInEmbfFile,
+    pasteWidgetsInEmbfFile,
     ungroupWidgetInEmbfFile,
     updatePageInEmbfFile,
     updateWidgetInEmbfFile
@@ -61,6 +63,12 @@ export type WebviewToHostMessage =
     | { type: "pickImageSource"; pageIndex: number; componentId: string }
     | { type: "deleteWidget"; pageIndex: number; componentId: string }
     | { type: "bulkDeleteWidgets"; pageIndex: number; componentIds: string[] }
+    | { type: "duplicateWidgets"; pageIndex: number; componentIds: string[] }
+    | {
+          type: "pasteWidgets";
+          pageIndex: number;
+          components: import("./types/embf").Component[];
+      }
     | {
           type: "combineWidgets";
           pageIndex: number;
@@ -534,6 +542,39 @@ export class EmbfPreviewPanel {
             void deleteWidgetFromEmbfFile(this._filePath, pageIndex, componentId).then(ok => {
                 if (ok) {
                     this.reloadPreviewNow(pageIndex);
+                    this.sendHistoryState();
+                }
+            });
+        } else if (msg.type === "duplicateWidgets") {
+            const pageIndex = Number(msg.pageIndex);
+            const ids = msg.componentIds;
+            if (!Number.isInteger(pageIndex) || pageIndex < 0 || !Array.isArray(ids) || ids.length === 0) {
+                return;
+            }
+            const norm = ids.map(id => String(id ?? "").trim()).filter(Boolean);
+            if (!norm.length) {
+                return;
+            }
+            void duplicateWidgetsInEmbfFile(this._filePath, pageIndex, norm).then(newIds => {
+                if (newIds.length) {
+                    this.reloadPreviewNow(pageIndex, { selectedComponentIds: newIds });
+                    this.sendHistoryState();
+                }
+            });
+        } else if (msg.type === "pasteWidgets") {
+            const pageIndex = Number(msg.pageIndex);
+            const components = msg.components;
+            if (
+                !Number.isInteger(pageIndex) ||
+                pageIndex < 0 ||
+                !Array.isArray(components) ||
+                components.length === 0
+            ) {
+                return;
+            }
+            void pasteWidgetsInEmbfFile(this._filePath, pageIndex, components).then(newIds => {
+                if (newIds.length) {
+                    this.reloadPreviewNow(pageIndex, { selectedComponentIds: newIds });
                     this.sendHistoryState();
                 }
             });
@@ -1234,6 +1275,39 @@ export class EmbfPreviewPanel {
         .page-list-item.active .page-list-id {
             color: #b3d4f5;
         }
+        .widget-tree {
+            list-style: none;
+            margin: 0;
+            padding: 4px 0 8px;
+            font-size: 12px;
+        }
+        .widget-tree li {
+            margin: 0;
+            padding: 0;
+        }
+        .widget-tree-btn {
+            display: block;
+            width: 100%;
+            text-align: left;
+            border: none;
+            background: transparent;
+            color: #ccc;
+            padding: 3px 8px;
+            cursor: pointer;
+            font: inherit;
+            border-radius: 3px;
+        }
+        .widget-tree-btn:hover {
+            background: #333;
+        }
+        .widget-tree-btn.active {
+            background: #094771;
+            color: #fff;
+        }
+        .widget-tree-btn .tree-type {
+            color: #888;
+            margin-right: 6px;
+        }
         .flow-add-form {
             padding: 8px;
             border-bottom: 1px solid #3c3c3c;
@@ -1836,6 +1910,11 @@ export class EmbfPreviewPanel {
             <input type="checkbox" id="design-mode" checked />
             Design
         </label>
+        <label title="Snap moves and resize to a pixel grid">
+            <input type="checkbox" id="design-grid" />
+            Grid
+        </label>
+        <button type="button" class="tb-btn" id="btn-theme-toggle" title="Toggle light/dark preview theme">Theme</button>
         <label for="preview-zoom">Zoom:</label>
         <button type="button" class="tb-btn" id="btn-generate-code" title="Generate C UI files for this project">Generate C Code</button>
         <select id="preview-zoom" title="Preview scale only — device resolution stays in .embf">

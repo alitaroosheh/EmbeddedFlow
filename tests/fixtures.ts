@@ -25,17 +25,23 @@ const defaultPage: Page = {
     ]
 };
 
-/** Minimal valid project for tests (passes `parseEmbfSource`). */
+/** Minimal valid project for tests (passes `parseEmbfSource`). Always returns a deep clone. */
 export function minimalProject(overrides?: {
     display?: Partial<DisplayConfig>;
     pages?: Page[];
 }): EmbfProject {
     const display = { ...defaultDisplay, ...overrides?.display };
-    const pages = overrides?.pages ?? [defaultPage];
+    const pages = overrides?.pages
+        ? clone(overrides.pages)
+        : [clone(defaultPage)];
     return {
         version: "1.0",
         project: { name: "Test", lvglVersion: "9.5.0" },
         display,
         pages
     };
+}
+
+function clone<T>(v: T): T {
+    return JSON.parse(JSON.stringify(v));
 }

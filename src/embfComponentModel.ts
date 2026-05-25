@@ -368,6 +368,48 @@ export function applyComponentPatch(comp: Component, patch: Record<string, unkno
         }
     }
 
+    if ("styleRefs" in patch) {
+        if (Array.isArray(patch.styleRefs)) {
+            const ids = (patch.styleRefs as unknown[]).filter(
+                (v): v is string => typeof v === "string" && v.trim().length > 0
+            );
+            if (ids.length === 0) {
+                delete r.styleRefs;
+            } else {
+                r.styleRefs = ids;
+            }
+        } else if (patch.styleRefs === null || patch.styleRefs === undefined) {
+            delete r.styleRefs;
+        }
+    }
+
+    if ("animations" in patch) {
+        if (Array.isArray(patch.animations)) {
+            r.animations = patch.animations as unknown[];
+        } else if (patch.animations === null || patch.animations === undefined) {
+            delete r.animations;
+        }
+    }
+
+    if ("bindings" in patch) {
+        const b = patch.bindings;
+        if (b === null || b === undefined) {
+            delete r.bindings;
+        } else if (typeof b === "object" && !Array.isArray(b)) {
+            const clean: Record<string, string> = {};
+            for (const [k, v] of Object.entries(b as Record<string, unknown>)) {
+                if (typeof v === "string" && v.trim().length > 0) {
+                    clean[k] = v;
+                }
+            }
+            if (Object.keys(clean).length === 0) {
+                delete r.bindings;
+            } else {
+                r.bindings = clean;
+            }
+        }
+    }
+
     switch (comp.type) {
         case "label":
             if ("text" in patch) setStr(r, "text", patch.text);
@@ -404,6 +446,14 @@ export function applyComponentPatch(comp: Component, patch: Record<string, unkno
             if ("startAngle" in patch) setFiniteNum(r, "startAngle", patch.startAngle);
             if ("endAngle" in patch) setFiniteNum(r, "endAngle", patch.endAngle);
             if ("mode" in patch) setArcMode(r, patch.mode);
+            break;
+        case "knob":
+            if ("min" in patch) setFiniteNum(r, "min", patch.min);
+            if ("max" in patch) setFiniteNum(r, "max", patch.max);
+            if ("value" in patch) setFiniteNum(r, "value", patch.value);
+            if ("startAngle" in patch) setFiniteNum(r, "startAngle", patch.startAngle);
+            if ("endAngle" in patch) setFiniteNum(r, "endAngle", patch.endAngle);
+            if ("indicatorColor" in patch) setStr(r, "indicatorColor", patch.indicatorColor);
             break;
         case "switch":
         case "checkbox":
@@ -626,6 +676,24 @@ export function applyPageInspectorPatch(
             delete project.theme.secondaryColor;
         } else if (typeof v === "string" && v.trim()) {
             project.theme.secondaryColor = v.trim();
+        }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(patch, "projStyles")) {
+        const v = patch.projStyles;
+        if (v === null || (Array.isArray(v) && v.length === 0)) {
+            delete project.styles;
+        } else if (Array.isArray(v)) {
+            project.styles = v as typeof project.styles;
+        }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(patch, "projDataFields")) {
+        const v = patch.projDataFields;
+        if (v === null || (Array.isArray(v) && v.length === 0)) {
+            delete project.dataModel;
+        } else if (Array.isArray(v)) {
+            project.dataModel = { fields: v as NonNullable<typeof project.dataModel>["fields"] };
         }
     }
 

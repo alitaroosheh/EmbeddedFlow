@@ -1,6 +1,10 @@
 import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
+import { execFile, spawnSync } from "child_process";
+import { promisify } from "util";
+
+const execFileAsync = promisify(execFile);
 import { EmbfPreviewPanel } from "./previewPanel";
 import { EmbfParseError, parseEmbf, parseEmbfSource, watchEmbf } from "./embfParser";
 import { lintEmbfProject } from "./embfSemanticLint";
@@ -56,6 +60,16 @@ export function activate(context: vscode.ExtensionContext): void {
         }),
         vscode.commands.registerCommand("embeddedflow.showOutput", () => {
             embfOutput.show(true);
+        }),
+        vscode.commands.registerCommand("embeddedflow.addFont", async (uri?: vscode.Uri) => {
+            const filePath = await resolveCodegenEmbfPath(uri);
+            if (!filePath) {
+                vscode.window.showErrorMessage(
+                    "EmbeddedFlow: Open a .embf file or UI preview, then run Add Font to Project."
+                );
+                return;
+            }
+            await runAddFontCommand(filePath);
         })
     );
 
@@ -492,5 +506,235 @@ async function runCodeGen(filePath: string): Promise<void> {
         const doc = await vscode.workspace.openTextDocument(uiDisp);
         await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
     }
+}
+
+/**
+ * Interactive flow to register a new font in `project.fonts[]` without manual JSON editing.
+ * Asks for id, C symbol, size and an optional source path (relative to the .embf when inside
+ * the workspace). Validates the entry against the parser before persisting.
+ */
+async function runAddFontCommand(filePath: string): Promise<void> {
+    let project: EmbfProject;
+    let rawText: string;
+    try {
+        rawText = fs.readFileSync(filePath, "utf-8");
+        project = parseEmbfSource(rawText);
+    } catch (e: any) {
+        vscode.window.showErrorMessage(`EmbeddedFlow: cannot read project — ${e.message ?? e}`);
+        return;
+    }
+
+    const existingIds = new Set((project.fonts ?? []).map(f => f.id));
+    const id = await vscode.window.showInputBox({
+        title: "Add Font — id",
+        prompt: "Unique font id used by widget styles.fontFamily (e.g. \"title\", \"body_small\")",
+        validateInput: v => {
+            if (!v?.trim()) return "id is required";
+            if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(v.trim())) return "id must be a C identifier";
+            if (existingIds.has(v.trim())) return `id "${v.trim()}" already exists`;
+            return null;
+        }
+    });
+    if (!id) return;
+
+    const name = await vscode.window.showInputBox({
+        title: "Add Font — C symbol",
+        prompt: "C symbol of the lv_font_t (e.g. \"lv_font_montserrat_24\" for built-in, or \"my_font_24\" for a custom .c)",
+        value: `lv_font_montserrat_14`,
+        validateInput: v => {
+            if (!v?.trim()) return "name is required";
+            if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(v.trim())) return "name must be a C identifier";
+            return null;
+        }
+    });
+    if (!name) return;
+
+    const sizeStr = await vscode.window.showInputBox({
+        title: "Add Font — size",
+        prompt: "Glyph size in pixels (positive integer)",
+        value: "14",
+        validateInput: v => {
+            const n = Number(v);
+            if (!Number.isFinite(n) || n < 1 || Math.floor(n) !== n) return "size must be a positive integer";
+            return null;
+        }
+    });
+    if (!sizeStr) return;
+    const size = Math.round(Number(sizeStr));
+
+    let source: string | undefined;
+    if (!name.trim().startsWith("lv_font_montserrat_")) {
+        const fontConvAvailable = await isLvFontConvAvailable();
+        const sourceOptions: { label: string; value: "pick" | "convert" | "skip"; description?: string }[] = [
+            { label: "Pick existing .c file…", value: "pick" }
+        ];
+        if (fontConvAvailable) {
+            sourceOptions.push({
+                label: "Convert TTF/OTF with lv_font_conv…",
+                value: "convert",
+                description: "Found on PATH"
+            });
+        } else {
+            sourceOptions.push({
+                label: "Convert TTF/OTF with lv_font_conv (not installed)",
+                value: "convert",
+                description: "Install: npm i -g lv_font_conv"
+            });
+        }
+        sourceOptions.push({ label: "Skip (built-in or externally declared)", value: "skip" });
+
+        const pickSource = await vscode.window.showQuickPick(sourceOptions, {
+            title: "Add Font — source .c",
+            placeHolder: "Choose how to attach the .c source"
+        });
+        if (!pickSource) return;
+
+        if (pickSource.value === "pick") {
+            const picked = await vscode.window.showOpenDialog({
+                canSelectFiles: true,
+                canSelectFolders: false,
+                canSelectMany: false,
+                openLabel: "Use Font .c File",
+                filters: { "Font C": ["c"], "All": ["*"] }
+            });
+            if (!picked?.length) return;
+            source = relativeToProject(filePath, picked[0].fsPath);
+        } else if (pickSource.value === "convert") {
+            if (!fontConvAvailable) {
+                vscode.window.showErrorMessage(
+                    "EmbeddedFlow: lv_font_conv not found on PATH. Install with `npm install -g lv_font_conv`."
+                );
+                return;
+            }
+            const converted = await runLvFontConv(filePath, name.trim(), size);
+            if (!converted) return;
+            source = relativeToProject(filePath, converted);
+        }
+    }
+
+    const newFont = { id: id.trim(), name: name.trim(), size, ...(source ? { source } : {}) };
+    const nextProject = { ...project, fonts: [...(project.fonts ?? []), newFont] };
+
+    try {
+        parseEmbfSource(JSON.stringify(nextProject));
+    } catch (e: any) {
+        vscode.window.showErrorMessage(`EmbeddedFlow: font entry rejected — ${e.message ?? e}`);
+        return;
+    }
+
+    try {
+        const indent = detectJsonIndent(rawText);
+        fs.writeFileSync(filePath, JSON.stringify(nextProject, null, indent), "utf-8");
+    } catch (e: any) {
+        vscode.window.showErrorMessage(`EmbeddedFlow: failed to save — ${e.message ?? e}`);
+        return;
+    }
+    embeddedFlowLog("addFont", "info", `added font "${newFont.id}" → ${newFont.name} (size ${size})${source ? ` source=${source}` : ""}`);
+    vscode.window.showInformationMessage(
+        `EmbeddedFlow: font "${newFont.id}" added. Reference it as styles.fontFamily: "${newFont.id}".`
+    );
+}
+
+/** Detect indent (2 vs 4 spaces vs tab) from existing JSON; defaults to 2. */
+function detectJsonIndent(text: string): number | string {
+    const m = text.match(/\n([\t ]+)"/);
+    if (!m) return 2;
+    const ws = m[1];
+    if (ws.startsWith("\t")) return "\t";
+    return ws.length;
+}
+
+/** Express `abs` relative to the directory holding the `.embf` (POSIX separators); falls back to absolute. */
+function relativeToProject(embfPath: string, abs: string): string {
+    const projDir = path.dirname(embfPath);
+    const rel = path.relative(projDir, abs);
+    return rel.startsWith("..") ? abs : rel.split(path.sep).join("/");
+}
+
+/** `true` when `lv_font_conv` (or the `npx`-shimmed variant) responds to `--version`. */
+async function isLvFontConvAvailable(): Promise<boolean> {
+    try {
+        await execFileAsync("lv_font_conv", ["--version"], { timeout: 4000, windowsHide: true });
+        return true;
+    } catch {
+        // Some Windows installs land as `lv_font_conv.cmd`; spawnSync resolves PATHEXT.
+        const r = spawnSync("lv_font_conv", ["--version"], { shell: true, timeout: 4000, windowsHide: true });
+        return r.status === 0;
+    }
+}
+
+/**
+ * Pick a TTF/OTF and a glyph range, invoke `lv_font_conv` to emit a .c, save next to the .embf
+ * in `fonts/<symbol>.c`. Returns the absolute output path on success, undefined on cancel/failure.
+ */
+async function runLvFontConv(embfPath: string, symbol: string, size: number): Promise<string | undefined> {
+    const picked = await vscode.window.showOpenDialog({
+        canSelectFiles: true,
+        canSelectFolders: false,
+        canSelectMany: false,
+        openLabel: "Convert Font File",
+        filters: { "Font": ["ttf", "otf", "woff"], "All": ["*"] }
+    });
+    if (!picked?.length) return undefined;
+
+    const range = await vscode.window.showInputBox({
+        title: "lv_font_conv — Unicode range",
+        prompt: "Glyph range(s) to include (lv_font_conv --range syntax)",
+        value: "0x20-0x7F",
+        validateInput: v => (!v?.trim() ? "range is required" : null)
+    });
+    if (!range) return undefined;
+
+    const bpp = await vscode.window.showQuickPick(
+        [
+            { label: "4 bpp (recommended)", value: "4" as const },
+            { label: "2 bpp (smaller, jaggies)", value: "2" as const },
+            { label: "8 bpp (best, larger)",  value: "8" as const },
+            { label: "1 bpp (bitmap)",        value: "1" as const }
+        ],
+        { title: "lv_font_conv — bits per pixel", placeHolder: "Subpixel depth" }
+    );
+    if (!bpp) return undefined;
+
+    const projDir = path.dirname(embfPath);
+    const outDir = path.join(projDir, "fonts");
+    try {
+        fs.mkdirSync(outDir, { recursive: true });
+    } catch (e: any) {
+        vscode.window.showErrorMessage(`EmbeddedFlow: cannot create fonts/ — ${e.message ?? e}`);
+        return undefined;
+    }
+    const outPath = path.join(outDir, `${symbol}.c`);
+
+    const args = [
+        "--font", picked[0].fsPath,
+        "--size", String(size),
+        "--bpp", bpp.value,
+        "--range", range.trim(),
+        "--format", "lvgl",
+        "--no-compress",
+        "-o", outPath
+    ];
+
+    try {
+        await vscode.window.withProgress(
+            { location: vscode.ProgressLocation.Notification, title: `Running lv_font_conv → ${symbol}.c`, cancellable: false },
+            async () => {
+                await execFileAsync("lv_font_conv", args, { timeout: 90000, windowsHide: true, shell: process.platform === "win32" });
+            }
+        );
+    } catch (e: any) {
+        const stderr = (e as { stderr?: string }).stderr ?? "";
+        vscode.window.showErrorMessage(
+            `EmbeddedFlow: lv_font_conv failed — ${e.message ?? e}${stderr ? `\n${stderr.slice(0, 400)}` : ""}`
+        );
+        return undefined;
+    }
+    if (!fs.existsSync(outPath)) {
+        vscode.window.showErrorMessage(`EmbeddedFlow: lv_font_conv reported success but ${outPath} is missing.`);
+        return undefined;
+    }
+    embeddedFlowLog("addFont", "info", `lv_font_conv emitted ${outPath}`);
+    return outPath;
 }
 

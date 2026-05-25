@@ -1,16 +1,19 @@
 import type {
     Component, LabelComponent, ButtonComponent, SliderComponent,
-    SwitchComponent, BarComponent, SpinnerComponent, ArcComponent,
+    SwitchComponent, BarComponent, SpinnerComponent, ArcComponent, KnobComponent,
     CheckboxComponent, DropdownComponent, RollerComponent, TextareaComponent,
     LineComponent, ContainerComponent, PanelComponent, ImageComponent,
-    FontDef
+    FontDef, StyleDef
 } from "../types/embf";
 import { toIdentifier, widgetVar } from "./naming";
 import { emitStyleCalls } from "./styleGen";
+import { styleVarName } from "./stylesGen";
+import { emitAnimationCalls } from "./animationGen";
 
 /** Optional shared context for widget emission (project-level resolvers). */
 export interface WidgetEmitContext {
     fonts?: FontDef[];
+    styles?: StyleDef[];
 }
 
 /**
@@ -45,6 +48,7 @@ export function emitComponent(
         case "bar":        lines.push(...emitBar(v, comp as BarComponent, parentExpr, lvglV9)); break;
         case "spinner":    lines.push(...emitSpinner(v, comp as SpinnerComponent, parentExpr, lvglV9)); break;
         case "arc":        lines.push(...emitArc(v, comp as ArcComponent, parentExpr, lvglV9)); break;
+        case "knob":       lines.push(...emitKnob(v, comp as KnobComponent, parentExpr, lvglV9)); break;
         case "checkbox":   lines.push(...emitCheckbox(v, comp as CheckboxComponent, parentExpr, lvglV9)); break;
         case "dropdown":   lines.push(...emitDropdown(v, comp as DropdownComponent, parentExpr, lvglV9)); break;
         case "roller":     lines.push(...emitRoller(v, comp as RollerComponent, parentExpr, lvglV9)); break;
@@ -61,11 +65,30 @@ export function emitComponent(
 
     // Position, size, styles apply to all widget types
     lines.push(...posSize(v, comp));
+    lines.push(...emitStyleRefCalls(v, comp.styleRefs, ctx?.styles));
     if (comp.styles && Object.keys(comp.styles).length > 0) {
         lines.push(...emitStyleCalls(v, comp.styles, "    ", "LV_PART_MAIN | LV_STATE_DEFAULT", { fonts: ctx?.fonts }));
     }
+    lines.push(...emitAnimationCalls(v, comp.animations));
     lines.push("");  // blank line between widgets
 
+    return lines;
+}
+
+/** Emit `lv_obj_add_style` for every valid styleRef on this widget. */
+function emitStyleRefCalls(v: string, refs: string[] | undefined, defs: StyleDef[] | undefined): string[] {
+    if (!refs?.length) {
+        return [];
+    }
+    const known = new Set((defs ?? []).map(d => d.id));
+    const lines: string[] = [];
+    for (const id of refs) {
+        if (!known.has(id)) {
+            lines.push(`    /* WARN: styleRef "${id}" not declared in project.styles[] */`);
+            continue;
+        }
+        lines.push(`    lv_obj_add_style(${v}, &${styleVarName(id)}, LV_PART_MAIN | LV_STATE_DEFAULT);`);
+    }
     return lines;
 }
 
@@ -200,6 +223,39 @@ function emitArc(v: string, c: ArcComponent, parent: string, _v9: boolean): stri
         lines.push(`    lv_arc_set_mode(${v}, ${modeMap[c.mode]});`);
     }
     return lines;
+}
+
+// ── Knob ───────────────────────────────────────────────────────────────────────
+
+/**
+ * Knob primitive — implemented as an `lv_arc_t` with knob-typical defaults:
+ *  - 270° sweep (135° → 45°) unless overridden
+ *  - thicker indicator arc + visible knob handle in `LV_PART_KNOB`
+ *  - background marker layer kept transparent (focus the indicator)
+ */
+function emitKnob(v: string, c: KnobComponent, parent: string, _v9: boolean): string[] {
+    const start = c.startAngle ?? 135;
+    const end   = c.endAngle   ?? 45;
+    const lines = [
+        `    lv_obj_t *${v} = lv_arc_create(${parent});`,
+        `    lv_arc_set_range(${v}, ${c.min}, ${c.max});`,
+        `    lv_arc_set_value(${v}, ${c.value});`,
+        `    lv_arc_set_bg_angles(${v}, ${start}, ${end});`,
+        `    lv_obj_remove_style(${v}, NULL, LV_PART_KNOB);`,
+        `    lv_obj_set_style_arc_width(${v}, 8, LV_PART_MAIN);`,
+        `    lv_obj_set_style_arc_width(${v}, 8, LV_PART_INDICATOR);`,
+        `    lv_obj_add_flag(${v}, LV_OBJ_FLAG_CLICKABLE);`
+    ];
+    if (c.indicatorColor) {
+        const col = hexToColor(c.indicatorColor);
+        lines.push(`    lv_obj_set_style_arc_color(${v}, ${col}, LV_PART_INDICATOR);`);
+    }
+    return lines;
+}
+
+function hexToColor(hex: string): string {
+    const raw = hex.replace(/^#/, "").padStart(6, "0").slice(0, 6).toUpperCase();
+    return `lv_color_hex(0x${raw})`;
 }
 
 // ── Checkbox ───────────────────────────────────────────────────────────────────

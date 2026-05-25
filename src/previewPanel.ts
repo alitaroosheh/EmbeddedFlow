@@ -1737,6 +1737,42 @@ export class EmbfPreviewPanel {
             grid-template-columns: 1fr 1fr;
             gap: 6px;
         }
+        #inspector-form .styleref-list {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            padding: 4px;
+            border: 1px solid #2f2f2f;
+            border-radius: 3px;
+            background: #1f1f1f;
+        }
+        #inspector-form .styleref-row {
+            display: grid;
+            grid-template-columns: 16px 1fr auto;
+            gap: 6px;
+            align-items: center;
+            font-size: 11px;
+        }
+        #inspector-form .styleref-row .styleref-id {
+            color: #888;
+            font-family: ui-monospace, monospace;
+            font-size: 10px;
+        }
+        #inspector-form .anim-row,
+        #inspector-form .proj-style-row,
+        #inspector-form .proj-field-row {
+            border: 1px solid #2f2f2f;
+            border-radius: 3px;
+            padding: 6px;
+            margin: 0 0 6px;
+            background: #1f1f1f;
+        }
+        #inspector-form .inspector-group-title button.tb-btn-small {
+            float: right;
+            padding: 1px 6px;
+            margin-top: -2px;
+            font-weight: 700;
+        }
         #inspector-form .inspector-layout-grid {
             display: flex;
             flex-wrap: wrap;

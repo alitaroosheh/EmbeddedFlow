@@ -8,6 +8,7 @@ const PREFIX: Partial<Record<ComponentType, string>> = {
     switch: "sw",
     bar: "bar",
     arc: "arc",
+    knob: "knob",
     checkbox: "chk",
     dropdown: "dd",
     roller: "rol",
@@ -131,6 +132,16 @@ export function buildNewComponent(project: EmbfProject, page: Page, widgetType: 
                 min: 0,
                 max: 100,
                 value: 30
+            };
+        case "knob":
+            return {
+                ...base(80, 80),
+                type: "knob",
+                min: 0,
+                max: 100,
+                value: 50,
+                startAngle: 135,
+                endAngle: 45
             };
         case "checkbox":
             return {

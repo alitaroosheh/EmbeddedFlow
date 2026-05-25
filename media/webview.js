@@ -110,10 +110,17 @@ const propertyInspector = document.getElementById("property-inspector");
 const btnToggleInspector = document.getElementById("btn-toggle-inspector");
 const btnToggleLeftSidebar = document.getElementById("btn-toggle-left-sidebar");
 
-/** Sidebar category rail → parallel panel (extend when adding categories in sidebarCategories.ts). */
+/**
+ * Sidebar category rail → parallel panel.
+ * MUST stay in sync with `SIDEBAR_CATEGORIES` in `src/sidebarCategories.ts`.
+ * `setSidebarCategory` early-returns on any id missing from this map, so unlisted
+ * categories silently render dead rail buttons.
+ */
 const SIDEBAR_PANEL_LABELS = {
     components: "Components",
+    hierarchy: "Tree",
     pages: "Pages",
+    settings: "Settings",
     flow: "Flow"
 };
 const SIDEBAR_PANEL_WIDE = new Set(["pages", "flow", "settings", "hierarchy"]);
@@ -793,6 +800,9 @@ function setSidebarCategory(categoryId, persist = true) {
         populateFlowForm();
         renderFlowList();
     }
+    if (categoryId === "hierarchy") {
+        renderWidgetTree();
+    }
     refreshPreviewLayoutAfterPanelChange();
 }
 
@@ -1154,6 +1164,50 @@ function triggerToLvCode(trigger) {
     }
 }
 
+/**
+ * Substitute `{{field}}` references with the matching `dataModel.fields[].default`
+ * (or a `<id>` placeholder when missing) so the live preview shows realistic copy.
+ */
+function applyBindingTemplates(text) {
+    if (typeof text !== "string" || text.indexOf("{{") === -1) {
+        return text;
+    }
+    const fields = currentProject?.dataModel?.fields;
+    return text.replace(/\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g, (_full, id) => {
+        if (!Array.isArray(fields)) return `<${id}>`;
+        const f = fields.find(x => x && x.id === id);
+        if (!f) return `<${id}>`;
+        if (f.default === undefined || f.default === null) {
+            switch (f.type) {
+                case "int":
+                case "float": return "0";
+                case "bool":  return "false";
+                default:      return "";
+            }
+        }
+        if (typeof f.default === "boolean") return f.default ? "true" : "false";
+        return String(f.default);
+    });
+}
+
+/**
+ * Resolve a numeric value from `comp.bindings[prop]` against `dataModel.fields[]` defaults.
+ * Falls back to `fallback` if no binding is set or the field is missing/non-numeric.
+ */
+function resolveBoundNumber(comp, prop, fallback) {
+    const fieldId = comp?.bindings?.[prop];
+    if (typeof fieldId !== "string") return fallback;
+    const fields = currentProject?.dataModel?.fields;
+    if (!Array.isArray(fields)) return fallback;
+    const f = fields.find(x => x && x.id === fieldId);
+    if (!f) return fallback;
+    if (f.default === undefined || f.default === null) {
+        return f.type === "float" || f.type === "int" ? 0 : fallback;
+    }
+    const n = Number(f.default);
+    return Number.isFinite(n) ? n : fallback;
+}
+
 function buildComponentEmbf(wasm, comp, parent) {
     if (comp.hidden) return;
     let obj = 0;
@@ -1162,7 +1216,7 @@ function buildComponentEmbf(wasm, comp, parent) {
     switch (comp.type) {
         case "label": {
             obj = wasm._embf_create_label(parent, comp.x, comp.y, comp.width, comp.height);
-            const ptr = wasm.stringToNewUTF8(comp.text ?? "");
+            const ptr = wasm.stringToNewUTF8(applyBindingTemplates(comp.text ?? ""));
             wasm._embf_label_set_text(obj, ptr);
             wasm._free(ptr);
             break;
@@ -1170,7 +1224,7 @@ function buildComponentEmbf(wasm, comp, parent) {
         case "button": {
             obj = wasm._embf_create_button(parent, comp.x, comp.y, comp.width, comp.height);
             if (comp.label) {
-                const ptr = wasm.stringToNewUTF8(comp.label);
+                const ptr = wasm.stringToNewUTF8(applyBindingTemplates(comp.label));
                 wasm._embf_button_set_label(obj, ptr);
                 wasm._free(ptr);
             }
@@ -1179,7 +1233,7 @@ function buildComponentEmbf(wasm, comp, parent) {
         case "slider": {
             obj = wasm._embf_create_slider(parent, comp.x, comp.y, comp.width, comp.height);
             wasm._embf_slider_set_range(obj, comp.min, comp.max);
-            wasm._embf_slider_set_value(obj, comp.value);
+            wasm._embf_slider_set_value(obj, resolveBoundNumber(comp, "value", comp.value));
             break;
         }
         case "switch": {
@@ -1190,7 +1244,7 @@ function buildComponentEmbf(wasm, comp, parent) {
         case "bar": {
             obj = wasm._embf_create_bar(parent, comp.x, comp.y, comp.width, comp.height);
             wasm._embf_bar_set_range(obj, comp.min, comp.max);
-            wasm._embf_bar_set_value(obj, comp.value);
+            wasm._embf_bar_set_value(obj, resolveBoundNumber(comp, "value", comp.value));
             break;
         }
         case "spinner": {
@@ -1201,13 +1255,20 @@ function buildComponentEmbf(wasm, comp, parent) {
         case "arc": {
             obj = wasm._embf_create_arc(parent, comp.x, comp.y, comp.width, comp.height);
             wasm._embf_arc_set_range(obj, comp.min, comp.max);
-            wasm._embf_arc_set_value(obj, comp.value);
+            wasm._embf_arc_set_value(obj, resolveBoundNumber(comp, "value", comp.value));
+            break;
+        }
+        case "knob": {
+            // Knob is rendered as an arc; native runtime knob styling (LV_PART_KNOB) is approximated.
+            obj = wasm._embf_create_arc(parent, comp.x, comp.y, comp.width, comp.height);
+            wasm._embf_arc_set_range(obj, comp.min, comp.max);
+            wasm._embf_arc_set_value(obj, resolveBoundNumber(comp, "value", comp.value));
             break;
         }
         case "checkbox": {
             obj = wasm._embf_create_checkbox(parent, comp.x, comp.y, comp.width, comp.height);
             if (comp.text) {
-                const ptr = wasm.stringToNewUTF8(comp.text);
+                const ptr = wasm.stringToNewUTF8(applyBindingTemplates(comp.text));
                 wasm._embf_checkbox_set_text(obj, ptr);
                 wasm._free(ptr);
             }
@@ -1236,12 +1297,12 @@ function buildComponentEmbf(wasm, comp, parent) {
         case "textarea": {
             obj = wasm._embf_create_textarea(parent, comp.x, comp.y, comp.width, comp.height);
             if (comp.text) {
-                const ptr = wasm.stringToNewUTF8(comp.text);
+                const ptr = wasm.stringToNewUTF8(applyBindingTemplates(comp.text));
                 wasm._embf_textarea_set_text(obj, ptr);
                 wasm._free(ptr);
             }
             if (comp.placeholder) {
-                const ptr = wasm.stringToNewUTF8(comp.placeholder);
+                const ptr = wasm.stringToNewUTF8(applyBindingTemplates(comp.placeholder));
                 wasm._embf_textarea_set_placeholder(obj, ptr);
                 wasm._free(ptr);
             }
@@ -1640,6 +1701,7 @@ function componentOutsetPadding(type) {
         case "switch":
             return { l: 10, t: 4, r: 10, b: 4 };
         case "arc":
+        case "knob":
             return { l: 8, t: 8, r: 8, b: 8 };
         case "dropdown":
         case "roller":
@@ -2813,6 +2875,7 @@ const INSERT_WIDGET_TYPES = [
     "switch",
     "bar",
     "arc",
+    "knob",
     "checkbox",
     "dropdown",
     "roller",
@@ -3275,6 +3338,81 @@ function wirePageInspectorActions() {
             });
         });
     }
+    wireProjectStylesAndFieldsActions();
+}
+
+/** Add/Remove buttons for the project-level styles + data-fields panels in the page inspector. */
+function wireProjectStylesAndFieldsActions() {
+    if (!inspectorForm || !currentProject) return;
+
+    const addStyle = inspectorForm.querySelector(`[data-proj-style-add="1"]`);
+    if (addStyle && !addStyle.dataset.wired) {
+        addStyle.dataset.wired = "1";
+        addStyle.addEventListener("click", () => {
+            const next = (currentProject.styles ?? []).slice();
+            const id = nextUniqueIdAmong(next.map(s => s.id), "style");
+            next.push({ id, props: {} });
+            vscode.postMessage({
+                type: "updatePage",
+                pageIndex: currentPageIndex,
+                patch: { projStyles: next }
+            });
+        });
+    }
+    inspectorForm.querySelectorAll(`[data-proj-style-remove]`).forEach(btn => {
+        if (btn.dataset.wired) return;
+        btn.dataset.wired = "1";
+        btn.addEventListener("click", () => {
+            const idx = Number(/** @type {HTMLElement} */ (btn).dataset.projStyleRemove);
+            if (!Number.isInteger(idx)) return;
+            const next = (currentProject.styles ?? []).slice();
+            next.splice(idx, 1);
+            vscode.postMessage({
+                type: "updatePage",
+                pageIndex: currentPageIndex,
+                patch: { projStyles: next }
+            });
+        });
+    });
+
+    const addField = inspectorForm.querySelector(`[data-proj-field-add="1"]`);
+    if (addField && !addField.dataset.wired) {
+        addField.dataset.wired = "1";
+        addField.addEventListener("click", () => {
+            const next = (currentProject.dataModel?.fields ?? []).slice();
+            const id = nextUniqueIdAmong(next.map(f => f.id), "field");
+            next.push({ id, type: "string", default: "" });
+            vscode.postMessage({
+                type: "updatePage",
+                pageIndex: currentPageIndex,
+                patch: { projDataFields: next }
+            });
+        });
+    }
+    inspectorForm.querySelectorAll(`[data-proj-field-remove]`).forEach(btn => {
+        if (btn.dataset.wired) return;
+        btn.dataset.wired = "1";
+        btn.addEventListener("click", () => {
+            const idx = Number(/** @type {HTMLElement} */ (btn).dataset.projFieldRemove);
+            if (!Number.isInteger(idx)) return;
+            const next = (currentProject.dataModel?.fields ?? []).slice();
+            next.splice(idx, 1);
+            vscode.postMessage({
+                type: "updatePage",
+                pageIndex: currentPageIndex,
+                patch: { projDataFields: next }
+            });
+        });
+    });
+}
+
+function nextUniqueIdAmong(existing, prefix) {
+    const set = new Set(existing);
+    for (let i = 1; i < 10000; i++) {
+        const id = `${prefix}_${i}`;
+        if (!set.has(id)) return id;
+    }
+    return `${prefix}_${Date.now()}`;
 }
 
 /** @returns {{ id: string, path: string, uri: string }[]} */
@@ -3615,7 +3753,72 @@ function renderPageInspectorHtml(page, project) {
             "Secondary color",
             (project.theme && project.theme.secondaryColor) || ""
         );
+
+    html += projectStylesPanelHtml(project);
+    html += projectDataModelPanelHtml(project);
     return html;
+}
+
+function projectStylesPanelHtml(project) {
+    const styles = project.styles ?? [];
+    let inner = "";
+    if (styles.length === 0) {
+        inner += `<p style="font-size:11px;color:#888;margin:0 0 6px;">No named styles yet.</p>`;
+    } else {
+        inner += `<div data-proj-styles-host="1">`;
+        styles.forEach((s, i) => {
+            inner +=
+                `<div class="proj-style-row" data-proj-style-idx="${i}">` +
+                `<div class="row2"><div class="field"><label>id</label>` +
+                `<input type="text" data-proj-style-field="id" value="${esc(s.id)}" /></div>` +
+                `<div class="field"><label>name</label>` +
+                `<input type="text" data-proj-style-field="name" value="${esc(s.name ?? "")}" /></div></div>` +
+                `<div class="field"><label>props (JSON)</label>` +
+                `<textarea data-proj-style-field="props" rows="3" spellcheck="false">${esc(
+                    JSON.stringify(s.props ?? {}, null, 0)
+                )}</textarea></div>` +
+                `<button type="button" class="tb-btn-small" data-proj-style-remove="${i}">Remove</button>` +
+                `</div>`;
+        });
+        inner += `</div>`;
+    }
+    return (
+        `<div class="inspector-group-title">Named styles ` +
+        `<button type="button" class="tb-btn-small" data-proj-style-add="1" title="Add named style">+</button></div>` +
+        inner
+    );
+}
+
+function projectDataModelPanelHtml(project) {
+    const fields = project.dataModel?.fields ?? [];
+    let inner = "";
+    if (fields.length === 0) {
+        inner += `<p style="font-size:11px;color:#888;margin:0 0 6px;">No data fields yet.</p>`;
+    } else {
+        inner += `<div data-proj-fields-host="1">`;
+        fields.forEach((f, i) => {
+            const sel = (cur, opts) =>
+                opts.map(v => `<option value="${esc(v)}" ${v === cur ? "selected" : ""}>${esc(v)}</option>`).join("");
+            inner +=
+                `<div class="proj-field-row" data-proj-field-idx="${i}">` +
+                `<div class="row2"><div class="field"><label>id</label>` +
+                `<input type="text" data-proj-field-field="id" value="${esc(f.id)}" /></div>` +
+                `<div class="field"><label>type</label>` +
+                `<select data-proj-field-field="type">${sel(f.type, ["string", "int", "float", "bool"])}</select></div></div>` +
+                `<div class="field"><label>default</label>` +
+                `<input type="text" data-proj-field-field="default" value="${esc(
+                    f.default === undefined ? "" : String(f.default)
+                )}" /></div>` +
+                `<button type="button" class="tb-btn-small" data-proj-field-remove="${i}">Remove</button>` +
+                `</div>`;
+        });
+        inner += `</div>`;
+    }
+    return (
+        `<div class="inspector-group-title">Data fields ` +
+        `<button type="button" class="tb-btn-small" data-proj-field-add="1" title="Add data field">+</button></div>` +
+        inner
+    );
 }
 
 function esc(s) {
@@ -3805,6 +4008,14 @@ function buildConsensusWidgetModel(comps) {
             m.startAngle = consensusNumeric(comps, "startAngle");
             m.endAngle = consensusNumeric(comps, "endAngle");
             m.mode = consensusEnumStr(comps, "mode", "");
+            break;
+        case "knob":
+            m.min = consensusNumeric(comps, "min");
+            m.max = consensusNumeric(comps, "max");
+            m.value = consensusNumeric(comps, "value");
+            m.startAngle = consensusNumeric(comps, "startAngle");
+            m.endAngle = consensusNumeric(comps, "endAngle");
+            m.indicatorColor = consensusStr(comps, "indicatorColor");
             break;
         case "switch":
             m.checked = consensusBool(comps, "checked");
@@ -4144,6 +4355,22 @@ function widgetTypeSpecificFieldsHtml(type, m) {
                 { value: "symmetrical", label: "symmetrical" }
             ], /** @type {unknown} */ (m.mode) ?? "");
             break;
+        case "knob":
+            html +=
+                `<div class="row2">${mixFloat("min", "Min", /** @type {unknown} */ (m.min))}${mixFloat(
+                    "max",
+                    "Max",
+                    /** @type {unknown} */ (m.max)
+                )}</div>`;
+            html += mixFloat("value", "Value", /** @type {unknown} */ (m.value));
+            html +=
+                `<div class="row2">${mixFloat(
+                    "startAngle",
+                    "Start °",
+                    /** @type {unknown} */ (m.startAngle)
+                )}${mixFloat("endAngle", "End °", /** @type {unknown} */ (m.endAngle))}</div>`;
+            html += mixText("indicatorColor", "Indicator color (#hex)", /** @type {unknown} */ (m.indicatorColor));
+            break;
         case "switch":
             html += mixCheck("checked", "Checked", /** @type {unknown} */ (m.checked));
             break;
@@ -4296,6 +4523,148 @@ function typeModelFromComp(comp) {
 
 function inspectorAppearancesSection(comp) {
     return inspectorAppearancesFromModels(comp.styles ?? {}, comp.events ?? []);
+}
+
+// ── Bindings / named styles / animations (per-widget) ────────────────────────
+
+const NUMERIC_BINDING_WIDGETS = new Set(["slider", "bar", "arc", "knob"]);
+
+/**
+ * "Named styles", "Bindings", and "Animations" inspector sections.
+ * Each renders only when the project has the relevant declarations (project.styles[],
+ * project.dataModel.fields[]) — otherwise the section is hidden to keep the UI light.
+ */
+function inspectorBindingsAndStylesSection(comp) {
+    let html = "";
+
+    const styles = currentProject?.styles ?? [];
+    if (styles.length > 0) {
+        const refs = Array.isArray(comp.styleRefs) ? comp.styleRefs : [];
+        html +=
+            `<div class="inspector-group-title">Named styles</div>` +
+            `<div class="field"><div class="styleref-list" data-styleref-host="1">` +
+            styles
+                .map(
+                    s =>
+                        `<label class="styleref-row"><input type="checkbox" data-styleref="${esc(s.id)}" ${
+                            refs.includes(s.id) ? "checked" : ""
+                        }/> <span class="styleref-name">${esc(s.name || s.id)}</span><span class="styleref-id">${esc(s.id)}</span></label>`
+                )
+                .join("") +
+            `</div></div>`;
+    }
+
+    if (NUMERIC_BINDING_WIDGETS.has(comp.type)) {
+        const fields = (currentProject?.dataModel?.fields ?? []).filter(
+            f => f && (f.type === "int" || f.type === "float")
+        );
+        if (fields.length > 0) {
+            const current = comp.bindings?.value ?? "";
+            html +=
+                `<div class="inspector-group-title">Binding</div>` +
+                `<div class="field"><label>Value bound to</label>` +
+                `<select name="binding_value" data-binding-prop="value">` +
+                `<option value="">(none)</option>` +
+                fields
+                    .map(
+                        f =>
+                            `<option value="${esc(f.id)}" ${
+                                f.id === current ? "selected" : ""
+                            }>${esc(f.id)} (${esc(f.type)})</option>`
+                    )
+                    .join("") +
+                `</select></div>`;
+        }
+    }
+
+    const anims = Array.isArray(comp.animations) ? comp.animations : [];
+    html +=
+        `<div class="inspector-group-title">Animations` +
+        ` <button type="button" class="tb-btn-small" data-anim-add="1" title="Add animation">+</button></div>` +
+        `<div class="field" data-anim-host="1">` +
+        (anims.length === 0
+            ? `<p style="font-size:11px;color:#888;margin:0 0 4px;">No animations.</p>`
+            : anims.map((a, i) => animationRowHtml(a, i)).join("")) +
+        `</div>`;
+
+    return html;
+}
+
+const ANIM_PROPS = ["x", "y", "width", "height", "opacity"];
+const ANIM_EASINGS = ["linear", "ease_in", "ease_out", "ease_in_out", "overshoot", "bounce", "step"];
+
+/**
+ * Wire add/remove buttons + checkbox/select changes for the new bindings + styles + anim
+ * inspector blocks. Commits via the normal debounced inspector flow.
+ */
+function wireBindingsInspectorActions(comp) {
+    if (!inspectorForm) return;
+
+    const animHost = inspectorForm.querySelector(`[data-anim-host="1"]`);
+    const animAddBtn = inspectorForm.querySelector(`[data-anim-add="1"]`);
+    if (animAddBtn && !animAddBtn.dataset.wired) {
+        animAddBtn.dataset.wired = "1";
+        animAddBtn.addEventListener("click", () => {
+            const existing = Array.isArray(comp.animations) ? comp.animations.slice() : [];
+            existing.push({ property: "x", from: 0, to: 100, duration: 400, easing: "ease_out" });
+            if (selectedComponentOrder.length === 1) {
+                vscode.postMessage({
+                    type: "updateWidget",
+                    pageIndex: currentPageIndex,
+                    componentId: selectedComponentOrder[0],
+                    patch: { animations: existing }
+                });
+            }
+        });
+    }
+    if (animHost) {
+        animHost.querySelectorAll(`[data-anim-remove]`).forEach(btn => {
+            if (btn.dataset.wired) return;
+            btn.dataset.wired = "1";
+            btn.addEventListener("click", () => {
+                const idx = Number(/** @type {HTMLElement} */ (btn).dataset.animRemove);
+                if (!Number.isInteger(idx)) return;
+                const existing = Array.isArray(comp.animations) ? comp.animations.slice() : [];
+                existing.splice(idx, 1);
+                if (selectedComponentOrder.length === 1) {
+                    vscode.postMessage({
+                        type: "updateWidget",
+                        pageIndex: currentPageIndex,
+                        componentId: selectedComponentOrder[0],
+                        patch: { animations: existing }
+                    });
+                }
+            });
+        });
+    }
+}
+
+function animationRowHtml(a, i) {
+    const sel = (cur, options) =>
+        options
+            .map(v => `<option value="${esc(v)}" ${v === cur ? "selected" : ""}>${esc(v)}</option>`)
+            .join("");
+    return (
+        `<div class="anim-row" data-anim-idx="${i}">` +
+        `<div class="row2"><div class="field"><label>Property</label>` +
+        `<select data-anim-field="property">${sel(a.property ?? "x", ANIM_PROPS)}</select></div>` +
+        `<div class="field"><label>Easing</label>` +
+        `<select data-anim-field="easing">${sel(a.easing ?? "linear", ANIM_EASINGS)}</select></div></div>` +
+        `<div class="row2"><div class="field"><label>From</label>` +
+        `<input type="number" data-anim-field="from" value="${esc(a.from ?? 0)}" step="any" /></div>` +
+        `<div class="field"><label>To</label>` +
+        `<input type="number" data-anim-field="to" value="${esc(a.to ?? 0)}" step="any" /></div></div>` +
+        `<div class="row2"><div class="field"><label>Duration (ms)</label>` +
+        `<input type="number" data-anim-field="duration" value="${esc(a.duration ?? 500)}" step="1" min="0" /></div>` +
+        `<div class="field"><label>Delay (ms)</label>` +
+        `<input type="number" data-anim-field="delay" value="${esc(a.delay ?? "")}" step="1" min="0" /></div></div>` +
+        `<div class="row2"><div class="field"><label>Repeat (-1 ∞)</label>` +
+        `<input type="number" data-anim-field="repeat" value="${esc(a.repeat ?? "")}" step="1" /></div>` +
+        `<div class="field"><label>Playback</label>` +
+        `<input type="checkbox" data-anim-field="playback" ${a.playback ? "checked" : ""} /></div></div>` +
+        `<button type="button" class="tb-btn-small" data-anim-remove="${i}">Remove</button>` +
+        `</div>`
+    );
 }
 
 function fieldNumOpt(name, label, value) {
@@ -4541,12 +4910,14 @@ function renderInspector() {
         html += widgetTypeSpecificFieldsHtml(comp.type, typeModelFromComp(comp));
     }
     html += inspectorAppearancesSection(comp);
+    html += inspectorBindingsAndStylesSection(comp);
 
     inspectorForm.innerHTML = html;
     inspectorSyncing = false;
 
     refreshMixedCheckboxes(inspectorForm);
     wireImageInspectorActions();
+    wireBindingsInspectorActions(comp);
 
     if (inspectorFocusSnap) {
         requestAnimationFrame(() => {
@@ -4868,6 +5239,61 @@ function readInspectorPatch() {
         }
     }
 
+    const stylerefHost = inspectorForm.querySelector(`[data-styleref-host="1"]`);
+    if (stylerefHost) {
+        const checked = [
+            .../** @type {NodeListOf<HTMLInputElement>} */ (
+                stylerefHost.querySelectorAll(`input[type="checkbox"][data-styleref]`)
+            )
+        ]
+            .filter(el => el.checked)
+            .map(el => el.dataset.styleref || "")
+            .filter(Boolean);
+        patch.styleRefs = checked;
+    }
+
+    const bindSel = /** @type {HTMLSelectElement | null} */ (
+        inspectorForm.querySelector(`select[data-binding-prop]`)
+    );
+    if (bindSel) {
+        const prop = bindSel.dataset.bindingProp || "value";
+        if (bindSel.value) {
+            patch.bindings = { [prop]: bindSel.value };
+        } else {
+            patch.bindings = null;
+        }
+    }
+
+    const animHost = inspectorForm.querySelector(`[data-anim-host="1"]`);
+    if (animHost) {
+        const rows = [.../** @type {NodeListOf<HTMLElement>} */ (animHost.querySelectorAll(".anim-row"))];
+        const parsed = rows
+            .map(row => {
+                /** @type {Record<string, unknown>} */
+                const a = {};
+                row.querySelectorAll(`[data-anim-field]`).forEach(el => {
+                    const f = /** @type {HTMLElement} */ (el);
+                    const key = f.dataset.animField || "";
+                    if (!key) return;
+                    if (f instanceof HTMLInputElement && f.type === "checkbox") {
+                        if (f.checked) a[key] = true;
+                    } else if (f instanceof HTMLInputElement && f.type === "number") {
+                        if (f.value.trim() !== "") {
+                            const n = Number(f.value);
+                            if (Number.isFinite(n)) a[key] = n;
+                        }
+                    } else if (f instanceof HTMLSelectElement) {
+                        a[key] = f.value;
+                    }
+                });
+                if (typeof a.property !== "string") return null;
+                if (typeof a.from !== "number" || typeof a.to !== "number") return null;
+                return a;
+            })
+            .filter(Boolean);
+        patch.animations = parsed;
+    }
+
     return patch;
 }
 
@@ -4969,6 +5395,84 @@ function readPageInspectorPatch() {
     if (sec instanceof HTMLInputElement) {
         const t = sec.value.trim();
         patch.themeSecondaryColor = t === "" ? null : t;
+    }
+
+    const stylesHost = inspectorForm.querySelector(`[data-proj-styles-host="1"]`);
+    if (stylesHost && currentProject) {
+        const rows = [.../** @type {NodeListOf<HTMLElement>} */ (stylesHost.querySelectorAll(".proj-style-row"))];
+        const out = rows
+            .map(row => {
+                const get = key =>
+                    /** @type {HTMLInputElement | HTMLTextAreaElement | null} */ (
+                        row.querySelector(`[data-proj-style-field="${key}"]`)
+                    );
+                const idEl = get("id");
+                const nameEl = get("name");
+                const propsEl = get("props");
+                const id = idEl?.value.trim();
+                if (!id) return null;
+                let props = {};
+                if (propsEl && propsEl.value.trim()) {
+                    try {
+                        const parsed = JSON.parse(propsEl.value);
+                        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+                            props = parsed;
+                        }
+                    } catch {
+                        return null;
+                    }
+                }
+                const entry = { id, props };
+                if (nameEl && nameEl.value.trim()) entry.name = nameEl.value.trim();
+                return entry;
+            })
+            .filter(Boolean);
+        patch.projStyles = out;
+    }
+
+    const fieldsHost = inspectorForm.querySelector(`[data-proj-fields-host="1"]`);
+    if (fieldsHost && currentProject) {
+        const rows = [.../** @type {NodeListOf<HTMLElement>} */ (fieldsHost.querySelectorAll(".proj-field-row"))];
+        const out = rows
+            .map(row => {
+                const get = key =>
+                    /** @type {HTMLInputElement | HTMLSelectElement | null} */ (
+                        row.querySelector(`[data-proj-field-field="${key}"]`)
+                    );
+                const idEl = get("id");
+                const typeEl = get("type");
+                const defEl = get("default");
+                const id = idEl?.value.trim();
+                const type = typeEl?.value;
+                if (!id || !type) return null;
+                const entry = { id, type };
+                if (defEl && defEl.value !== "") {
+                    const raw = defEl.value;
+                    let parsed;
+                    switch (type) {
+                        case "int": {
+                            const n = Number(raw);
+                            if (Number.isFinite(n) && Number.isInteger(n)) parsed = n;
+                            break;
+                        }
+                        case "float": {
+                            const n = Number(raw);
+                            if (Number.isFinite(n)) parsed = n;
+                            break;
+                        }
+                        case "bool":
+                            parsed = raw === "true" || raw === "1";
+                            break;
+                        case "string":
+                        default:
+                            parsed = raw;
+                    }
+                    if (parsed !== undefined) entry.default = parsed;
+                }
+                return entry;
+            })
+            .filter(Boolean);
+        patch.projDataFields = out;
     }
 
     return patch;
@@ -6429,11 +6933,24 @@ if (previewBezelCheck) {
 
 if (btnOpenProjectSettings) {
     btnOpenProjectSettings.addEventListener("click", () => {
-        selectPageInspector();
-        if (propertyInspector?.classList.contains("collapsed") && btnToggleInspector) {
-            propertyInspector.classList.remove("collapsed");
-            btnToggleInspector.setAttribute("aria-expanded", "true");
+        // The page/project/display inspector only renders in Design mode (renderInspector()
+        // early-returns when designMode is false). Force-enable it so the button always works,
+        // regardless of whether the user is currently in Run mode.
+        if (!designMode) {
+            designMode = true;
+            if (designModeCheck instanceof HTMLInputElement) {
+                designModeCheck.checked = true;
+            }
+            setDesignPointerMode();
         }
+        // Un-collapse the right Properties panel via the persisted-state path so the
+        // toggle button glyph (‹/›), tooltip, and stored collapse flag stay in sync.
+        if (panelCollapseState.inspectorCollapsed) {
+            panelCollapseState.inspectorCollapsed = false;
+            savePanelCollapseState();
+            applyPanelCollapseState();
+        }
+        selectPageInspector();
     });
 }
 

@@ -22,9 +22,35 @@ export interface EmbfProject {
     theme?: ThemeConfig;
     fonts?: FontDef[];
     images?: ImageDef[];
+    /** Reusable named styles emitted as `lv_style_t ui_style_<id>` in `ui_styles.c`. */
+    styles?: StyleDef[];
+    /** Application data fields exposed to bindings (`{{field}}` in widget props). */
+    dataModel?: DataModel;
     pages: Page[];
     /** User-defined reusable groups (container/panel subtrees). */
     componentLibrary?: ComponentLibraryEntry[];
+}
+
+/** Named reusable style → `lv_style_t ui_style_<id>` with `lv_obj_add_style` references on widgets. */
+export interface StyleDef {
+    id: string;
+    name?: string;
+    /** Property bag — same keys understood by inline StyleProps. */
+    props: StyleProps;
+}
+
+/** App-side data fields. Phase-1 binding emits `extern <type> ui_data_<id>;` + setters. */
+export interface DataModel {
+    fields: DataField[];
+}
+
+export type DataFieldType = "string" | "int" | "float" | "bool";
+
+export interface DataField {
+    id: string;
+    type: DataFieldType;
+    /** Default value used both for preview substitution and `ui_bindings_init()`. */
+    default?: string | number | boolean;
 }
 
 export interface ProjectMeta {
@@ -112,6 +138,7 @@ export type Component =
     | BarComponent
     | SpinnerComponent
     | ArcComponent
+    | KnobComponent
     | CheckboxComponent
     | DropdownComponent
     | RollerComponent
@@ -129,6 +156,7 @@ export type ComponentType =
     | "bar"
     | "spinner"
     | "arc"
+    | "knob"
     | "checkbox"
     | "dropdown"
     | "roller"
@@ -231,7 +259,47 @@ export interface BaseComponent {
     height: number;
     hidden?: boolean;
     styles?: StyleProps;
+    /** Named-style references applied in order (`project.styles[].id`). */
+    styleRefs?: string[];
     events?: EventDef[];
+    /** Widget-scoped LVGL animations applied after creation. */
+    animations?: AnimationDef[];
+    /**
+     * Data bindings keyed by widget property → `project.dataModel.fields[].id`.
+     * Supported properties depend on widget type:
+     *   - all                  → `text` (label only) is handled via `{{field}}` in `text`
+     *   - slider / bar / arc   → `value`     (numeric)
+     */
+    bindings?: { [propertyName: string]: string };
+}
+
+/** Property of a widget that can be animated. Maps to a `lv_obj_set_*` setter in codegen. */
+export type AnimationProperty = "x" | "y" | "width" | "height" | "opacity";
+
+/** Animation easing path — maps to an `lv_anim_path_*` function pointer. */
+export type AnimationEasing =
+    | "linear"
+    | "ease_in"
+    | "ease_out"
+    | "ease_in_out"
+    | "overshoot"
+    | "bounce"
+    | "step";
+
+/** Single LVGL animation applied to the owning widget when the screen loads. */
+export interface AnimationDef {
+    id?: string;
+    property: AnimationProperty;
+    from: number;
+    to: number;
+    /** Duration in milliseconds (defaults to 500 in codegen). */
+    duration?: number;
+    delay?: number;
+    easing?: AnimationEasing;
+    /** Number of repeats (`0` = none, omit / `-1` for infinite). */
+    repeat?: number;
+    /** When true, animates back to `from` after reaching `to` (LVGL `lv_anim_set_playback_*`). */
+    playback?: boolean;
 }
 
 export interface StyleProps {
@@ -299,6 +367,25 @@ export interface ArcComponent extends BaseComponent {
     startAngle?: number;
     endAngle?: number;
     mode?: "normal" | "reverse" | "symmetrical";
+}
+
+/**
+ * Knob widget — first-class type emitted as a styled `lv_arc_t` with click-to-adjust
+ * enabled (LVGL's arc is the standard primitive used to build rotary knobs).
+ * Distinct schema from {@link ArcComponent} so the inspector + palette + codegen
+ * can present knob-specific defaults (full 270° sweep, larger indicator).
+ */
+export interface KnobComponent extends BaseComponent {
+    type: "knob";
+    min: number;
+    max: number;
+    value: number;
+    /** Background arc start angle in LVGL degrees (default 135). */
+    startAngle?: number;
+    /** Background arc end angle in LVGL degrees (default 45 — full 270° sweep). */
+    endAngle?: number;
+    /** Color of the value indicator + knob (defaults to theme primary). */
+    indicatorColor?: string;
 }
 
 export interface CheckboxComponent extends BaseComponent {

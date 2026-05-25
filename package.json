@@ -3,7 +3,7 @@
   "publisher": "erminity",
   "displayName": "embeddedflow (an LVGL Design tool)",
   "description": "Design LVGL UIs in .embf projects — live WASM preview, visual editor with groups & flows, and C codegen for LVGL 8/9.",
-  "version": "0.3.6",
+  "version": "1.0.0",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -35,7 +35,8 @@
     "onCommand:embeddedflow.newproject",
     "onCommand:embeddedflow.openPreview",
     "onCommand:embeddedflow.generateCode",
-    "onCommand:embeddedflow.showOutput"
+    "onCommand:embeddedflow.showOutput",
+    "onCommand:embeddedflow.addFont"
   ],
   "main": "./out/extension.js",
   "icon": "media/embeddedflow-icon.png",
@@ -82,6 +83,11 @@
         "command": "embeddedflow.showOutput",
         "title": "embeddedflow: Show Output Log",
         "icon": "$(output)"
+      },
+      {
+        "command": "embeddedflow.addFont",
+        "title": "embeddedflow: Add Font to Project",
+        "icon": "$(symbol-text)"
       }
     ],
     "menus": {
@@ -97,6 +103,9 @@
         },
         {
           "command": "embeddedflow.showOutput"
+        },
+        {
+          "command": "embeddedflow.addFont"
         }
       ],
       "editor/title": [

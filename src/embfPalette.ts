@@ -8,6 +8,7 @@ export const WIDGET_PALETTE_ORDER: readonly ComponentType[] = [
     "switch",
     "bar",
     "arc",
+    "knob",
     "checkbox",
     "dropdown",
     "roller",

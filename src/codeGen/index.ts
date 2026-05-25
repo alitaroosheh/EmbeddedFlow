@@ -11,6 +11,8 @@ import {
     isLvglV9
 } from "./pageGen";
 import { generateFontsHeader, generateFontsSource } from "./fontsGen";
+import { generateStylesHeader, generateStylesSource } from "./stylesGen";
+import { generateBindingsHeader, generateBindingsSource } from "./bindingsGen";
 import { convertProjectImages } from "../resources";
 
 export { resolveCodegenOutputDir } from "./outputDir";
@@ -74,11 +76,27 @@ export function generateCode(
         files.set(path.join(dir, "ui_fonts.c"), fontsSource);
     }
 
+    const stylesHeader = generateStylesHeader(project);
+    const stylesSource = generateStylesSource(project);
+    if (stylesHeader && stylesSource) {
+        files.set(path.join(dir, "ui_styles.h"), stylesHeader);
+        files.set(path.join(dir, "ui_styles.c"), stylesSource);
+    }
+
+    const bindingsHeader = generateBindingsHeader(project);
+    const bindingsSource = generateBindingsSource(project);
+    if (bindingsHeader && bindingsSource) {
+        files.set(path.join(dir, "ui_bindings.h"), bindingsHeader);
+        files.set(path.join(dir, "ui_bindings.c"), bindingsSource);
+    }
+
     files.set(
         path.join(dir, "ui.h"),
         generateRootHeader(project, {
             imageSymbols: imageSymbols.length > 0 ? imageSymbols : undefined,
-            includeFonts: fontsHeader !== null
+            includeFonts: fontsHeader !== null,
+            includeStyles: stylesHeader !== null,
+            includeBindings: bindingsHeader !== null
         })
     );
     files.set(path.join(dir, "ui.c"), generateRootSource(project));

@@ -20,6 +20,7 @@ const COMPONENT_TYPES = new Set<string>([
     "bar",
     "spinner",
     "arc",
+    "knob",
     "checkbox",
     "dropdown",
     "roller",
@@ -45,6 +46,20 @@ export class EmbfParseError extends Error {
     }
 }
 
+/** Module-scoped context filled by {@link validateEmbf} and read by deep validators. */
+const componentContext: {
+    styleIds: Set<string>;
+    fieldIds: Set<string>;
+} = {
+    styleIds: new Set(),
+    fieldIds: new Set()
+};
+
+function resetComponentContext(): void {
+    componentContext.styleIds = new Set();
+    componentContext.fieldIds = new Set();
+}
+
 export function parseEmbf(filePath: string): EmbfProject {
     let raw: string;
     try {
@@ -68,6 +83,7 @@ export function parseEmbfSource(content: string): EmbfProject {
 }
 
 function validateEmbf(data: unknown): EmbfProject {
+    resetComponentContext();
     if (typeof data !== "object" || data === null) {
         throw new EmbfParseError("Root must be a JSON object");
     }
@@ -173,8 +189,6 @@ function validateEmbf(data: unknown): EmbfProject {
         throw new EmbfParseError("'pages' must be a non-empty array");
     }
 
-    validatePagesDeep(obj["pages"] as unknown[]);
-
     const images = obj["images"];
     if (images !== undefined) {
         if (!Array.isArray(images)) {
@@ -200,6 +214,48 @@ function validateEmbf(data: unknown): EmbfProject {
         });
     }
 
+    const styles = obj["styles"];
+    const styleIds = new Set<string>();
+    if (styles !== undefined) {
+        if (!Array.isArray(styles)) {
+            throw new EmbfParseError("'styles' must be an array when present");
+        }
+        styles.forEach((entry, i) => {
+            const p = `styles[${i}]`;
+            validateStyleDefDeep(entry, p);
+            const id = (entry as Record<string, unknown>)["id"] as string;
+            if (styleIds.has(id)) {
+                throw new EmbfParseError(`${p}.id "${id}" duplicates an earlier style entry`);
+            }
+            styleIds.add(id);
+        });
+    }
+    componentContext.styleIds = styleIds;
+
+    const dataModel = obj["dataModel"];
+    const fieldIds = new Set<string>();
+    if (dataModel !== undefined) {
+        if (typeof dataModel !== "object" || dataModel === null || Array.isArray(dataModel)) {
+            throw new EmbfParseError("'dataModel' must be an object when present");
+        }
+        const dm = dataModel as Record<string, unknown>;
+        if (!Array.isArray(dm["fields"])) {
+            throw new EmbfParseError("dataModel.fields must be an array");
+        }
+        (dm["fields"] as unknown[]).forEach((entry, i) => {
+            const p = `dataModel.fields[${i}]`;
+            validateDataFieldDeep(entry, p);
+            const id = (entry as Record<string, unknown>)["id"] as string;
+            if (fieldIds.has(id)) {
+                throw new EmbfParseError(`${p}.id "${id}" duplicates an earlier field`);
+            }
+            fieldIds.add(id);
+        });
+    }
+    componentContext.fieldIds = fieldIds;
+
+    validatePagesDeep(obj["pages"] as unknown[]);
+
     const lib = obj["componentLibrary"];
     if (lib !== undefined) {
         if (!Array.isArray(lib)) {
@@ -221,6 +277,72 @@ function validateImageDefDeep(entry: unknown, path: string): void {
     }
     if (typeof o["path"] !== "string" || !o["path"].trim()) {
         throw new EmbfParseError(`${path}.path must be a non-empty string`);
+    }
+}
+
+function validateStyleDefDeep(entry: unknown, path: string): void {
+    if (typeof entry !== "object" || entry === null) {
+        throw new EmbfParseError(`${path} must be an object`);
+    }
+    const o = entry as Record<string, unknown>;
+    if (typeof o["id"] !== "string" || !(o["id"] as string).trim()) {
+        throw new EmbfParseError(`${path}.id must be a non-empty string`);
+    }
+    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(o["id"] as string)) {
+        throw new EmbfParseError(`${path}.id must be a valid C identifier`);
+    }
+    if (o["name"] !== undefined && (typeof o["name"] !== "string" || !(o["name"] as string).trim())) {
+        throw new EmbfParseError(`${path}.name must be a non-empty string when set`);
+    }
+    if (typeof o["props"] !== "object" || o["props"] === null || Array.isArray(o["props"])) {
+        throw new EmbfParseError(`${path}.props must be an object`);
+    }
+    validateStylePropsObject(o["props"], `${path}.props`);
+}
+
+const DATA_FIELD_TYPES = new Set<string>(["string", "int", "float", "bool"]);
+
+function validateDataFieldDeep(entry: unknown, path: string): void {
+    if (typeof entry !== "object" || entry === null) {
+        throw new EmbfParseError(`${path} must be an object`);
+    }
+    const o = entry as Record<string, unknown>;
+    if (typeof o["id"] !== "string" || !(o["id"] as string).trim()) {
+        throw new EmbfParseError(`${path}.id must be a non-empty string`);
+    }
+    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(o["id"] as string)) {
+        throw new EmbfParseError(`${path}.id must be a valid C identifier`);
+    }
+    const ty = o["type"];
+    if (typeof ty !== "string" || !DATA_FIELD_TYPES.has(ty)) {
+        throw new EmbfParseError(
+            `${path}.type must be one of: ${[...DATA_FIELD_TYPES].join(", ")}`
+        );
+    }
+    if (o["default"] !== undefined) {
+        const def = o["default"];
+        switch (ty) {
+            case "string":
+                if (typeof def !== "string") {
+                    throw new EmbfParseError(`${path}.default must be a string`);
+                }
+                break;
+            case "int":
+                if (!Number.isFinite(def) || !Number.isInteger(def as number)) {
+                    throw new EmbfParseError(`${path}.default must be an integer`);
+                }
+                break;
+            case "float":
+                if (!Number.isFinite(def)) {
+                    throw new EmbfParseError(`${path}.default must be a finite number`);
+                }
+                break;
+            case "bool":
+                if (typeof def !== "boolean") {
+                    throw new EmbfParseError(`${path}.default must be a boolean`);
+                }
+                break;
+        }
     }
 }
 
@@ -425,6 +547,9 @@ function validateComponentDeep(comp: unknown, path: string): void {
     }
 
     validateOptionalStyles(o, path);
+    validateOptionalStyleRefs(o, path);
+    validateOptionalAnimations(o, path);
+    validateOptionalBindings(o, path);
 
     const t = o["type"] as string;
     switch (t) {
@@ -432,6 +557,7 @@ function validateComponentDeep(comp: unknown, path: string): void {
             if (typeof o["text"] !== "string") {
                 throw new EmbfParseError(`${path}.text must be a string`);
             }
+            validateBindingTemplates(o["text"] as string, `${path}.text`);
             if (o["longMode"] !== undefined) {
                 const lm = o["longMode"];
                 if (lm !== "wrap" && lm !== "dot" && lm !== "scroll" && lm !== "clip") {
@@ -452,7 +578,8 @@ function validateComponentDeep(comp: unknown, path: string): void {
             break;
         case "slider":
         case "bar":
-        case "arc": {
+        case "arc":
+        case "knob": {
             for (const k of ["min", "max", "value"] as const) {
                 if (!isFiniteNumber(o[k])) {
                     throw new EmbfParseError(`${path}.${k} must be a finite number`);
@@ -476,6 +603,17 @@ function validateComponentDeep(comp: unknown, path: string): void {
                     if (m !== "normal" && m !== "reverse" && m !== "symmetrical") {
                         throw new EmbfParseError(`${path}.mode must be normal, reverse, or symmetrical`);
                     }
+                }
+            }
+            if (t === "knob") {
+                if (o["startAngle"] !== undefined && !isFiniteNumber(o["startAngle"])) {
+                    throw new EmbfParseError(`${path}.startAngle must be a finite number`);
+                }
+                if (o["endAngle"] !== undefined && !isFiniteNumber(o["endAngle"])) {
+                    throw new EmbfParseError(`${path}.endAngle must be a finite number`);
+                }
+                if (o["indicatorColor"] !== undefined && typeof o["indicatorColor"] !== "string") {
+                    throw new EmbfParseError(`${path}.indicatorColor must be a string when set`);
                 }
             }
             break;
@@ -584,26 +722,171 @@ function validateComponentDeep(comp: unknown, path: string): void {
 
 const ALIGN_VALUES = new Set<string>(["left", "center", "right"]);
 
+const ANIMATION_PROPERTIES = new Set<string>(["x", "y", "width", "height", "opacity"]);
+const ANIMATION_EASINGS = new Set<string>([
+    "linear",
+    "ease_in",
+    "ease_out",
+    "ease_in_out",
+    "overshoot",
+    "bounce",
+    "step"
+]);
+
+function validateOptionalStyleRefs(o: Record<string, unknown>, path: string): void {
+    if (o["styleRefs"] === undefined) {
+        return;
+    }
+    const raw = o["styleRefs"];
+    if (!Array.isArray(raw)) {
+        throw new EmbfParseError(`${path}.styleRefs must be an array of style ids`);
+    }
+    for (let i = 0; i < raw.length; i++) {
+        const v = raw[i];
+        if (typeof v !== "string" || !v.trim()) {
+            throw new EmbfParseError(`${path}.styleRefs[${i}] must be a non-empty string`);
+        }
+        if (componentContext.styleIds.size > 0 && !componentContext.styleIds.has(v)) {
+            throw new EmbfParseError(
+                `${path}.styleRefs[${i}] "${v}" is not defined in project.styles[]`
+            );
+        }
+    }
+}
+
+function validateOptionalAnimations(o: Record<string, unknown>, path: string): void {
+    if (o["animations"] === undefined) {
+        return;
+    }
+    const raw = o["animations"];
+    if (!Array.isArray(raw)) {
+        throw new EmbfParseError(`${path}.animations must be an array`);
+    }
+    for (let i = 0; i < raw.length; i++) {
+        const ap = `${path}.animations[${i}]`;
+        const a = raw[i];
+        if (typeof a !== "object" || a === null) {
+            throw new EmbfParseError(`${ap} must be an object`);
+        }
+        const ao = a as Record<string, unknown>;
+        if (typeof ao["property"] !== "string" || !ANIMATION_PROPERTIES.has(ao["property"])) {
+            throw new EmbfParseError(
+                `${ap}.property must be one of: ${[...ANIMATION_PROPERTIES].join(", ")}`
+            );
+        }
+        for (const k of ["from", "to"] as const) {
+            if (!isFiniteNumber(ao[k])) {
+                throw new EmbfParseError(`${ap}.${k} must be a finite number`);
+            }
+        }
+        if (ao["duration"] !== undefined && (!isFiniteNumber(ao["duration"]) || (ao["duration"] as number) < 0)) {
+            throw new EmbfParseError(`${ap}.duration must be a non-negative number when set`);
+        }
+        if (ao["delay"] !== undefined && (!isFiniteNumber(ao["delay"]) || (ao["delay"] as number) < 0)) {
+            throw new EmbfParseError(`${ap}.delay must be a non-negative number when set`);
+        }
+        if (ao["easing"] !== undefined && (typeof ao["easing"] !== "string" || !ANIMATION_EASINGS.has(ao["easing"]))) {
+            throw new EmbfParseError(
+                `${ap}.easing must be one of: ${[...ANIMATION_EASINGS].join(", ")}`
+            );
+        }
+        if (ao["repeat"] !== undefined && !isFiniteNumber(ao["repeat"])) {
+            throw new EmbfParseError(`${ap}.repeat must be a finite number when set`);
+        }
+        if (ao["playback"] !== undefined && typeof ao["playback"] !== "boolean") {
+            throw new EmbfParseError(`${ap}.playback must be a boolean when set`);
+        }
+        if (ao["id"] !== undefined && (typeof ao["id"] !== "string" || !(ao["id"] as string).trim())) {
+            throw new EmbfParseError(`${ap}.id must be a non-empty string when set`);
+        }
+    }
+}
+
+const BINDING_TEMPLATE = /\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g;
+
+/** Widget property → required dataField type for numeric bindings. */
+const NUMERIC_BINDING_PROPS: Record<string, Set<string>> = {
+    slider: new Set(["value"]),
+    bar:    new Set(["value"]),
+    arc:    new Set(["value"]),
+    knob:   new Set(["value"])
+};
+
+function validateOptionalBindings(o: Record<string, unknown>, path: string): void {
+    if (o["bindings"] === undefined) {
+        return;
+    }
+    const raw = o["bindings"];
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+        throw new EmbfParseError(`${path}.bindings must be an object`);
+    }
+    const widgetType = o["type"] as string;
+    const allowedProps = NUMERIC_BINDING_PROPS[widgetType] ?? new Set<string>();
+    const fields = componentContext.fieldIds;
+    for (const [prop, value] of Object.entries(raw as Record<string, unknown>)) {
+        if (!allowedProps.has(prop)) {
+            throw new EmbfParseError(
+                `${path}.bindings.${prop} is not a bindable property on widget type "${widgetType}" (supported: ${[...allowedProps].join(", ") || "<none>"})`
+            );
+        }
+        if (typeof value !== "string" || !value.trim()) {
+            throw new EmbfParseError(`${path}.bindings.${prop} must be a non-empty field id`);
+        }
+        if (fields.size === 0) {
+            throw new EmbfParseError(
+                `${path}.bindings.${prop} references "${value}" but project.dataModel.fields[] is empty`
+            );
+        }
+        if (!fields.has(value)) {
+            throw new EmbfParseError(
+                `${path}.bindings.${prop} references unknown field "${value}" (defined: ${[...fields].join(", ")})`
+            );
+        }
+    }
+}
+
+function validateBindingTemplates(value: string, path: string): void {
+    const ids = componentContext.fieldIds;
+    let m: RegExpExecArray | null;
+    const re = new RegExp(BINDING_TEMPLATE.source, "g");
+    while ((m = re.exec(value)) !== null) {
+        const fid = m[1];
+        if (ids.size === 0) {
+            throw new EmbfParseError(
+                `${path} references binding "{{${fid}}}" but project.dataModel.fields[] is empty`
+            );
+        }
+        if (!ids.has(fid)) {
+            throw new EmbfParseError(
+                `${path} references unknown binding field "${fid}" (defined: ${[...ids].join(", ") || "<none>"})`
+            );
+        }
+    }
+}
+
 function validateOptionalStyles(o: Record<string, unknown>, path: string): void {
     if (o["styles"] === undefined) {
         return;
     }
-    const raw = o["styles"];
+    validateStylePropsObject(o["styles"], `${path}.styles`);
+}
+
+function validateStylePropsObject(raw: unknown, path: string): void {
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-        throw new EmbfParseError(`${path}.styles must be an object`);
+        throw new EmbfParseError(`${path} must be an object`);
     }
     const st = raw as Record<string, unknown>;
 
     function needStr(prop: string, v: unknown): string {
         if (typeof v !== "string") {
-            throw new EmbfParseError(`${path}.styles.${prop} must be a string`);
+            throw new EmbfParseError(`${path}.${prop} must be a string`);
         }
         return v;
     }
 
     function needFinNum(prop: string, v: unknown): number {
         if (!isFiniteNumber(v)) {
-            throw new EmbfParseError(`${path}.styles.${prop} must be a finite number`);
+            throw new EmbfParseError(`${path}.${prop} must be a finite number`);
         }
         return v as number;
     }
@@ -611,7 +894,7 @@ function validateOptionalStyles(o: Record<string, unknown>, path: string): void 
     function needUint(prop: string, v: unknown): number {
         const n = needFinNum(prop, v);
         if (n < 0 || Math.floor(n) !== n) {
-            throw new EmbfParseError(`${path}.styles.${prop} must be a non-negative integer`);
+            throw new EmbfParseError(`${path}.${prop} must be a non-negative integer`);
         }
         return n;
     }
@@ -632,7 +915,7 @@ function validateOptionalStyles(o: Record<string, unknown>, path: string): void 
     for (const key of Object.keys(st)) {
         if (!allowedKeys.has(key)) {
             throw new EmbfParseError(
-                `${path}.styles has unknown property "${key}" (allowed: ${[...allowedKeys].join(", ")})`
+                `${path} has unknown property "${key}" (allowed: ${[...allowedKeys].join(", ")})`
             );
         }
     }
@@ -699,7 +982,7 @@ function validateOptionalStyles(o: Record<string, unknown>, path: string): void 
     if (st["align"] !== undefined) {
         const al = st["align"];
         if (typeof al !== "string" || !ALIGN_VALUES.has(al)) {
-            throw new EmbfParseError(`${path}.styles.align must be left, center, or right`);
+            throw new EmbfParseError(`${path}.align must be left, center, or right`);
         }
     }
 }

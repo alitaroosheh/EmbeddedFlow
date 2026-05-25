@@ -13,6 +13,7 @@ import {
     duplicateComponentsOnPage,
     pasteComponentsOnPage,
     reorderComponentZOrderOnPage,
+    reparentComponentOnPage,
     ungroupContainerOnPage,
     type ZOrderAction
 } from "./embfComponentModel";
@@ -336,6 +337,43 @@ export async function combineWidgetsInEmbfFile(
     }
     embeddedFlowLog("widgets", "info", `combined → ${result.containerId} (${path.basename(filePath)})`);
     return { ok: true, containerId: result.containerId };
+}
+
+/** Move a widget to a different parent (container/panel or page root) preserving absolute position. */
+export async function reparentWidgetInEmbfFile(
+    filePath: string,
+    pageIndex: number,
+    componentId: string,
+    parentId: string | null,
+    beforeId?: string | null
+): Promise<{ ok: true } | { ok: false }> {
+    const id = String(componentId ?? "").trim();
+    if (!id) {
+        return { ok: false };
+    }
+
+    let reason = "";
+    const ok = await persistPageEdit(filePath, pageIndex, page => {
+        const r = reparentComponentOnPage(page, id, parentId, beforeId);
+        if (r.ok) {
+            return true;
+        }
+        reason = r.reason;
+        return false;
+    });
+
+    if (!ok) {
+        if (reason) {
+            await vscode.window.showErrorMessage(`EmbeddedFlow: ${reason}`);
+        }
+        return { ok: false };
+    }
+    embeddedFlowLog(
+        "widgets",
+        "info",
+        `reparented "${id}" → ${parentId ?? "(root)"} (${path.basename(filePath)})`
+    );
+    return { ok: true };
 }
 
 /** Lift container/panel children back to its parent sibling list (ungroup). */

@@ -3,7 +3,7 @@
   "publisher": "erminity",
   "displayName": "embeddedflow (an LVGL Design tool)",
   "description": "Design LVGL UIs in .embf projects — live WASM preview, visual editor with groups & flows, and C codegen for LVGL 8/9.",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "license": "MIT",
   "repository": {
     "type": "git",

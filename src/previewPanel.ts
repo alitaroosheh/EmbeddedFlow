@@ -14,6 +14,7 @@ import {
     moveWidgetInEmbfFile,
     pasteWidgetsInEmbfFile,
     reorderWidgetInEmbfFile,
+    reparentWidgetInEmbfFile,
     ungroupWidgetInEmbfFile,
     updatePageInEmbfFile,
     updateWidgetInEmbfFile
@@ -88,6 +89,13 @@ export type WebviewToHostMessage =
           componentIds: string[];
       }
     | { type: "ungroupWidget"; pageIndex: number; componentId: string }
+    | {
+          type: "reparentWidget";
+          pageIndex: number;
+          componentId: string;
+          parentId: string | null;
+          beforeId?: string | null;
+      }
     | { type: "saveGroupToLibrary"; pageIndex: number; componentId: string }
     | { type: "insertLibraryComponent"; pageIndex: number; libraryId: string }
     | { type: "removeLibraryEntry"; libraryId: string }
@@ -658,6 +666,32 @@ export class EmbfPreviewPanel {
             void ungroupWidgetInEmbfFile(this._filePath, pageIndex, componentId).then(res => {
                 if (res.ok) {
                     this.reloadPreviewNow(pageIndex, { selectedComponentIds: res.liftedIds });
+                    this.sendHistoryState();
+                }
+            });
+        } else if (msg.type === "reparentWidget") {
+            const pageIndex = Number(msg.pageIndex);
+            const componentId = String(msg.componentId ?? "").trim();
+            if (!Number.isInteger(pageIndex) || pageIndex < 0 || !componentId) {
+                return;
+            }
+            const parentId =
+                msg.parentId === null || msg.parentId === undefined
+                    ? null
+                    : String(msg.parentId).trim() || null;
+            const beforeId =
+                typeof msg.beforeId === "string" && msg.beforeId.trim()
+                    ? msg.beforeId.trim()
+                    : null;
+            void reparentWidgetInEmbfFile(
+                this._filePath,
+                pageIndex,
+                componentId,
+                parentId,
+                beforeId
+            ).then(res => {
+                if (res.ok) {
+                    this.reloadPreviewNow(pageIndex, { selectedComponentIds: [componentId] });
                     this.sendHistoryState();
                 }
             });
@@ -1347,6 +1381,20 @@ export class EmbfPreviewPanel {
             color: #888;
             margin-right: 6px;
         }
+        .widget-tree-btn.dragging {
+            opacity: 0.45;
+        }
+        .widget-tree-btn.drop-into {
+            background: #093d5a;
+            outline: 1px dashed #4ea2e0;
+            outline-offset: -2px;
+        }
+        .widget-tree-btn.drop-before {
+            box-shadow: inset 0 2px 0 0 #4ea2e0;
+        }
+        .widget-tree-btn.drop-after {
+            box-shadow: inset 0 -2px 0 0 #4ea2e0;
+        }
         .flow-add-form {
             padding: 8px;
             border-bottom: 1px solid #3c3c3c;
@@ -1968,6 +2016,47 @@ export class EmbfPreviewPanel {
             z-index: 10;
             touch-action: none;
         }
+        .ruler {
+            position: absolute;
+            background: #1f1f1f;
+            z-index: 5;
+            pointer-events: none;
+            image-rendering: pixelated;
+        }
+        .ruler-top {
+            left: 0;
+            top: -20px;
+            height: 20px;
+        }
+        .ruler-left {
+            left: -20px;
+            top: 0;
+            width: 20px;
+        }
+        .ruler-corner {
+            position: absolute;
+            left: -20px;
+            top: -20px;
+            width: 20px;
+            height: 20px;
+            background: #1f1f1f;
+            z-index: 5;
+            pointer-events: none;
+        }
+        #display-wrapper.no-rulers .ruler,
+        #display-wrapper.no-rulers .ruler-corner {
+            display: none;
+        }
+        #canvas-container.pan-armed {
+            cursor: grab;
+        }
+        #canvas-container.pan-active {
+            cursor: grabbing;
+        }
+        #canvas-container.pan-armed #design-overlay,
+        #canvas-container.pan-active #design-overlay {
+            pointer-events: none;
+        }
         #toolbar input[type="checkbox"] {
             margin: 0 4px 0 0;
             vertical-align: middle;
@@ -2026,6 +2115,10 @@ export class EmbfPreviewPanel {
             <input type="checkbox" id="design-grid" />
             Grid
         </label>
+        <label title="Show pixel rulers on the canvas edges">
+            <input type="checkbox" id="design-rulers" />
+            Rulers
+        </label>
         <button type="button" class="tb-btn" id="btn-theme-toggle" title="Toggle light/dark preview theme">Theme</button>
         <label for="preview-zoom">Zoom:</label>
         <button type="button" class="tb-btn" id="btn-generate-code" title="Generate C UI files for this project">Generate C Code</button>
@@ -2069,7 +2162,10 @@ export class EmbfPreviewPanel {
         </aside>
         <div id="canvas-container">
         <div id="insert-widget-picker" role="menu" aria-label="Insert widget" hidden></div>
-        <div id="display-wrapper">
+        <div id="display-wrapper" class="no-rulers">
+            <div id="ruler-corner" class="ruler-corner" aria-hidden="true"></div>
+            <canvas id="ruler-top" class="ruler ruler-top" aria-hidden="true"></canvas>
+            <canvas id="ruler-left" class="ruler ruler-left" aria-hidden="true"></canvas>
             <canvas id="lvgl-canvas"></canvas>
             <div id="image-preview-layer" aria-hidden="true"></div>
             <canvas id="design-overlay"></canvas>

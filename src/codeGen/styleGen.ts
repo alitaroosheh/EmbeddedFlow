@@ -1,4 +1,10 @@
-import type { StyleProps } from "../types/embf";
+import type { FontDef, StyleProps } from "../types/embf";
+
+/** Optional context passed to {@link emitStyleCalls} for project-aware lookups. */
+export interface StyleEmitContext {
+    /** Project-declared fonts; enables `fontFamily` → `UI_FONT_*` resolution. */
+    fonts?: FontDef[];
+}
 
 /**
  * Emit lv_obj_set_style_* calls for a widget's inline styles.
@@ -7,12 +13,14 @@ import type { StyleProps } from "../types/embf";
  * @param styles   StyleProps from the .embf component
  * @param indent   leading whitespace string (e.g. "    ")
  * @param selector LVGL part+state selector (default: `LV_PART_MAIN | LV_STATE_DEFAULT`)
+ * @param ctx      Optional project context (fonts) for advanced style resolution
  */
 export function emitStyleCalls(
     varName: string,
     styles: StyleProps,
     indent: string = "    ",
-    selector: string = "LV_PART_MAIN | LV_STATE_DEFAULT"
+    selector: string = "LV_PART_MAIN | LV_STATE_DEFAULT",
+    ctx?: StyleEmitContext
 ): string[] {
     const lines: string[] = [];
 
@@ -50,7 +58,10 @@ export function emitStyleCalls(
     if (styles.textColor !== undefined) {
         lines.push(s("text_color", hexToLvColor(styles.textColor)));
     }
-    if (styles.fontSize !== undefined) {
+    const fontExpr = resolveFontExpr(styles, ctx?.fonts);
+    if (fontExpr) {
+        lines.push(s("text_font", fontExpr));
+    } else if (styles.fontSize !== undefined) {
         lines.push(s("text_font", builtinFont(styles.fontSize)));
     }
     if (styles.align !== undefined) {
@@ -107,6 +118,19 @@ export function hexToLvColor(hex: string): string {
 
     const packed = (r << 16) | (g << 8) | b;
     return `lv_color_hex(0x${packed.toString(16).padStart(6, "0").toUpperCase()})`;
+}
+
+/**
+ * Resolve a font expression from `styles.fontFamily` against the project's `fonts[]`.
+ * Returns `&<font_symbol>` when the family matches a declared id, otherwise `null`.
+ */
+function resolveFontExpr(styles: StyleProps, fonts: FontDef[] | undefined): string | null {
+    const family = styles.fontFamily?.trim();
+    if (!family || !fonts) {
+        return null;
+    }
+    const def = fonts.find(f => f.id === family);
+    return def?.name ? `&${def.name}` : null;
 }
 
 /**

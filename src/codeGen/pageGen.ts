@@ -79,10 +79,10 @@ export function generatePageSource(project: EmbfProject, page: Page): string {
         `lv_obj_t *${widgetVar(page.id, w.id)} = NULL;`
     );
 
-    // Widget creation code
+    const widgetCtx = { fonts: project.fonts };
     const bodyLines: string[] = [];
     for (const comp of page.components) {
-        bodyLines.push(...emitComponent(page.id, comp, scrVar, v9));
+        bodyLines.push(...emitComponent(page.id, comp, scrVar, v9, widgetCtx));
     }
 
     // Screen background color
@@ -165,6 +165,8 @@ export function generateDisplayHeader(project: EmbfProject): string {
 export interface GenerateRootHeaderOptions {
     /** Converted image symbols to declare in `ui.h` (sources are `ui_img_*.c` in this folder). */
     imageSymbols?: { symbolName: string; lvglV9: boolean }[];
+    /** When true, `ui.h` will `#include "ui_fonts.h"` so callers get UI_FONT_* macros. */
+    includeFonts?: boolean;
 }
 
 export function generateRootHeader(
@@ -178,6 +180,7 @@ export function generateRootHeader(
         opts?.imageSymbols && opts.imageSymbols.length > 0
             ? [...generateImageExternLines(opts.imageSymbols), ``]
             : [];
+    const fontsInclude = opts?.includeFonts ? [`#include "ui_fonts.h"`] : [];
 
     return [
         AUTOGEN_BANNER,
@@ -190,6 +193,7 @@ export function generateRootHeader(
         ``,
         `#include "ui_display.h"`,
         lvglIncludeDirective(project),
+        ...fontsInclude,
         ``,
         ...imageLines,
         ...includes,

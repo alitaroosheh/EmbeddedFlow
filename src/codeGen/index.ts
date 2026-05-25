@@ -10,6 +10,7 @@ import {
     generateDisplayHeader,
     isLvglV9
 } from "./pageGen";
+import { generateFontsHeader, generateFontsSource } from "./fontsGen";
 import { convertProjectImages } from "../resources";
 
 export { resolveCodegenOutputDir } from "./outputDir";
@@ -66,10 +67,18 @@ export function generateCode(
         lvglV9
     }));
 
+    const fontsHeader = generateFontsHeader(project);
+    const fontsSource = generateFontsSource(project);
+    if (fontsHeader && fontsSource) {
+        files.set(path.join(dir, "ui_fonts.h"), fontsHeader);
+        files.set(path.join(dir, "ui_fonts.c"), fontsSource);
+    }
+
     files.set(
         path.join(dir, "ui.h"),
         generateRootHeader(project, {
-            imageSymbols: imageSymbols.length > 0 ? imageSymbols : undefined
+            imageSymbols: imageSymbols.length > 0 ? imageSymbols : undefined,
+            includeFonts: fontsHeader !== null
         })
     );
     files.set(path.join(dir, "ui.c"), generateRootSource(project));

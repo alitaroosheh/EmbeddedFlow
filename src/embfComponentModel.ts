@@ -1087,6 +1087,89 @@ export function reorderComponentZOrderOnPage(
     return true;
 }
 
+export type ReparentResult =
+    | { ok: true; absX: number; absY: number }
+    | { ok: false; reason: string };
+
+/**
+ * Move a widget to a new parent on the same page, preserving its absolute screen position.
+ *
+ * @param parentId Target parent component id; `null` to move to page root.
+ * @param beforeId Optional sibling id to insert before (place at end when omitted/unknown).
+ */
+export function reparentComponentOnPage(
+    page: Page,
+    componentId: string,
+    parentId: string | null,
+    beforeId?: string | null
+): ReparentResult {
+    const sourceId = componentId.trim();
+    if (!sourceId) {
+        return { ok: false, reason: "Invalid widget id." };
+    }
+    const targetId = parentId ? parentId.trim() : null;
+    if (targetId && targetId === sourceId) {
+        return { ok: false, reason: "Cannot drop a widget on itself." };
+    }
+    if (targetId && isAncestorOnPage(page, sourceId, targetId)) {
+        return { ok: false, reason: "Cannot drop a widget inside one of its descendants." };
+    }
+
+    const srcLoc = locateParentEntry(page.components, sourceId, 0, 0);
+    if (!srcLoc) {
+        return { ok: false, reason: "Widget not found on this page." };
+    }
+    const comp = srcLoc.list[srcLoc.index];
+    if (!comp) {
+        return { ok: false, reason: "Widget not found on this page." };
+    }
+
+    const absX = srcLoc.parentAbsX + comp.x;
+    const absY = srcLoc.parentAbsY + comp.y;
+
+    let destList: Component[];
+    let destParentAbsX = 0;
+    let destParentAbsY = 0;
+    if (targetId === null) {
+        destList = page.components;
+    } else {
+        const targetLoc = locateParentEntry(page.components, targetId, 0, 0);
+        if (!targetLoc) {
+            return { ok: false, reason: "Target parent not found on this page." };
+        }
+        const target = targetLoc.list[targetLoc.index];
+        if (!target) {
+            return { ok: false, reason: "Target parent not found on this page." };
+        }
+        const children = getChildrenArray(target);
+        if (!children) {
+            return { ok: false, reason: "Target widget cannot contain children." };
+        }
+        destList = children;
+        destParentAbsX = targetLoc.parentAbsX + target.x;
+        destParentAbsY = targetLoc.parentAbsY + target.y;
+    }
+
+    srcLoc.list.splice(srcLoc.index, 1);
+
+    let insertAt = destList.length;
+    if (beforeId) {
+        const bId = beforeId.trim();
+        if (bId && bId !== sourceId) {
+            const idx = destList.findIndex(c => c.id === bId);
+            if (idx >= 0) {
+                insertAt = idx;
+            }
+        }
+    }
+
+    comp.x = Math.round(absX - destParentAbsX);
+    comp.y = Math.round(absY - destParentAbsY);
+    destList.splice(insertAt, 0, comp);
+
+    return { ok: true, absX, absY };
+}
+
 export function pasteComponentsOnPage(
     page: Page,
     project: EmbfProject,

@@ -83,6 +83,9 @@ const toolbarWidgetSelect = /** @type {HTMLSelectElement | null} */ (
     document.getElementById("toolbar-widget-select")
 );
 const designGridCheck = /** @type {HTMLInputElement | null} */ (document.getElementById("design-grid"));
+const designRulersCheck = /** @type {HTMLInputElement | null} */ (document.getElementById("design-rulers"));
+const rulerTop = /** @type {HTMLCanvasElement | null} */ (document.getElementById("ruler-top"));
+const rulerLeft = /** @type {HTMLCanvasElement | null} */ (document.getElementById("ruler-left"));
 const btnThemeToggle = document.getElementById("btn-theme-toggle");
 const widgetTreeEl = document.getElementById("widget-tree");
 const paletteSearch = /** @type {HTMLInputElement | null} */ (document.getElementById("palette-search"));
@@ -280,6 +283,8 @@ const DESIGN_SNAP_THRESHOLD = 8;
 /** Snap positions/sizes to this grid when #design-grid is checked. */
 const DESIGN_GRID_SIZE = 16;
 let designGridEnabled = false;
+let designRulersEnabled = false;
+const RULER_THICKNESS = 20;
 /** @type {object[] | null} Deep-cloned components for copy/paste */
 let designClipboard = null;
 /**
@@ -560,6 +565,20 @@ function applyPreviewLayout() {
         designOverlay.style.width = `${cssW}px`;
         designOverlay.style.height = `${cssH}px`;
     }
+
+    if (rulerTop) {
+        rulerTop.width = Math.max(1, Math.round(cssW * dpr));
+        rulerTop.height = RULER_THICKNESS * dpr;
+        rulerTop.style.width = `${cssW}px`;
+        rulerTop.style.height = `${RULER_THICKNESS}px`;
+    }
+    if (rulerLeft) {
+        rulerLeft.width = RULER_THICKNESS * dpr;
+        rulerLeft.height = Math.max(1, Math.round(cssH * dpr));
+        rulerLeft.style.width = `${RULER_THICKNESS}px`;
+        rulerLeft.style.height = `${cssH}px`;
+    }
+    drawRulers();
 
     if (displayWrapper) {
         displayWrapper.style.width = `${cssW}px`;
@@ -5864,6 +5883,49 @@ function navigateToPageIndex(idx) {
     scheduleImageOverlaySync();
 }
 
+/** Cycle-safe check: is `descendantId` inside `ancestorId`'s subtree? */
+function isDescendantInTree(components, ancestorId, descendantId) {
+    const ancestor = findComponentById(components, ancestorId);
+    if (!ancestor || !ancestor.children?.length) {
+        return false;
+    }
+    return !!findComponentById(ancestor.children, descendantId);
+}
+
+const TREE_DRAG_MIME = "application/x-embeddedflow-tree-id";
+/** @type {{ srcId: string; dropIndicator: HTMLElement | null }} */
+const treeDragState = { srcId: "", dropIndicator: null };
+
+function clearTreeDropIndicators() {
+    if (!widgetTreeEl) return;
+    widgetTreeEl
+        .querySelectorAll(".widget-tree-btn.drop-into,.widget-tree-btn.drop-before,.widget-tree-btn.drop-after")
+        .forEach(el => el.classList.remove("drop-into", "drop-before", "drop-after"));
+}
+
+/** Hit test pointer Y within button rect → "before" | "into" | "after". */
+function computeTreeDropZone(btn, clientY) {
+    const r = btn.getBoundingClientRect();
+    const rel = clientY - r.top;
+    if (rel < r.height * 0.25) return "before";
+    if (rel > r.height * 0.75) return "after";
+    return "into";
+}
+
+function isContainerType(t) {
+    return t === "container" || t === "panel";
+}
+
+function postTreeReparent(srcId, parentId, beforeId) {
+    vscode.postMessage({
+        type: "reparentWidget",
+        pageIndex: currentPageIndex,
+        componentId: srcId,
+        parentId,
+        beforeId: beforeId ?? null
+    });
+}
+
 function renderWidgetTree() {
     if (!widgetTreeEl || !currentProject) {
         return;
@@ -5874,8 +5936,9 @@ function renderWidgetTree() {
         return;
     }
     widgetTreeEl.innerHTML = "";
-    /** @param {object[]} components @param {number} depth */
-    function appendBranch(components, depth) {
+
+    /** @param {object[]} components @param {number} depth @param {string | null} parentId */
+    function appendBranch(components, depth, parentId) {
         for (const c of components ?? []) {
             const li = document.createElement("li");
             const btn = document.createElement("button");
@@ -5883,6 +5946,9 @@ function renderWidgetTree() {
             const active = selectedComponentOrder.includes(c.id);
             btn.className = "widget-tree-btn" + (active ? " active" : "");
             btn.dataset.componentId = c.id;
+            btn.dataset.parentId = parentId ?? "";
+            btn.dataset.componentType = c.type || "";
+            btn.draggable = true;
             btn.style.paddingLeft = `${8 + depth * 12}px`;
             const typeSpan = document.createElement("span");
             typeSpan.className = "tree-type";
@@ -5901,14 +5967,108 @@ function renderWidgetTree() {
                     setSelection(c.id);
                 }
             });
+
+            btn.addEventListener("dragstart", ev => {
+                treeDragState.srcId = c.id;
+                if (ev.dataTransfer) {
+                    ev.dataTransfer.effectAllowed = "move";
+                    ev.dataTransfer.setData(TREE_DRAG_MIME, c.id);
+                    ev.dataTransfer.setData("text/plain", c.id);
+                }
+                btn.classList.add("dragging");
+            });
+            btn.addEventListener("dragend", () => {
+                btn.classList.remove("dragging");
+                treeDragState.srcId = "";
+                clearTreeDropIndicators();
+            });
+            btn.addEventListener("dragover", ev => {
+                const srcId = treeDragState.srcId;
+                if (!srcId || srcId === c.id) {
+                    return;
+                }
+                const page2 = currentProject?.pages[currentPageIndex];
+                if (!page2) return;
+                if (isDescendantInTree(page2.components, srcId, c.id)) {
+                    return;
+                }
+                const zone = computeTreeDropZone(btn, ev.clientY);
+                if (zone === "into" && !isContainerType(c.type)) {
+                    clearTreeDropIndicators();
+                    btn.classList.add("drop-after");
+                    ev.preventDefault();
+                    if (ev.dataTransfer) ev.dataTransfer.dropEffect = "move";
+                    return;
+                }
+                clearTreeDropIndicators();
+                if (zone === "into") {
+                    btn.classList.add("drop-into");
+                } else if (zone === "before") {
+                    btn.classList.add("drop-before");
+                } else {
+                    btn.classList.add("drop-after");
+                }
+                ev.preventDefault();
+                if (ev.dataTransfer) ev.dataTransfer.dropEffect = "move";
+            });
+            btn.addEventListener("dragleave", () => {
+                btn.classList.remove("drop-into", "drop-before", "drop-after");
+            });
+            btn.addEventListener("drop", ev => {
+                ev.preventDefault();
+                const srcId =
+                    (ev.dataTransfer && ev.dataTransfer.getData(TREE_DRAG_MIME)) ||
+                    treeDragState.srcId;
+                clearTreeDropIndicators();
+                if (!srcId || srcId === c.id) return;
+                const page2 = currentProject?.pages[currentPageIndex];
+                if (!page2) return;
+                if (isDescendantInTree(page2.components, srcId, c.id)) return;
+                let zone = computeTreeDropZone(btn, ev.clientY);
+                if (zone === "into" && !isContainerType(c.type)) {
+                    zone = "after";
+                }
+                if (zone === "into") {
+                    postTreeReparent(srcId, c.id, null);
+                } else if (zone === "before") {
+                    postTreeReparent(srcId, parentId, c.id);
+                } else {
+                    const siblings =
+                        parentId === null
+                            ? page2.components
+                            : (findComponentById(page2.components, parentId)?.children ?? []);
+                    const idx = siblings.findIndex(x => x.id === c.id);
+                    const next = siblings[idx + 1];
+                    postTreeReparent(srcId, parentId, next ? next.id : null);
+                }
+            });
+
             li.appendChild(btn);
             widgetTreeEl.appendChild(li);
             if (c.children?.length) {
-                appendBranch(c.children, depth + 1);
+                appendBranch(c.children, depth + 1, c.id);
             }
         }
     }
-    appendBranch(page.components, 0);
+    appendBranch(page.components, 0, null);
+
+    /** Allow drop on empty tree area → move to page root (append). */
+    widgetTreeEl.addEventListener("dragover", ev => {
+        const srcId = treeDragState.srcId;
+        if (!srcId) return;
+        if (/** @type {HTMLElement} */ (ev.target).closest(".widget-tree-btn")) return;
+        ev.preventDefault();
+        if (ev.dataTransfer) ev.dataTransfer.dropEffect = "move";
+    });
+    widgetTreeEl.addEventListener("drop", ev => {
+        const srcId =
+            (ev.dataTransfer && ev.dataTransfer.getData(TREE_DRAG_MIME)) || treeDragState.srcId;
+        clearTreeDropIndicators();
+        if (!srcId) return;
+        if (/** @type {HTMLElement} */ (ev.target).closest(".widget-tree-btn")) return;
+        ev.preventDefault();
+        postTreeReparent(srcId, null, null);
+    });
 }
 
 function updatePageSidebarActions() {
@@ -6009,6 +6169,188 @@ if (designGridCheck) {
     designGridCheck.addEventListener("change", () => {
         designGridEnabled = !!designGridCheck.checked;
         drawDesignOverlay();
+    });
+}
+
+if (designRulersCheck) {
+    designRulersCheck.addEventListener("change", () => {
+        designRulersEnabled = !!designRulersCheck.checked;
+        if (displayWrapper) {
+            displayWrapper.classList.toggle("no-rulers", !designRulersEnabled);
+        }
+        drawRulers();
+    });
+}
+
+/** Pick a tick step (logical px) so labels don't overlap at the current zoom. */
+function pickRulerStep(zoom) {
+    const cssPerLogical = zoom;
+    const minorTargetCss = 6;
+    const minor = Math.max(1, Math.ceil(minorTargetCss / cssPerLogical));
+    const candidates = [1, 2, 5, 10, 20, 25, 50, 100, 200, 500, 1000];
+    const minorStep = candidates.find(v => v >= minor) ?? candidates[candidates.length - 1];
+    const labelTargetCss = 60;
+    const labelMin = Math.max(minorStep, Math.ceil(labelTargetCss / cssPerLogical));
+    const labelStep = candidates.find(v => v >= labelMin && v % minorStep === 0) ?? labelMin;
+    return { minor: minorStep, label: labelStep };
+}
+
+function drawRulers() {
+    if (!designRulersEnabled || !displayWidth || !displayHeight) {
+        return;
+    }
+    const dpr = getPreviewDpr();
+    const { minor, label } = pickRulerStep(previewZoom);
+
+    if (rulerTop) {
+        const ctxTop = rulerTop.getContext("2d");
+        if (ctxTop) {
+            ctxTop.setTransform(dpr, 0, 0, dpr, 0, 0);
+            const w = rulerTop.width / dpr;
+            const h = rulerTop.height / dpr;
+            ctxTop.fillStyle = "#1f1f1f";
+            ctxTop.fillRect(0, 0, w, h);
+            ctxTop.strokeStyle = "#666";
+            ctxTop.fillStyle = "#bbb";
+            ctxTop.font = "9px ui-sans-serif, system-ui, sans-serif";
+            ctxTop.textBaseline = "top";
+            ctxTop.lineWidth = 1;
+            for (let lx = 0; lx <= displayWidth; lx += minor) {
+                const x = Math.round(lx * previewZoom) + 0.5;
+                const big = lx % label === 0;
+                ctxTop.beginPath();
+                ctxTop.moveTo(x, big ? h - 9 : h - 4);
+                ctxTop.lineTo(x, h);
+                ctxTop.stroke();
+                if (big) {
+                    ctxTop.fillText(String(lx), x + 2, 2);
+                }
+            }
+            ctxTop.strokeStyle = "#3c3c3c";
+            ctxTop.beginPath();
+            ctxTop.moveTo(0, h - 0.5);
+            ctxTop.lineTo(w, h - 0.5);
+            ctxTop.stroke();
+        }
+    }
+    if (rulerLeft) {
+        const ctxLeft = rulerLeft.getContext("2d");
+        if (ctxLeft) {
+            ctxLeft.setTransform(dpr, 0, 0, dpr, 0, 0);
+            const w = rulerLeft.width / dpr;
+            const h = rulerLeft.height / dpr;
+            ctxLeft.fillStyle = "#1f1f1f";
+            ctxLeft.fillRect(0, 0, w, h);
+            ctxLeft.strokeStyle = "#666";
+            ctxLeft.fillStyle = "#bbb";
+            ctxLeft.font = "9px ui-sans-serif, system-ui, sans-serif";
+            ctxLeft.textBaseline = "top";
+            ctxLeft.lineWidth = 1;
+            for (let ly = 0; ly <= displayHeight; ly += minor) {
+                const y = Math.round(ly * previewZoom) + 0.5;
+                const big = ly % label === 0;
+                ctxLeft.beginPath();
+                ctxLeft.moveTo(big ? w - 9 : w - 4, y);
+                ctxLeft.lineTo(w, y);
+                ctxLeft.stroke();
+                if (big) {
+                    ctxLeft.save();
+                    ctxLeft.translate(2, y + 2);
+                    ctxLeft.rotate(-Math.PI / 2);
+                    ctxLeft.textBaseline = "top";
+                    ctxLeft.textAlign = "right";
+                    ctxLeft.fillText(String(ly), 0, 0);
+                    ctxLeft.restore();
+                }
+            }
+            ctxLeft.strokeStyle = "#3c3c3c";
+            ctxLeft.beginPath();
+            ctxLeft.moveTo(w - 0.5, 0);
+            ctxLeft.lineTo(w - 0.5, h);
+            ctxLeft.stroke();
+        }
+    }
+}
+
+// ── Canvas pan (Space+drag / middle mouse) ───────────────────────────────────
+/** @type {{ startX: number; startY: number; scrollLeft: number; scrollTop: number; pointerId: number } | null} */
+let canvasPanState = null;
+let canvasPanArmed = false;
+
+function setCanvasPanArmed(on) {
+    if (canvasPanArmed === on) return;
+    canvasPanArmed = on;
+    if (canvasContainer) {
+        canvasContainer.classList.toggle("pan-armed", on && !canvasPanState);
+    }
+}
+
+window.addEventListener("keydown", ev => {
+    if (ev.code === "Space") {
+        const target = /** @type {HTMLElement | null} */ (ev.target);
+        if (
+            target &&
+            (target.tagName === "INPUT" ||
+                target.tagName === "TEXTAREA" ||
+                target.tagName === "SELECT" ||
+                target.isContentEditable)
+        ) {
+            return;
+        }
+        if (!canvasPanArmed) {
+            setCanvasPanArmed(true);
+            ev.preventDefault();
+        }
+    }
+});
+window.addEventListener("keyup", ev => {
+    if (ev.code === "Space" && canvasPanArmed && !canvasPanState) {
+        setCanvasPanArmed(false);
+    }
+});
+window.addEventListener("blur", () => {
+    if (!canvasPanState) {
+        setCanvasPanArmed(false);
+    }
+});
+
+if (canvasContainer) {
+    canvasContainer.addEventListener("pointerdown", ev => {
+        const middleButton = ev.button === 1;
+        if (!middleButton && !canvasPanArmed) return;
+        canvasPanState = {
+            startX: ev.clientX,
+            startY: ev.clientY,
+            scrollLeft: canvasContainer.scrollLeft,
+            scrollTop: canvasContainer.scrollTop,
+            pointerId: ev.pointerId
+        };
+        canvasContainer.setPointerCapture(ev.pointerId);
+        canvasContainer.classList.add("pan-active");
+        canvasContainer.classList.remove("pan-armed");
+        ev.preventDefault();
+        ev.stopPropagation();
+    }, true);
+    canvasContainer.addEventListener("pointermove", ev => {
+        if (!canvasPanState || ev.pointerId !== canvasPanState.pointerId) return;
+        canvasContainer.scrollLeft = canvasPanState.scrollLeft - (ev.clientX - canvasPanState.startX);
+        canvasContainer.scrollTop = canvasPanState.scrollTop - (ev.clientY - canvasPanState.startY);
+    }, true);
+    function endPan(ev) {
+        if (!canvasPanState || ev.pointerId !== canvasPanState.pointerId) return;
+        try {
+            canvasContainer.releasePointerCapture(ev.pointerId);
+        } catch (_) {
+            /* ignore */
+        }
+        canvasPanState = null;
+        canvasContainer.classList.remove("pan-active");
+        canvasContainer.classList.toggle("pan-armed", canvasPanArmed);
+    }
+    canvasContainer.addEventListener("pointerup", endPan, true);
+    canvasContainer.addEventListener("pointercancel", endPan, true);
+    canvasContainer.addEventListener("auxclick", ev => {
+        if (ev.button === 1) ev.preventDefault();
     });
 }
 

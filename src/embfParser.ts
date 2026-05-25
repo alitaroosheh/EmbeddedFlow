@@ -183,6 +183,23 @@ function validateEmbf(data: unknown): EmbfProject {
         images.forEach((entry, i) => validateImageDefDeep(entry, `images[${i}]`));
     }
 
+    const fonts = obj["fonts"];
+    if (fonts !== undefined) {
+        if (!Array.isArray(fonts)) {
+            throw new EmbfParseError("'fonts' must be an array when present");
+        }
+        const ids = new Set<string>();
+        fonts.forEach((entry, i) => {
+            const p = `fonts[${i}]`;
+            validateFontDefDeep(entry, p);
+            const id = (entry as Record<string, unknown>)["id"] as string;
+            if (ids.has(id)) {
+                throw new EmbfParseError(`${p}.id "${id}" duplicates an earlier font entry`);
+            }
+            ids.add(id);
+        });
+    }
+
     const lib = obj["componentLibrary"];
     if (lib !== undefined) {
         if (!Array.isArray(lib)) {
@@ -204,6 +221,30 @@ function validateImageDefDeep(entry: unknown, path: string): void {
     }
     if (typeof o["path"] !== "string" || !o["path"].trim()) {
         throw new EmbfParseError(`${path}.path must be a non-empty string`);
+    }
+}
+
+function validateFontDefDeep(entry: unknown, path: string): void {
+    if (typeof entry !== "object" || entry === null) {
+        throw new EmbfParseError(`${path} must be an object`);
+    }
+    const o = entry as Record<string, unknown>;
+    if (typeof o["id"] !== "string" || !(o["id"] as string).trim()) {
+        throw new EmbfParseError(`${path}.id must be a non-empty string`);
+    }
+    if (typeof o["name"] !== "string" || !(o["name"] as string).trim()) {
+        throw new EmbfParseError(`${path}.name must be a non-empty C identifier (e.g. lv_font_montserrat_24)`);
+    }
+    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(o["name"] as string)) {
+        throw new EmbfParseError(
+            `${path}.name "${o["name"]}" is not a valid C identifier`
+        );
+    }
+    if (typeof o["size"] !== "number" || !Number.isFinite(o["size"] as number) || (o["size"] as number) < 1) {
+        throw new EmbfParseError(`${path}.size must be a positive number`);
+    }
+    if (o["source"] !== undefined && (typeof o["source"] !== "string" || !(o["source"] as string).trim())) {
+        throw new EmbfParseError(`${path}.source must be a non-empty string when set`);
     }
 }
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.6
+
+- Hierarchy sidebar: drag a widget in the tree to **reparent** it into a container/panel or back to page root; absolute position is preserved. Visual drop indicators show `before` / `into` / `after`.
+- Canvas rulers: toolbar **Rulers** toggle overlays horizontal and vertical pixel rulers on the display edges; tick step adapts to zoom.
+- Canvas pan: hold **Space** and drag (or use the **middle mouse button**) to pan the canvas inside the scroll area without scrolling the inspector.
+- Codegen: when a project declares `fonts[]`, generates `ui_fonts.h` / `ui_fonts.c` with `LV_FONT_DECLARE` lines and `UI_FONT_<ID>` macros; `ui.h` includes them automatically.
+- Codegen: widget `styles.fontFamily` referencing a project font id now emits the matching font symbol (`UI_FONT_*`) instead of falling back to the nearest built-in Montserrat by size.
+- Parser: validates `fonts[]` (id uniqueness, C-identifier `name`, positive `size`, optional `source`).
+
 ## 0.3.5
 
 - Marketplace keywords: LVGL, UI, ESP32, STM32, Embedded.

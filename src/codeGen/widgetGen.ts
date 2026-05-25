@@ -2,10 +2,16 @@ import type {
     Component, LabelComponent, ButtonComponent, SliderComponent,
     SwitchComponent, BarComponent, SpinnerComponent, ArcComponent,
     CheckboxComponent, DropdownComponent, RollerComponent, TextareaComponent,
-    LineComponent, ContainerComponent, PanelComponent, ImageComponent
+    LineComponent, ContainerComponent, PanelComponent, ImageComponent,
+    FontDef
 } from "../types/embf";
 import { toIdentifier, widgetVar } from "./naming";
 import { emitStyleCalls } from "./styleGen";
+
+/** Optional shared context for widget emission (project-level resolvers). */
+export interface WidgetEmitContext {
+    fonts?: FontDef[];
+}
 
 /**
  * Emit all C lines needed to create one component and its children.
@@ -20,7 +26,8 @@ export function emitComponent(
     pageId: string,
     comp: Component,
     parentExpr: string,
-    lvglV9: boolean
+    lvglV9: boolean,
+    ctx?: WidgetEmitContext
 ): string[] {
     if (comp.hidden) {
         return [];
@@ -43,8 +50,8 @@ export function emitComponent(
         case "roller":     lines.push(...emitRoller(v, comp as RollerComponent, parentExpr, lvglV9)); break;
         case "textarea":   lines.push(...emitTextarea(v, comp as TextareaComponent, parentExpr, lvglV9)); break;
         case "line":       lines.push(...emitLine(v, comp as LineComponent, parentExpr, pageId, lvglV9)); break;
-        case "container":  lines.push(...emitContainer(v, comp as ContainerComponent, parentExpr, pageId, lvglV9)); break;
-        case "panel":      lines.push(...emitPanel(v, comp as PanelComponent, parentExpr, pageId, lvglV9)); break;
+        case "container":  lines.push(...emitContainer(v, comp as ContainerComponent, parentExpr, pageId, lvglV9, ctx)); break;
+        case "panel":      lines.push(...emitPanel(v, comp as PanelComponent, parentExpr, pageId, lvglV9, ctx)); break;
         default: {
             const unknown = comp as { type: string; id: string };
             lines.push(`    /* TODO: unsupported widget type "${unknown.type}" — id="${unknown.id}" */`);
@@ -55,7 +62,7 @@ export function emitComponent(
     // Position, size, styles apply to all widget types
     lines.push(...posSize(v, comp));
     if (comp.styles && Object.keys(comp.styles).length > 0) {
-        lines.push(...emitStyleCalls(v, comp.styles));
+        lines.push(...emitStyleCalls(v, comp.styles, "    ", "LV_PART_MAIN | LV_STATE_DEFAULT", { fonts: ctx?.fonts }));
     }
     lines.push("");  // blank line between widgets
 
@@ -271,7 +278,7 @@ function emitLine(v: string, c: LineComponent, parent: string, pageId: string, _
 
 // ── Container ─────────────────────────────────────────────────────────────────
 
-function emitContainer(v: string, c: ContainerComponent, parent: string, pageId: string, v9: boolean): string[] {
+function emitContainer(v: string, c: ContainerComponent, parent: string, pageId: string, v9: boolean, ctx?: WidgetEmitContext): string[] {
     const lines = [
         `    lv_obj_t *${v} = lv_obj_create(${parent});`
     ];
@@ -301,14 +308,14 @@ function emitContainer(v: string, c: ContainerComponent, parent: string, pageId:
     }
 
     for (const child of c.children ?? []) {
-        lines.push(...emitComponent(pageId, child, v, v9));
+        lines.push(...emitComponent(pageId, child, v, v9, ctx));
     }
     return lines;
 }
 
 // ── Panel ─────────────────────────────────────────────────────────────────────
 
-function emitPanel(v: string, c: PanelComponent, parent: string, pageId: string, v9: boolean): string[] {
+function emitPanel(v: string, c: PanelComponent, parent: string, pageId: string, v9: boolean, ctx?: WidgetEmitContext): string[] {
     const lines = [
         `    lv_obj_t *${v} = lv_obj_create(${parent});`
     ];
@@ -321,7 +328,7 @@ function emitPanel(v: string, c: PanelComponent, parent: string, pageId: string,
         );
     }
     for (const child of c.children ?? []) {
-        lines.push(...emitComponent(pageId, child, v, v9));
+        lines.push(...emitComponent(pageId, child, v, v9, ctx));
     }
     return lines;
 }

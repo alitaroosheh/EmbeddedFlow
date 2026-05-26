@@ -227,7 +227,10 @@ function invalidatePageScreen(pageId) {
 /** @type {string | null} last loaded wasm js uri */
 let loadedWasmJsUri = null;
 
-/** `null` = use JSON `project.theme.dark`; otherwise preview-only dark override (e.g. from `set_theme` action). */
+/**
+ * `null` = use JSON `project.theme.dark`; otherwise a transient preview-only dark override
+ * set by the `set_theme` flow action (toolbar toggle persists to JSON instead, see below).
+ */
 let previewDarkOverride = null;
 
 /** Skip duplicate rebuild when `pageSelect.value` is set from code (navigate). */
@@ -404,7 +407,6 @@ async function handleLoad(payload) {
         typeof payload.codegenOutputResolved === "string" ? payload.codegenOutputResolved : "";
     displayRound = !!(currentProject?.display && currentProject.display.round === true);
     syncPreviewBezel();
-    previewDarkOverride = null;
     displayWidth = payload.displayWidth;
     displayHeight = payload.displayHeight;
     dragState = null;
@@ -418,6 +420,12 @@ async function handleLoad(payload) {
         WasmModule !== null &&
         loadedWasmJsUri !== null &&
         payload.wasmJsUri === loadedWasmJsUri;
+
+    // The toolbar theme-toggle now persists to `project.theme.dark` directly (see
+    // btnThemeToggle handler), so any preview state is reset every reload — the JSON value
+    // is the source of truth. `previewDarkOverride` is only used by the `set_theme` flow
+    // action for in-session runtime theming.
+    previewDarkOverride = null;
 
     if (!quietReload) {
         showLoading(true);
@@ -6863,14 +6871,16 @@ if (btnThemeToggle) {
         if (!currentProject || !wasmReady) {
             return;
         }
-        const nowDark =
-            previewDarkOverride !== null ? previewDarkOverride : !!currentProject.theme?.dark;
-        previewDarkOverride = !nowDark;
-        applyEmbfThemeFromProject(currentProject);
-        clearPageScreenCache();
-        buildUiFromProject(currentProject, currentPageIndex);
-        syncImagePreviewOverlays();
-        scheduleImageOverlaySync();
+        // Persist the toggle into `project.theme.dark` so it survives every inspector-edit
+        // reload (previously this only set a transient `previewDarkOverride` that was wiped
+        // by the next reload, causing the preview to snap back to the JSON-saved theme).
+        previewDarkOverride = null;
+        const currentDark = !!currentProject.theme?.dark;
+        vscode.postMessage({
+            type: "updatePage",
+            pageIndex: currentPageIndex,
+            patch: { themeDark: !currentDark }
+        });
     });
 }
 

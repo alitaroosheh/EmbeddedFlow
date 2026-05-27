@@ -13,42 +13,37 @@ function getFile(files: Map<string, string>, name: string): string {
     throw new Error(`missing ${name}`);
 }
 
+function hasFileNamed(files: Map<string, string>, name: string): boolean {
+    for (const p of files.keys()) {
+        if (path.basename(p) === name) {
+            return true;
+        }
+    }
+    return false;
+}
+
 describe("temperature station sample codegen", () => {
-    it("emits ui_set_* for bound arc/bar buttons and safe handlers", () => {
+    it("uses literal label text and direct lv_* setters (no dataModel bindings)", () => {
         const embfPath = path.join(__dirname, "../sample/temperature_humidity_station_1024x600_lvgl9.embf");
         const src = fs.readFileSync(embfPath, "utf-8");
         const project = parseEmbfSource(src);
         const r = generateCode(project, embfPath, "/tmp/out");
         const pageC = getFile(r.files, "ui_page_station.c");
-        const bindC = getFile(r.files, "ui_bindings.c");
 
-        expect(bindC).toContain("ui_data_humidity");
-        expect(bindC).toContain("snprintf(buf, sizeof(buf), \"%d\"");
-        expect(bindC).toContain("ui_page_station_lbl_hum_value");
-        expect(bindC).toContain("ui_page_station_arc_temp_gauge");
+        expect(hasFileNamed(r.files, "ui_bindings.c")).toBe(false);
+        expect(project.dataModel).toBeUndefined();
 
-        expect(pageC).toContain("ui_set_temp_c(20);");
-        expect(pageC).toContain("ui_set_temp_c(24);");
-        expect(pageC).toContain("ui_set_temp_c(30);");
-        expect(pageC).toContain("ui_set_humidity(35);");
+        expect(pageC).toContain('lv_label_set_text(ui_page_station_lbl_temp_value, "24")');
+        expect(pageC).toContain('lv_label_set_text(ui_page_station_lbl_hum_value, "56")');
+        expect(pageC).toContain('lv_label_set_text(ui_page_station_lbl_clock, "08:41")');
+        expect(pageC).toContain('lv_label_set_text(ui_page_station_lbl_hum_status, "Comfort")');
+        expect(pageC).toContain("lv_arc_set_value(ui_page_station_arc_temp_gauge, 24)");
+        expect(pageC).toContain("lv_bar_set_value(ui_page_station_bar_hum, 56");
+
+        expect(pageC).toContain('lv_label_set_text(ui_page_station_lbl_temp_value, "20")');
+        expect(pageC).toContain('lv_label_set_text(ui_page_station_lbl_hum_value, "35")');
         expect(pageC).not.toContain("lv_obj_check_type");
-
-        expect(pageC).not.toMatch(/btn_cool[\s\S]*?ui_bindings_apply\(\)/);
-        expect(pageC).not.toMatch(/btn_hum_dry[\s\S]*?ui_bindings_apply\(\)/);
-        expect(pageC).toContain('ui_set_humidity_band("Dry")');
-
-        const bindApply = bindC.slice(
-            bindC.indexOf("void ui_bindings_apply"),
-            bindC.indexOf("void ui_set_")
-        );
-        expect(bindApply).toContain("ui_page_station_lbl_clock");
-        expect(bindApply).toContain('"%s:%s"');
-        expect(bindApply).toContain("lv_obj_invalidate(scr)");
-
-        const uiC = getFile(r.files, "ui.c");
-        const loadIdx = uiC.indexOf("lv_screen_load");
-        const applyIdx = uiC.lastIndexOf("ui_bindings_apply();");
-        expect(loadIdx).toBeGreaterThan(-1);
-        expect(applyIdx).toBeGreaterThan(loadIdx);
+        expect(pageC).not.toContain("ui_set_temp_c");
+        expect(pageC).not.toContain("ui_bindings_apply");
     });
 });

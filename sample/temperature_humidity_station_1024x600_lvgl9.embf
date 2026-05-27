@@ -116,20 +116,6 @@
       }
     }
   ],
-  "dataModel": {
-    "fields": [
-      { "id": "temp_c", "type": "int", "default": 24 },
-      { "id": "humidity", "type": "int", "default": 56 },
-      { "id": "temp_low", "type": "int", "default": 18 },
-      { "id": "temp_high", "type": "int", "default": 28 },
-      { "id": "clock_h", "type": "string", "default": "08" },
-      { "id": "clock_m", "type": "string", "default": "41" },
-      { "id": "date_day", "type": "string", "default": "Wed" },
-      { "id": "date_date", "type": "string", "default": "27" },
-      { "id": "date_mon", "type": "string", "default": "May" },
-      { "id": "humidity_band", "type": "string", "default": "Comfort" }
-    ]
-  },
   "pages": [
     {
       "id": "page_station",
@@ -181,7 +167,7 @@
                   "y": 12,
                   "width": 210,
                   "height": 32,
-                  "text": "{{clock_h}}:{{clock_m}}",
+                  "text": "08:41",
                   "styles": {
                     "fontSize": 26,
                     "textColor": "#e5e7eb",
@@ -310,9 +296,6 @@
                     "bgOpacity": 255,
                     "borderRadius": 110
                   },
-                  "bindings": {
-                    "value": "temp_c"
-                  },
                   "animations": [
                     {
                       "property": "opacity",
@@ -331,7 +314,7 @@
                   "y": 132,
                   "width": 136,
                   "height": 70,
-                  "text": "{{temp_c}}",
+                  "text": "24",
                   "styles": {
                     "fontSize": 72,
                     "textColor": "#2dd4ff",
@@ -359,7 +342,7 @@
                   "y": 222,
                   "width": 440,
                   "height": 26,
-                  "text": "Range: {{temp_low}}..{{temp_high}}",
+                  "text": "Range: 18..28",
                   "styles": {
                     "fontSize": 18,
                     "textColor": "#94a3b8",
@@ -395,7 +378,8 @@
                         {
                           "trigger": "clicked",
                           "actions": [
-                            { "type": "set_value", "target": "arc_temp_gauge", "value": 20 }
+                            { "type": "set_value", "target": "arc_temp_gauge", "value": 20 },
+                            { "type": "set_text", "target": "lbl_temp_value", "text": "20" }
                           ]
                         }
                       ]
@@ -420,7 +404,8 @@
                         {
                           "trigger": "clicked",
                           "actions": [
-                            { "type": "set_value", "target": "arc_temp_gauge", "value": 24 }
+                            { "type": "set_value", "target": "arc_temp_gauge", "value": 24 },
+                            { "type": "set_text", "target": "lbl_temp_value", "text": "24" }
                           ]
                         }
                       ]
@@ -445,7 +430,8 @@
                         {
                           "trigger": "clicked",
                           "actions": [
-                            { "type": "set_value", "target": "arc_temp_gauge", "value": 30 }
+                            { "type": "set_value", "target": "arc_temp_gauge", "value": 30 },
+                            { "type": "set_text", "target": "lbl_temp_value", "text": "30" }
                           ]
                         }
                       ]
@@ -470,7 +456,8 @@
                         {
                           "trigger": "clicked",
                           "actions": [
-                            { "type": "set_value", "target": "arc_temp_gauge", "value": 24 }
+                            { "type": "set_value", "target": "arc_temp_gauge", "value": 24 },
+                            { "type": "set_text", "target": "lbl_temp_value", "text": "24" }
                           ]
                         }
                       ]
@@ -539,9 +526,6 @@
                     "bgOpacity": 255,
                     "indicatorColor": "#a78bfa"
                   },
-                  "bindings": {
-                    "value": "humidity"
-                  },
                   "animations": [
                     {
                       "property": "opacity",
@@ -560,7 +544,7 @@
                   "y": 94,
                   "width": 200,
                   "height": 60,
-                  "text": "{{humidity}}",
+                  "text": "56",
                   "styles": {
                     "fontSize": 64,
                     "textColor": "#a78bfa",
@@ -589,7 +573,7 @@
                   "y": 152,
                   "width": 200,
                   "height": 42,
-                  "text": "{{humidity_band}}",
+                  "text": "Comfort",
                   "styleRefs": [
                     "chip"
                   ],
@@ -629,6 +613,7 @@
                           "trigger": "clicked",
                           "actions": [
                             { "type": "set_value", "target": "bar_hum", "value": 35 },
+                            { "type": "set_text", "target": "lbl_hum_value", "text": "35" },
                             { "type": "set_text", "target": "lbl_hum_status", "text": "Dry" }
                           ]
                         }
@@ -655,6 +640,7 @@
                           "trigger": "clicked",
                           "actions": [
                             { "type": "set_value", "target": "bar_hum", "value": 56 },
+                            { "type": "set_text", "target": "lbl_hum_value", "text": "56" },
                             { "type": "set_text", "target": "lbl_hum_status", "text": "Comfort" }
                           ]
                         }
@@ -681,6 +667,7 @@
                           "trigger": "clicked",
                           "actions": [
                             { "type": "set_value", "target": "bar_hum", "value": 78 },
+                            { "type": "set_text", "target": "lbl_hum_value", "text": "78" },
                             { "type": "set_text", "target": "lbl_hum_status", "text": "Humid" }
                           ]
                         }
@@ -727,7 +714,7 @@
                   "y": 14,
                   "width": 460,
                   "height": 36,
-                  "text": "{{date_day}} {{date_date}} {{date_mon}}",
+                  "text": "Wed 27 May",
                   "styles": {
                     "fontSize": 26,
                     "textColor": "#94a3b8",

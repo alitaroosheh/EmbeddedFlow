@@ -1,0 +1,473 @@
+{
+  "version": "1.0",
+  "project": {
+    "name": "Round 480 Watch",
+    "lvglVersion": "8.4.0",
+    "lvglInclude": "lvgl.h",
+    "outputPath": "ui_round_480"
+  },
+  "display": {
+    "width": 480,
+    "height": 480,
+    "bitDepth": 16,
+    "colorFormat": "RGB565",
+    "orientation": "portrait",
+    "direction": "ltr",
+    "dpi": 160,
+    "round": true
+  },
+  "theme": {
+    "dark": false,
+    "primaryColor": "#00c2ff",
+    "secondaryColor": "#6b5cff"
+  },
+  "styles": [
+    {
+      "id": "title",
+      "name": "Title",
+      "props": {
+        "textColor": "#0d0f14",
+        "fontSize": 26,
+        "align": "center"
+      }
+    },
+    {
+      "id": "subtitle",
+      "name": "Subtitle",
+      "props": {
+        "textColor": "#586174",
+        "fontSize": 14,
+        "align": "center"
+      }
+    },
+    {
+      "id": "card",
+      "name": "Card",
+      "props": {
+        "bgColor": "#ffffff",
+        "borderRadius": 18,
+        "bgOpacity": 255,
+        "padding": 12
+      }
+    },
+    {
+      "id": "chip",
+      "name": "Chip",
+      "props": {
+        "bgColor": "#f3f5fb",
+        "borderRadius": 16,
+        "bgOpacity": 255,
+        "padding": 10
+      }
+    },
+    {
+      "id": "accent_text",
+      "name": "Accent text",
+      "props": {
+        "textColor": "#00a6dd",
+        "fontSize": 16,
+        "align": "center"
+      }
+    }
+  ],
+  "dataModel": {
+    "fields": [
+      {
+        "id": "steps",
+        "type": "int",
+        "default": 7342
+      },
+      {
+        "id": "battery",
+        "type": "int",
+        "default": 78
+      },
+      {
+        "id": "temp_c",
+        "type": "int",
+        "default": 24
+      },
+      {
+        "id": "humidity",
+        "type": "int",
+        "default": 41
+      }
+    ]
+  },
+  "pages": [
+    {
+      "id": "page_home",
+      "name": "Home",
+      "components": [
+        {
+          "id": "lbl_title",
+          "type": "label",
+          "x": 40,
+          "y": 26,
+          "width": 400,
+          "height": 40,
+          "text": "Today",
+          "styleRefs": [
+            "title"
+          ],
+          "animations": [
+            {
+              "property": "y",
+              "from": 10,
+              "to": 26,
+              "duration": 500,
+              "easing": "ease_out"
+            }
+          ]
+        },
+        {
+          "id": "lbl_sub",
+          "type": "label",
+          "x": 31,
+          "y": 59,
+          "width": 400,
+          "height": 24,
+          "text": "Round 480×480 · LVGL 8",
+          "styleRefs": [
+            "subtitle"
+          ],
+          "animations": [
+            {
+              "property": "opacity",
+              "easing": "ease_in_out",
+              "from": 0,
+              "to": 255,
+              "duration": 650
+            }
+          ],
+          "hidden": false,
+          "styles": {
+            "align": "center"
+          },
+          "events": []
+        },
+        {
+          "id": "arc_steps_ring",
+          "type": "arc",
+          "x": 80,
+          "y": 104,
+          "width": 320,
+          "height": 320,
+          "min": 0,
+          "max": 10000,
+          "value": 7342,
+          "startAngle": 135,
+          "endAngle": 45,
+          "styles": {
+            "indicatorColor": "#00c2ff",
+            "bgColor": "#e9eef6",
+            "bgOpacity": 255,
+            "borderRadius": 160
+          },
+          "bindings": {
+            "value": "steps"
+          }
+        },
+        {
+          "id": "card_center",
+          "type": "container",
+          "x": 140,
+          "y": 172,
+          "width": 200,
+          "height": 200,
+          "layout": "none",
+          "styleRefs": [
+            "card"
+          ],
+          "children": [
+            {
+              "id": "lbl_steps",
+              "type": "label",
+              "x": 10,
+              "y": 34,
+              "width": 180,
+              "height": 28,
+              "text": "{{steps}}",
+              "styles": {
+                "fontSize": 36,
+                "align": "center",
+                "textColor": "#0d0f14"
+              }
+            },
+            {
+              "id": "lbl_steps_unit",
+              "type": "label",
+              "x": 10,
+              "y": 74,
+              "width": 180,
+              "height": 20,
+              "text": "steps",
+              "styleRefs": [
+                "subtitle"
+              ]
+            },
+            {
+              "id": "bar_battery",
+              "type": "bar",
+              "x": 30,
+              "y": 120,
+              "width": 140,
+              "height": 18,
+              "min": 0,
+              "max": 100,
+              "value": 78,
+              "bindings": {
+                "value": "battery"
+              },
+              "styles": {
+                "indicatorColor": "#6b5cff",
+                "borderRadius": 10
+              }
+            },
+            {
+              "id": "lbl_battery",
+              "type": "label",
+              "x": 10,
+              "y": 146,
+              "width": 180,
+              "height": 20,
+              "text": "Battery {{battery}}%",
+              "styleRefs": [
+                "subtitle"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "chip_weather",
+          "type": "container",
+          "x": 158,
+          "y": 155,
+          "width": 160,
+          "height": 66,
+          "layout": "none",
+          "styleRefs": [
+            "chip"
+          ],
+          "children": [
+            {
+              "id": "lbl_temp",
+              "type": "label",
+              "x": 10,
+              "y": 10,
+              "width": 140,
+              "height": 24,
+              "text": "{{temp_c}}°C",
+              "styleRefs": [
+                "accent_text"
+              ]
+            },
+            {
+              "id": "lbl_hum",
+              "type": "label",
+              "x": 10,
+              "y": 36,
+              "width": 140,
+              "height": 20,
+              "text": "Humidity {{humidity}}%",
+              "styleRefs": [
+                "subtitle"
+              ]
+            }
+          ],
+          "hidden": false,
+          "styles": {
+            "align": "center"
+          },
+          "events": [],
+          "animations": []
+        },
+        {
+          "id": "btn_details",
+          "type": "button",
+          "x": 172,
+          "y": 426,
+          "width": 136,
+          "height": 40,
+          "label": "Details",
+          "styles": {
+            "borderRadius": 14
+          },
+          "events": [
+            {
+              "trigger": "clicked",
+              "actions": [
+                {
+                  "type": "navigate",
+                  "target": "page_details",
+                  "anim": "move_left",
+                  "time": 280
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "page_details",
+      "name": "Details",
+      "components": [
+        {
+          "id": "lbl_details",
+          "type": "label",
+          "x": 40,
+          "y": 26,
+          "width": 400,
+          "height": 40,
+          "text": "Details",
+          "styleRefs": [
+            "title"
+          ]
+        },
+        {
+          "id": "lbl_details_sub",
+          "type": "label",
+          "x": 40,
+          "y": 62,
+          "width": 400,
+          "height": 24,
+          "text": "Bindings + knob + animations",
+          "styleRefs": [
+            "subtitle"
+          ],
+          "hidden": false,
+          "styles": {
+            "align": "center"
+          },
+          "events": [],
+          "animations": []
+        },
+        {
+          "id": "card_stats",
+          "type": "container",
+          "x": 60,
+          "y": 120,
+          "width": 360,
+          "height": 240,
+          "layout": "none",
+          "styleRefs": [
+            "card"
+          ],
+          "children": [
+            {
+              "id": "lbl_s1",
+              "type": "label",
+              "x": 18,
+              "y": 20,
+              "width": 324,
+              "height": 24,
+              "text": "Steps: {{steps}}",
+              "styles": {
+                "fontSize": 18,
+                "textColor": "#0d0f14"
+              }
+            },
+            {
+              "id": "lbl_s2",
+              "type": "label",
+              "x": 18,
+              "y": 58,
+              "width": 324,
+              "height": 24,
+              "text": "Battery: {{battery}}%",
+              "styles": {
+                "fontSize": 18,
+                "textColor": "#0d0f14"
+              }
+            },
+            {
+              "id": "lbl_s3",
+              "type": "label",
+              "x": 18,
+              "y": 96,
+              "width": 324,
+              "height": 24,
+              "text": "Temp: {{temp_c}}°C",
+              "styles": {
+                "fontSize": 18,
+                "textColor": "#0d0f14"
+              }
+            },
+            {
+              "id": "lbl_s4",
+              "type": "label",
+              "x": 18,
+              "y": 134,
+              "width": 324,
+              "height": 24,
+              "text": "Humidity: {{humidity}}%",
+              "styles": {
+                "fontSize": 18,
+                "textColor": "#0d0f14"
+              }
+            },
+            {
+              "id": "arc_bat",
+              "type": "arc",
+              "x": 120,
+              "y": 164,
+              "width": 120,
+              "height": 120,
+              "min": 0,
+              "max": 100,
+              "value": 78,
+              "startAngle": 135,
+              "endAngle": 45,
+              "bindings": {
+                "value": "battery"
+              },
+              "styles": {
+                "indicatorColor": "#6b5cff",
+                "bgColor": "#eef1f8",
+                "bgOpacity": 255
+              }
+            },
+            {
+              "id": "knob_detail",
+              "type": "knob",
+              "x": 244,
+              "y": 164,
+              "width": 120,
+              "height": 120,
+              "min": 0,
+              "max": 100,
+              "value": 60,
+              "indicatorColor": "#00c2ff"
+            }
+          ]
+        },
+        {
+          "id": "btn_back",
+          "type": "button",
+          "x": 172,
+          "y": 384,
+          "width": 136,
+          "height": 40,
+          "label": "Back",
+          "styles": {
+            "borderRadius": 14
+          },
+          "events": [
+            {
+              "trigger": "clicked",
+              "actions": [
+                {
+                  "type": "navigate",
+                  "target": "page_home",
+                  "anim": "move_right",
+                  "time": 280
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

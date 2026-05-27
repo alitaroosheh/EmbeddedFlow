@@ -3,7 +3,7 @@
   "publisher": "erminity",
   "displayName": "embeddedflow (an LVGL Design tool)",
   "description": "Design LVGL UIs in .embf projects — live preview, named styles, data bindings, animations, knob widget, and C codegen for LVGL 8/9.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "license": "MIT",
   "repository": {
     "type": "git",

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.1
+
+- Preview toolbar: **Play animations** to run widget `animations[]` on the current page (preview WASM).
+- Commands: improve discoverability of **EmbeddedFlow: Open Preview** in the Command Palette.
+
 ## 1.0.0
 
 First feature-complete release: visual editing for named styles, data bindings, animations, and the knob widget, with inspector UI and codegen aligned end-to-end.

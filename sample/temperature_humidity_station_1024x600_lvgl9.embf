@@ -161,6 +161,36 @@
                   "events": []
                 },
                 {
+                  "id": "btn_open_settings",
+                  "type": "button",
+                  "x": 300,
+                  "y": 12,
+                  "width": 118,
+                  "height": 40,
+                  "label": "Settings",
+                  "styles": {
+                    "textColor": "#e5e7eb",
+                    "bgColor": "#0f172a",
+                    "indicatorColor": "#2dd4ff",
+                    "borderColor": "#1f2a44",
+                    "borderWidth": 2,
+                    "borderRadius": 12
+                  },
+                  "events": [
+                    {
+                      "trigger": "clicked",
+                      "actions": [
+                        {
+                          "type": "navigate",
+                          "target": "page_settings",
+                          "anim": "move_left",
+                          "time": 300
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
                   "id": "lbl_clock",
                   "type": "label",
                   "x": 720,
@@ -728,11 +758,468 @@
                   "y": 16,
                   "width": 470,
                   "height": 60,
-                  "text": "Tip: Use the toolbar to Play animations. Buttons update the gauges.",
+                  "text": "Open Settings for display, alerts, and sensor options.",
                   "styles": {
                     "fontSize": 18,
                     "textColor": "#94a3b8",
                     "align": "right"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "page_settings",
+      "name": "Settings",
+      "backgroundColor": "#070a12",
+      "components": [
+        {
+          "id": "cont_settings_root",
+          "type": "container",
+          "x": 0,
+          "y": 0,
+          "width": 1024,
+          "height": 600,
+          "layout": "none",
+          "styleRefs": ["app_bg"],
+          "children": [
+            {
+              "id": "cont_settings_header",
+              "type": "container",
+              "x": 24,
+              "y": 18,
+              "width": 976,
+              "height": 64,
+              "layout": "none",
+              "styleRefs": ["header_card"],
+              "children": [
+                {
+                  "id": "lbl_settings_title",
+                  "type": "label",
+                  "x": 14,
+                  "y": 10,
+                  "width": 320,
+                  "height": 32,
+                  "text": "Station Settings",
+                  "styles": {
+                    "fontSize": 26,
+                    "textColor": "#e5e7eb"
+                  }
+                },
+                {
+                  "id": "lbl_settings_sub",
+                  "type": "label",
+                  "x": 14,
+                  "y": 38,
+                  "width": 400,
+                  "height": 22,
+                  "text": "Display, alerts, and sensor preferences",
+                  "styles": {
+                    "fontSize": 16,
+                    "textColor": "#94a3b8"
+                  }
+                },
+                {
+                  "id": "btn_back_station",
+                  "type": "button",
+                  "x": 820,
+                  "y": 12,
+                  "width": 140,
+                  "height": 40,
+                  "label": "Back",
+                  "styles": {
+                    "textColor": "#0f172a",
+                    "bgColor": "#2dd4ff",
+                    "indicatorColor": "#2dd4ff",
+                    "borderColor": "#2dd4ff",
+                    "borderWidth": 2,
+                    "borderRadius": 12
+                  },
+                  "events": [
+                    {
+                      "trigger": "clicked",
+                      "actions": [
+                        {
+                          "type": "navigate",
+                          "target": "page_station",
+                          "anim": "move_right",
+                          "time": 300
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "ln_settings_sep",
+              "type": "line",
+              "x": 0,
+              "y": 92,
+              "width": 1024,
+              "height": 6,
+              "points": [
+                { "x": 24, "y": 0 },
+                { "x": 1000, "y": 0 }
+              ]
+            },
+            {
+              "id": "cont_settings_display",
+              "type": "container",
+              "x": 24,
+              "y": 110,
+              "width": 468,
+              "height": 368,
+              "layout": "none",
+              "styleRefs": ["metric_card"],
+              "children": [
+                {
+                  "id": "lbl_display_section",
+                  "type": "label",
+                  "x": 18,
+                  "y": 12,
+                  "width": 200,
+                  "height": 28,
+                  "text": "Display",
+                  "styles": {
+                    "fontSize": 22,
+                    "textColor": "#e5e7eb"
+                  }
+                },
+                {
+                  "id": "lbl_brightness",
+                  "type": "label",
+                  "x": 18,
+                  "y": 52,
+                  "width": 200,
+                  "height": 24,
+                  "text": "Screen brightness",
+                  "styleRefs": ["muted_text"]
+                },
+                {
+                  "id": "slider_brightness",
+                  "type": "slider",
+                  "x": 18,
+                  "y": 80,
+                  "width": 420,
+                  "height": 28,
+                  "min": 10,
+                  "max": 100,
+                  "value": 72,
+                  "styles": {
+                    "indicatorColor": "#2dd4ff",
+                    "bgColor": "#0f172a"
+                  }
+                },
+                {
+                  "id": "lbl_brightness_val",
+                  "type": "label",
+                  "x": 360,
+                  "y": 52,
+                  "width": 80,
+                  "height": 24,
+                  "text": "72%",
+                  "styles": {
+                    "fontSize": 18,
+                    "textColor": "#2dd4ff",
+                    "align": "right"
+                  }
+                },
+                {
+                  "id": "lbl_units",
+                  "type": "label",
+                  "x": 18,
+                  "y": 128,
+                  "width": 160,
+                  "height": 24,
+                  "text": "Temperature units",
+                  "styleRefs": ["muted_text"]
+                },
+                {
+                  "id": "dd_temp_units",
+                  "type": "dropdown",
+                  "x": 18,
+                  "y": 156,
+                  "width": 220,
+                  "height": 40,
+                  "options": ["Celsius (°C)", "Fahrenheit (°F)"],
+                  "selectedIndex": 0,
+                  "styles": {
+                    "textColor": "#e5e7eb",
+                    "bgColor": "#0f172a",
+                    "borderColor": "#1f2a44",
+                    "borderWidth": 2,
+                    "borderRadius": 10
+                  }
+                },
+                {
+                  "id": "lbl_dark_mode",
+                  "type": "label",
+                  "x": 18,
+                  "y": 214,
+                  "width": 200,
+                  "height": 24,
+                  "text": "Dark theme",
+                  "styleRefs": ["muted_text"]
+                },
+                {
+                  "id": "sw_dark_theme",
+                  "type": "switch",
+                  "x": 380,
+                  "y": 210,
+                  "width": 56,
+                  "height": 30,
+                  "checked": true,
+                  "events": [
+                    {
+                      "trigger": "value_changed",
+                      "actions": [{ "type": "set_theme" }]
+                    }
+                  ]
+                },
+                {
+                  "id": "lbl_screen_timeout",
+                  "type": "label",
+                  "x": 18,
+                  "y": 262,
+                  "width": 220,
+                  "height": 24,
+                  "text": "Screen timeout",
+                  "styleRefs": ["muted_text"]
+                },
+                {
+                  "id": "roller_timeout",
+                  "type": "roller",
+                  "x": 18,
+                  "y": 290,
+                  "width": 420,
+                  "height": 64,
+                  "options": ["30 sec", "1 min", "2 min", "5 min", "Never"],
+                  "selectedIndex": 2,
+                  "mode": "normal",
+                  "styles": {
+                    "textColor": "#e5e7eb",
+                    "bgColor": "#0f172a",
+                    "borderColor": "#1f2a44"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "cont_settings_alerts",
+              "type": "container",
+              "x": 512,
+              "y": 110,
+              "width": 488,
+              "height": 368,
+              "layout": "none",
+              "styleRefs": ["metric_card"],
+              "children": [
+                {
+                  "id": "lbl_alerts_section",
+                  "type": "label",
+                  "x": 18,
+                  "y": 12,
+                  "width": 200,
+                  "height": 28,
+                  "text": "Alerts & sensors",
+                  "styles": {
+                    "fontSize": 22,
+                    "textColor": "#e5e7eb"
+                  }
+                },
+                {
+                  "id": "lbl_alert_hum_high",
+                  "type": "label",
+                  "x": 18,
+                  "y": 52,
+                  "width": 280,
+                  "height": 24,
+                  "text": "High humidity warning (>70%)",
+                  "styleRefs": ["muted_text"]
+                },
+                {
+                  "id": "sw_alert_humidity",
+                  "type": "switch",
+                  "x": 400,
+                  "y": 48,
+                  "width": 56,
+                  "height": 30,
+                  "checked": true
+                },
+                {
+                  "id": "lbl_alert_temp",
+                  "type": "label",
+                  "x": 18,
+                  "y": 96,
+                  "width": 280,
+                  "height": 24,
+                  "text": "Freeze alert (<5°C)",
+                  "styleRefs": ["muted_text"]
+                },
+                {
+                  "id": "sw_alert_freeze",
+                  "type": "switch",
+                  "x": 400,
+                  "y": 92,
+                  "width": 56,
+                  "height": 30,
+                  "checked": false
+                },
+                {
+                  "id": "chk_sound_alerts",
+                  "type": "checkbox",
+                  "x": 18,
+                  "y": 140,
+                  "width": 280,
+                  "height": 32,
+                  "text": "Sound on alerts",
+                  "checked": true,
+                  "styles": {
+                    "textColor": "#e5e7eb"
+                  }
+                },
+                {
+                  "id": "chk_led_pulse",
+                  "type": "checkbox",
+                  "x": 18,
+                  "y": 178,
+                  "width": 280,
+                  "height": 32,
+                  "text": "LED pulse on update",
+                  "checked": false,
+                  "styles": {
+                    "textColor": "#e5e7eb"
+                  }
+                },
+                {
+                  "id": "lbl_sample_rate",
+                  "type": "label",
+                  "x": 18,
+                  "y": 224,
+                  "width": 200,
+                  "height": 24,
+                  "text": "Sensor sample rate",
+                  "styleRefs": ["muted_text"]
+                },
+                {
+                  "id": "bar_sample_rate",
+                  "type": "bar",
+                  "x": 18,
+                  "y": 254,
+                  "width": 440,
+                  "height": 18,
+                  "min": 0,
+                  "max": 100,
+                  "value": 40,
+                  "styles": {
+                    "indicatorColor": "#a78bfa",
+                    "bgColor": "#0f172a"
+                  }
+                },
+                {
+                  "id": "lbl_sample_hint",
+                  "type": "label",
+                  "x": 18,
+                  "y": 280,
+                  "width": 440,
+                  "height": 22,
+                  "text": "Normal — one reading every 30 seconds",
+                  "styles": {
+                    "fontSize": 15,
+                    "textColor": "#94a3b8"
+                  }
+                },
+                {
+                  "id": "sw_wifi_sync",
+                  "type": "switch",
+                  "x": 18,
+                  "y": 316,
+                  "width": 56,
+                  "height": 30,
+                  "checked": true
+                },
+                {
+                  "id": "lbl_wifi_sync",
+                  "type": "label",
+                  "x": 84,
+                  "y": 320,
+                  "width": 360,
+                  "height": 24,
+                  "text": "Cloud sync (Wi‑Fi connected)",
+                  "styleRefs": ["muted_text"]
+                }
+              ]
+            },
+            {
+              "id": "cont_settings_device",
+              "type": "container",
+              "x": 24,
+              "y": 494,
+              "width": 976,
+              "height": 88,
+              "layout": "none",
+              "styleRefs": ["header_card"],
+              "children": [
+                {
+                  "id": "lbl_device_name",
+                  "type": "label",
+                  "x": 18,
+                  "y": 14,
+                  "width": 140,
+                  "height": 28,
+                  "text": "Device name",
+                  "styleRefs": ["muted_text"]
+                },
+                {
+                  "id": "ta_device_name",
+                  "type": "textarea",
+                  "x": 18,
+                  "y": 42,
+                  "width": 320,
+                  "height": 36,
+                  "text": "Living Room Station",
+                  "placeholder": "Enter name…",
+                  "oneLine": true,
+                  "styles": {
+                    "textColor": "#e5e7eb",
+                    "bgColor": "#0b1222",
+                    "borderColor": "#1f2a44",
+                    "borderWidth": 2,
+                    "borderRadius": 10
+                  }
+                },
+                {
+                  "id": "lbl_firmware",
+                  "type": "label",
+                  "x": 360,
+                  "y": 20,
+                  "width": 280,
+                  "height": 24,
+                  "text": "Firmware v1.0.0 · LVGL 9.5",
+                  "styles": {
+                    "fontSize": 16,
+                    "textColor": "#94a3b8"
+                  }
+                },
+                {
+                  "id": "btn_reset_defaults",
+                  "type": "button",
+                  "x": 720,
+                  "y": 22,
+                  "width": 220,
+                  "height": 40,
+                  "label": "Reset to defaults",
+                  "styles": {
+                    "textColor": "#e5e7eb",
+                    "bgColor": "#0f172a",
+                    "indicatorColor": "#a78bfa",
+                    "borderColor": "#1f2a44",
+                    "borderWidth": 2,
+                    "borderRadius": 12
                   }
                 }
               ]

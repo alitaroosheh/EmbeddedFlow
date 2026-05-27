@@ -15,7 +15,7 @@ describe("codegen page swipe", () => {
         expect(src).toContain("lv_indev_get_gesture_dir(lv_indev_active())");
         expect(src).not.toContain("lv_indev_get_act()");
         expect(src).toContain("if (dir == LV_DIR_LEFT)");
-        expect(src).toContain("lv_screen_load_anim(ui_page_b, LV_SCREEN_LOAD_ANIM_MOVE_LEFT, 350, 0, false)");
+        expect(src).toContain("lv_screen_load_anim(ui_page_b, LV_SCR_LOAD_ANIM_MOVE_LEFT, 350, 0, false)");
     });
 
     it("emits lv_scr_load for instant swipe target on LVGL 8", () => {

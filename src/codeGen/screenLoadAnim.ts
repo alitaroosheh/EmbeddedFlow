@@ -29,11 +29,14 @@ export function normalizeScreenLoadAnim(value: unknown): ScreenLoadAnim | undefi
     return undefined;
 }
 
-/** LVGL C constant for codegen (v8 `LV_SCR_LOAD_ANIM_*` / v9 `LV_SCREEN_LOAD_ANIM_*`). */
-export function screenLoadAnimCConstant(anim: ScreenLoadAnim, lvglV9: boolean): string {
-    const prefix = lvglV9 ? "LV_SCREEN_LOAD_ANIM_" : "LV_SCR_LOAD_ANIM_";
+/**
+ * LVGL screen-load animation enum for codegen.
+ * Always `LV_SCR_LOAD_ANIM_*` — native on LVGL 8; on LVGL 9.x mapped via `lv_api_map_v9_*.h`
+ * (do not emit `LV_SCREEN_LOAD_ANIM_*`, which breaks many v9 firmware builds).
+ */
+export function screenLoadAnimCConstant(anim: ScreenLoadAnim, _lvglV9?: boolean): string {
     const suffix = anim === "none" ? "NONE" : anim.toUpperCase();
-    return prefix + suffix;
+    return `LV_SCR_LOAD_ANIM_${suffix}`;
 }
 
 export const SCREEN_LOAD_ANIM_OPTIONS: { value: ScreenLoadAnim; label: string }[] = [

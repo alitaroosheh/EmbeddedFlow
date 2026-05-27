@@ -19,7 +19,7 @@ describe("codegen navigate screen animation", () => {
     it("emits lv_screen_load_anim for LVGL 9", () => {
         const p = projectWithNavigate("move_left", "9.2.2");
         const src = generatePageSource(p, p.pages[0]);
-        expect(src).toContain("lv_screen_load_anim(ui_page_b, LV_SCREEN_LOAD_ANIM_MOVE_LEFT, 400, 0, false)");
+        expect(src).toContain("lv_screen_load_anim(ui_page_b, LV_SCR_LOAD_ANIM_MOVE_LEFT, 400, 0, false)");
         expect(src).not.toContain("lv_screen_load(ui_page_b)");
     });
 

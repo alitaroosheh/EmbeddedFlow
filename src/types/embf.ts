@@ -179,6 +179,7 @@ export type EventTrigger =
 
 /**
  * Screen transition when loading another page (maps to LVGL `lv_scr_load_anim` / `lv_screen_load_anim`).
+ * Codegen always emits `LV_SCR_LOAD_ANIM_*` constants (v8 native; v9 via `lv_api_map_v9_*.h`).
  * Omitted or `"none"` → instant `lv_scr_load` / `lv_screen_load`.
  */
 export type ScreenLoadAnim =

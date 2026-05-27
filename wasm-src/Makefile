@@ -40,6 +40,8 @@ EM_FLAGS := \
     -s EXPORT_NAME="createEmbfRuntime" \
     -s EXPORTED_FUNCTIONS="[ \
         '_embf_init', \
+        '_embf_deinit', \
+        '_embf_force_redraw', \
         '_embf_main_loop', \
         '_embf_get_buffer', \
         '_embf_clear_screen', \

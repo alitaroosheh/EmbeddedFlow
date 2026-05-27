@@ -39,7 +39,7 @@ Write-Host "Found $($lvglCFiles.Count) LVGL source files"
 
 # Exported functions
 $exports = @(
-    "_embf_init","_embf_set_theme","_embf_main_loop","_embf_get_buffer","_embf_clear_screen",
+    "_embf_init","_embf_deinit","_embf_force_redraw","_embf_set_theme","_embf_main_loop","_embf_get_buffer","_embf_clear_screen",
     "_embf_create_screen","_embf_load_screen","_embf_load_screen_anim",
     "_embf_create_label","_embf_label_set_text",
     "_embf_create_button","_embf_button_set_label",
@@ -55,6 +55,7 @@ $exports = @(
     "_embf_create_textarea","_embf_textarea_set_text","_embf_textarea_set_placeholder","_embf_textarea_set_one_line",
     "_embf_create_line","_embf_line_set_points",
     "_embf_obj_set_hidden","_embf_obj_get_screen_coords",
+    "_embf_obj_set_scroll_dir",
     "_embf_obj_set_style_bg_color","_embf_obj_set_style_bg_color_part","_embf_obj_set_style_text_color",
     "_embf_obj_set_style_font_size",
     "_embf_obj_set_style_border_color","_embf_obj_set_style_text_align",

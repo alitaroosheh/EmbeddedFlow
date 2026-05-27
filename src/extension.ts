@@ -24,7 +24,7 @@ const embfLintDebounceMs = 400;
 const embfLintTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const liveGenDebounceMs = 600;
 const liveGenTimers = new Map<string, ReturnType<typeof setTimeout>>();
-const previewRefreshDebounceMs = 280;
+const previewRefreshDebounceMs = 400;
 const previewRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -331,6 +331,8 @@ function openPreview(filePath: string, extensionUri: vscode.Uri): void {
             if (result instanceof EmbfParseError) {
                 embeddedFlowLog("preview", "error", `${path.basename(filePath)}: ${result.message}`);
                 p.sendError(result.message);
+            } else if (p.shouldCoalesceExternalReload()) {
+                /* Inspector debounced reload already scheduled — avoid duplicate full refresh. */
             } else {
                 p.sendProject(result);
             }

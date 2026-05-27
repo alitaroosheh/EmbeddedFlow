@@ -410,6 +410,9 @@ export function applyComponentPatch(comp: Component, patch: Record<string, unkno
         }
     }
 
+    if ("scrollX" in patch) setBool(r, "scrollX", patch.scrollX);
+    if ("scrollY" in patch) setBool(r, "scrollY", patch.scrollY);
+
     switch (comp.type) {
         case "label":
             if ("text" in patch) setStr(r, "text", patch.text);
@@ -560,6 +563,17 @@ export function applyPageInspectorPatch(
         } else if (typeof v === "string" && v.trim()) {
             page.backgroundColor = v.trim();
         }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(patch, "pageScrollX")) {
+        const v = patch.pageScrollX;
+        if (v === null || v === undefined) delete (page as unknown as Record<string, unknown>).scrollX;
+        else if (typeof v === "boolean") (page as unknown as Record<string, unknown>).scrollX = v;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "pageScrollY")) {
+        const v = patch.pageScrollY;
+        if (v === null || v === undefined) delete (page as unknown as Record<string, unknown>).scrollY;
+        else if (typeof v === "boolean") (page as unknown as Record<string, unknown>).scrollY = v;
     }
 
     if (patch.projName !== undefined && typeof patch.projName === "string") {

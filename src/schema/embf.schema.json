@@ -132,6 +132,8 @@
         "id": { "type": "string", "minLength": 1 },
         "name": { "type": "string", "minLength": 1 },
         "backgroundColor": { "type": "string" },
+        "scrollX": { "type": "boolean", "description": "Enable horizontal scrolling on the page screen" },
+        "scrollY": { "type": "boolean", "description": "Enable vertical scrolling on the page screen" },
         "components": {
           "type": "array",
           "items": { "$ref": "#/definitions/component" }

@@ -8,10 +8,14 @@ import type {
     NavPushAction,
     NavReplaceAction,
     NavResetAction,
-    PageSwipeFlow
+    PageSwipeFlow,
+    DataField
 } from "../types/embf";
 import { widgetVar, screenVar, toIdentifier } from "./naming";
 import { screenLoadAnimCConstant } from "./screenLoadAnim";
+import { dataSetterName } from "./bindingsGen";
+
+const BINDING_RE = /\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g;
 
 /** Name for the event callback function of a component+trigger. */
 export function eventCbName(pageId: string, compId: string, trigger: string): string {
@@ -47,6 +51,11 @@ export function emitEventCallback(
     const objVar = widgetVar(page.id, comp.id);
 
     const actionLines = evtDef.actions.map(a => emitAction(project, page, a, v9));
+    /* ui_set_*() already calls ui_bindings_apply(); a second apply after every click
+     * can corrupt partial-framebuffer displays (green flash / blank labels). */
+    const needsBindingsRefresh =
+        (project.dataModel?.fields?.length ?? 0) > 0 &&
+        evtDef.actions.some(a => actionNeedsBindingsApply(project, page, a));
 
     const impl = [
         `static void ${cbName}(lv_event_t *e)`,
@@ -54,6 +63,7 @@ export function emitEventCallback(
         `    lv_event_code_t code = lv_event_get_code(e);`,
         `    if (code == ${lvEventCode(evtDef.trigger)}) {`,
         ...actionLines.map(l => `        ${l}`),
+        ...(needsBindingsRefresh ? [`        ui_bindings_apply();`] : []),
         `    }`,
         `}`,
     ].join("\n");
@@ -79,14 +89,152 @@ export function emitNavigateStatement(
     const anim = nav.anim ?? "none";
     if (anim === "none") {
         const loadFn = v9 ? "lv_screen_load" : "lv_scr_load";
-        return `${loadFn}(${scr});`;
+        const load = `${loadFn}(${scr});`;
+        if ((project.dataModel?.fields?.length ?? 0) > 0) {
+            return `{ ${load} ui_bindings_apply(); }`;
+        }
+        return load;
     }
     const time = Math.max(0, Math.round(nav.time ?? 300));
     const delay = Math.max(0, Math.round(nav.delay ?? 0));
     const autoDel = nav.autoDel ? "true" : "false";
     const lvAnim = screenLoadAnimCConstant(anim, v9);
     const loadAnimFn = v9 ? "lv_screen_load_anim" : "lv_scr_load_anim";
-    return `${loadAnimFn}(${scr}, ${lvAnim}, ${time}, ${delay}, ${autoDel});`;
+    const load = `${loadAnimFn}(${scr}, ${lvAnim}, ${time}, ${delay}, ${autoDel});`;
+    if ((project.dataModel?.fields?.length ?? 0) > 0) {
+        return `{ ${load} ui_bindings_apply(); }`;
+    }
+    return load;
+}
+
+function actionNeedsBindingsApply(project: EmbfProject, page: Page, action: Action): boolean {
+    switch (action.type) {
+        case "navigate":
+            return true;
+        case "set_hidden":
+        case "set_checked":
+        case "set_theme":
+            return false;
+        case "set_value": {
+            const comp = findComponentOnPage(page, action.target);
+            const bindField = (comp as { bindings?: { value?: string } } | null)?.bindings?.value;
+            if (
+                typeof bindField === "string" &&
+                project.dataModel?.fields?.some(
+                    f => f.id === bindField && (f.type === "int" || f.type === "float")
+                )
+            ) {
+                return false;
+            }
+            return true;
+        }
+        case "set_text": {
+            const comp = findComponentOnPage(page, action.target);
+            if (comp?.type === "label" && typeof comp.text === "string") {
+                const fieldId = singleBindingFieldInLabel(comp.text);
+                if (fieldId && project.dataModel?.fields?.some(f => f.id === fieldId)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        default:
+            return false;
+    }
+}
+
+function findComponentOnPage(page: Page, componentId: string): Component | null {
+    function walk(comps: Component[]): Component | null {
+        for (const c of comps) {
+            if (c.id === componentId) {
+                return c;
+            }
+            const ch = (c as { children?: Component[] }).children;
+            if (Array.isArray(ch)) {
+                const inner = walk(ch);
+                if (inner) {
+                    return inner;
+                }
+            }
+        }
+        return null;
+    }
+    return walk(page.components);
+}
+
+function singleBindingFieldInLabel(text: string): string | null {
+    const fields: string[] = [];
+    let m: RegExpExecArray | null;
+    const re = new RegExp(BINDING_RE.source, "g");
+    while ((m = re.exec(text)) !== null) {
+        if (!fields.includes(m[1])) {
+            fields.push(m[1]);
+        }
+    }
+    if (fields.length !== 1) {
+        return null;
+    }
+    const trimmed = text.replace(/\s/g, "");
+    const expected = `{{${fields[0]}}}`;
+    return trimmed === expected ? fields[0] : null;
+}
+
+function emitDataSetterForNumeric(field: DataField, value: number): string {
+    if (field.type === "float") {
+        const n = Number(value);
+        return `${dataSetterName(field.id)}(${Number.isInteger(n) ? `${n}.0f` : `${n}f`});`;
+    }
+    return `${dataSetterName(field.id)}(${Math.round(value)});`;
+}
+
+function emitDataSetterForText(field: DataField, text: string): string | null {
+    switch (field.type) {
+        case "string":
+            return `${dataSetterName(field.id)}("${text.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}");`;
+        case "int": {
+            const n = Number.parseInt(text, 10);
+            if (!Number.isFinite(n)) {
+                return null;
+            }
+            return `${dataSetterName(field.id)}(${n});`;
+        }
+        case "float": {
+            const n = Number.parseFloat(text);
+            if (!Number.isFinite(n)) {
+                return null;
+            }
+            return emitDataSetterForNumeric(field, n);
+        }
+        case "bool": {
+            const low = text.trim().toLowerCase();
+            if (low === "true" || low === "1") {
+                return `${dataSetterName(field.id)}(true);`;
+            }
+            if (low === "false" || low === "0") {
+                return `${dataSetterName(field.id)}(false);`;
+            }
+            return null;
+        }
+    }
+}
+
+function emitWidgetSetValue(page: Page, targetId: string, value: number): string {
+    const wv = widgetVar(page.id, targetId);
+    const comp = findComponentOnPage(page, targetId);
+    if (!comp) {
+        return `/* set_value: widget "${targetId}" not found */`;
+    }
+    switch (comp.type) {
+        case "slider":
+            return `lv_slider_set_value(${wv}, ${Math.round(value)}, LV_ANIM_OFF);`;
+        case "bar":
+            return `lv_bar_set_value(${wv}, ${Math.round(value)}, LV_ANIM_OFF);`;
+        case "arc":
+        case "knob":
+            return `lv_arc_set_value(${wv}, ${Math.round(value)});`;
+        default:
+            return `/* set_value: "${targetId}" is type "${comp.type}", not numeric */`;
+    }
 }
 
 /** Emit one action as a C statement (no leading indent). */
@@ -121,26 +269,59 @@ function emitAction(project: EmbfProject, page: Page, action: Action, v9: boolea
             );
         }
         case "set_text": {
-            // Escape the string
+            const comp = findComponentOnPage(page, action.target);
+            const fieldId =
+                comp?.type === "label" && typeof comp.text === "string"
+                    ? singleBindingFieldInLabel(comp.text)
+                    : null;
+            if (fieldId) {
+                const field = project.dataModel?.fields?.find(f => f.id === fieldId);
+                if (field) {
+                    const setter = emitDataSetterForText(field, action.text);
+                    if (setter) {
+                        return setter;
+                    }
+                }
+            }
             const escaped = action.text
                 .replace(/\\/g, "\\\\")
                 .replace(/"/g, '\\"')
                 .replace(/\n/g, "\\n");
+            if (comp?.type === "button") {
+                const wv = widgetVar(page.id, action.target);
+                return `lv_label_set_text(lv_obj_get_child(${wv}, 0), "${escaped}");`;
+            }
             return `lv_label_set_text(${widgetVar(page.id, action.target)}, "${escaped}");`;
         }
-        case "set_value":
-            // Component type determines the correct setter.
-            // We emit all three guarded by a NULL check since only one will match.
-            return `lv_obj_check_type(${widgetVar(page.id, action.target)}, &lv_slider_class)` +
-                   ` ? lv_slider_set_value(${widgetVar(page.id, action.target)}, ${action.value}, LV_ANIM_OFF)` +
-                   ` : lv_obj_check_type(${widgetVar(page.id, action.target)}, &lv_arc_class)` +
-                   ` ? lv_arc_set_value(${widgetVar(page.id, action.target)}, ${action.value})` +
-                   ` : lv_bar_set_value(${widgetVar(page.id, action.target)}, ${action.value}, LV_ANIM_OFF);`;
+        case "set_value": {
+            const comp = findComponentOnPage(page, action.target);
+            const bindField = (comp as { bindings?: { value?: string } } | null)?.bindings?.value;
+            if (typeof bindField === "string") {
+                const field = project.dataModel?.fields?.find(f => f.id === bindField);
+                if (field && (field.type === "int" || field.type === "float")) {
+                    return emitDataSetterForNumeric(field, action.value);
+                }
+            }
+            return emitWidgetSetValue(page, action.target, action.value);
+        }
         case "set_checked": {
-            const stateCall = action.checked
-                ? `lv_obj_add_state(${widgetVar(page.id, action.target)}, LV_STATE_CHECKED);`
-                : `lv_obj_remove_state(${widgetVar(page.id, action.target)}, LV_STATE_CHECKED);`;
-            return stateCall;
+            const comp = findComponentOnPage(page, action.target);
+            const wv = widgetVar(page.id, action.target);
+            const on = action.checked;
+            switch (comp?.type) {
+                case "switch":
+                    return on
+                        ? `lv_obj_add_state(${wv}, LV_STATE_CHECKED);`
+                        : `lv_obj_remove_state(${wv}, LV_STATE_CHECKED);`;
+                case "checkbox":
+                    return on
+                        ? `lv_obj_add_state(${wv}, LV_STATE_CHECKED);`
+                        : `lv_obj_remove_state(${wv}, LV_STATE_CHECKED);`;
+                default:
+                    return on
+                        ? `lv_obj_add_state(${wv}, LV_STATE_CHECKED);`
+                        : `lv_obj_remove_state(${wv}, LV_STATE_CHECKED);`;
+            }
         }
         case "set_hidden": {
             return action.hidden
@@ -155,9 +336,9 @@ function emitAction(project: EmbfProject, page: Page, action: Action, v9: boolea
                     ? action.dark ? "true" : "false"
                     : "lv_obj_has_state(lv_event_get_target_obj(e), LV_STATE_CHECKED)";
             if (v9) {
-                return `{ lv_theme_t *t = lv_theme_default_init(lv_display_get_default(), ${primary}, ${secondary}, ${darkExpr}, LV_FONT_DEFAULT); lv_display_set_theme(lv_display_get_default(), t); lv_obj_report_style_change(NULL); }`;
+                return `{ lv_theme_t *t = lv_theme_default_init(lv_display_get_default(), ${primary}, ${secondary}, ${darkExpr}, LV_FONT_DEFAULT); lv_display_set_theme(lv_display_get_default(), t); lv_obj_invalidate(lv_screen_active()); }`;
             }
-            return `{ lv_theme_t *t = lv_theme_default_init(lv_disp_get_default(), ${primary}, ${secondary}, ${darkExpr}, LV_FONT_DEFAULT); lv_disp_set_theme(lv_disp_get_default(), t); lv_obj_report_style_change(NULL); }`;
+            return `{ lv_theme_t *t = lv_theme_default_init(lv_disp_get_default(), ${primary}, ${secondary}, ${darkExpr}, LV_FONT_DEFAULT); lv_disp_set_theme(lv_disp_get_default(), t); lv_obj_invalidate(lv_scr_act()); }`;
         }
         default:
             return `/* unsupported action: ${(action as any).type} */`;

@@ -65,6 +65,7 @@ export function emitComponent(
 
     // Position, size, styles apply to all widget types
     lines.push(...posSize(v, comp));
+    lines.push(...emitScrollConfig(v, comp));
     lines.push(...emitStyleRefCalls(v, comp.styleRefs, ctx?.styles));
     if (comp.styles && Object.keys(comp.styles).length > 0) {
         lines.push(...emitStyleCalls(v, comp.styles, "    ", "LV_PART_MAIN | LV_STATE_DEFAULT", { fonts: ctx?.fonts }));
@@ -73,6 +74,27 @@ export function emitComponent(
     lines.push("");  // blank line between widgets
 
     return lines;
+}
+
+function emitScrollConfig(v: string, comp: Component): string[] {
+    if (comp.scrollX === undefined && comp.scrollY === undefined) {
+        return [];
+    }
+    const sx = comp.scrollX === true;
+    const sy = comp.scrollY === true;
+    if (!sx && !sy) {
+        return [
+            `    lv_obj_clear_flag(${v}, LV_OBJ_FLAG_SCROLLABLE);`,
+            `    lv_obj_set_scroll_dir(${v}, LV_DIR_NONE);`
+        ];
+    }
+    const dirs: string[] = [];
+    if (sx) dirs.push("LV_DIR_HOR");
+    if (sy) dirs.push("LV_DIR_VER");
+    return [
+        `    lv_obj_add_flag(${v}, LV_OBJ_FLAG_SCROLLABLE);`,
+        `    lv_obj_set_scroll_dir(${v}, ${dirs.join(" | ")});`
+    ];
 }
 
 /** Emit `lv_obj_add_style` for every valid styleRef on this widget. */
@@ -118,8 +140,12 @@ function emitLabel(v: string, c: LabelComponent, parent: string, v9: boolean): s
         lines.push(`    lv_label_set_long_mode(${v}, ${longModeMap[c.longMode] ?? "LV_LABEL_LONG_WRAP"});`);
     }
 
-    const escaped = escapeC(c.text);
-    lines.push(`    lv_label_set_text(${v}, "${escaped}");`);
+    /* Literal {{field}} templates are resolved in ui_bindings_apply() — do not bake them into ROM. */
+    if (/\{\{/.test(c.text)) {
+        lines.push(`    lv_label_set_text(${v}, "");`);
+    } else {
+        lines.push(`    lv_label_set_text(${v}, "${escapeC(c.text)}");`);
+    }
     return lines;
 }
 

@@ -122,6 +122,10 @@ export interface Page {
     id: string;
     name: string;
     backgroundColor?: string;
+    /** Enable/disable horizontal scrolling on the page's screen object. */
+    scrollX?: boolean;
+    /** Enable/disable vertical scrolling on the page's screen object. */
+    scrollY?: boolean;
     components: Component[];
     /** Page-level swipe handlers (LVGL `LV_EVENT_GESTURE` on the screen). */
     swipes?: PageSwipeFlow[];
@@ -271,6 +275,10 @@ export interface BaseComponent {
      *   - slider / bar / arc   → `value`     (numeric)
      */
     bindings?: { [propertyName: string]: string };
+    /** Enable/disable horizontal scrolling on this widget (LVGL scroll dir). */
+    scrollX?: boolean;
+    /** Enable/disable vertical scrolling on this widget (LVGL scroll dir). */
+    scrollY?: boolean;
 }
 
 /** Property of a widget that can be animated. Maps to a `lv_obj_set_*` setter in codegen. */

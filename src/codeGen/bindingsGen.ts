@@ -23,7 +23,7 @@ export function dataGetterName(id: string): string {
     return `ui_get_${id}`;
 }
 
-/** Map JSON DataFieldType → C scalar type for variables and accessors. */
+/** Type used in setter parameters / getters. */
 function cTypeFor(field: DataField): string {
     switch (field.type) {
         case "string":
@@ -35,6 +35,12 @@ function cTypeFor(field: DataField): string {
         case "bool":
             return "bool";
     }
+}
+
+function stringFieldBufSize(field: DataField): number {
+    const def =
+        field.default !== undefined && field.default !== null ? String(field.default) : "";
+    return Math.max(16, Math.min(128, def.length + 12));
 }
 
 function formatDefault(field: DataField): string {
@@ -178,11 +184,17 @@ export function generateBindingsHeader(project: EmbfProject): string | null {
     const setters: string[] = [];
     const getters: string[] = [];
     for (const f of fields) {
-        const cType = cTypeFor(f);
-        const sp = cType.endsWith("*") ? "" : " ";
-        externs.push(`extern ${cType}${sp}${dataVarName(f.id)};`);
-        setters.push(`void ${dataSetterName(f.id)}(${cType}${sp}value);`);
-        getters.push(`${cType}${sp}${dataGetterName(f.id)}(void);`);
+        if (f.type === "string") {
+            externs.push(`extern char ${dataVarName(f.id)}[${stringFieldBufSize(f)}];`);
+            setters.push(`void ${dataSetterName(f.id)}(const char *value);`);
+            getters.push(`const char *${dataGetterName(f.id)}(void);`);
+        } else {
+            const cType = cTypeFor(f);
+            const sp = cType.endsWith("*") ? "" : " ";
+            externs.push(`extern ${cType}${sp}${dataVarName(f.id)};`);
+            setters.push(`void ${dataSetterName(f.id)}(${cType}${sp}value);`);
+            getters.push(`${cType}${sp}${dataGetterName(f.id)}(void);`);
+        }
     }
     return [
         AUTOGEN_BANNER,
@@ -232,10 +244,18 @@ export function generateBindingsSource(project: EmbfProject): string | null {
     const definitions: string[] = [];
     const initBody: string[] = [];
     for (const f of fields) {
-        const cType = cTypeFor(f);
-        const sp = cType.endsWith("*") ? "" : " ";
-        definitions.push(`${cType}${sp}${dataVarName(f.id)};`);
-        initBody.push(`    ${dataVarName(f.id)} = ${formatDefault(f)};`);
+        if (f.type === "string") {
+            definitions.push(`char ${dataVarName(f.id)}[${stringFieldBufSize(f)}];`);
+            initBody.push(
+                `    strncpy(${dataVarName(f.id)}, ${formatDefault(f)}, sizeof(${dataVarName(f.id)}) - 1);`,
+                `    ${dataVarName(f.id)}[sizeof(${dataVarName(f.id)}) - 1] = '\\0';`
+            );
+        } else {
+            const cType = cTypeFor(f);
+            const sp = cType.endsWith("*") ? "" : " ";
+            definitions.push(`${cType}${sp}${dataVarName(f.id)};`);
+            initBody.push(`    ${dataVarName(f.id)} = ${formatDefault(f)};`);
+        }
     }
 
     const applyBody: string[] = [];
@@ -248,35 +268,64 @@ export function generateBindingsSource(project: EmbfProject): string | null {
 
     const setterImpls: string[] = [];
     for (const f of fields) {
-        const cType = cTypeFor(f);
-        const sp = cType.endsWith("*") ? "" : " ";
-        setterImpls.push(
-            `void ${dataSetterName(f.id)}(${cType}${sp}value)`,
-            `{`,
-            `    ${dataVarName(f.id)} = value;`,
-            `    ui_bindings_apply();`,
-            `}`,
-            ``
-        );
+        if (f.type === "string") {
+            setterImpls.push(
+                `void ${dataSetterName(f.id)}(const char *value)`,
+                `{`,
+                `    if (value == NULL) value = "";`,
+                `    strncpy(${dataVarName(f.id)}, value, sizeof(${dataVarName(f.id)}) - 1);`,
+                `    ${dataVarName(f.id)}[sizeof(${dataVarName(f.id)}) - 1] = '\\0';`,
+                `    ui_bindings_apply();`,
+                `}`,
+                ``
+            );
+        } else {
+            const cType = cTypeFor(f);
+            const sp = cType.endsWith("*") ? "" : " ";
+            setterImpls.push(
+                `void ${dataSetterName(f.id)}(${cType}${sp}value)`,
+                `{`,
+                `    ${dataVarName(f.id)} = value;`,
+                `    ui_bindings_apply();`,
+                `}`,
+                ``
+            );
+        }
     }
     const getterImpls: string[] = [];
     for (const f of fields) {
-        const cType = cTypeFor(f);
-        const sp = cType.endsWith("*") ? "" : " ";
-        getterImpls.push(
-            `${cType}${sp}${dataGetterName(f.id)}(void)`,
-            `{`,
-            `    return ${dataVarName(f.id)};`,
-            `}`,
-            ``
-        );
+        if (f.type === "string") {
+            getterImpls.push(
+                `const char *${dataGetterName(f.id)}(void)`,
+                `{`,
+                `    return ${dataVarName(f.id)};`,
+                `}`,
+                ``
+            );
+        } else {
+            const cType = cTypeFor(f);
+            const sp = cType.endsWith("*") ? "" : " ";
+            getterImpls.push(
+                `${cType}${sp}${dataGetterName(f.id)}(void)`,
+                `{`,
+                `    return ${dataVarName(f.id)};`,
+                `}`,
+                ``
+            );
+        }
     }
+
+    const v9 = project.project.lvglVersion.startsWith("9");
+    const invalidateActiveScreen = v9
+        ? `    lv_obj_t *scr = lv_screen_active();`
+        : `    lv_obj_t *scr = lv_scr_act();`;
 
     return [
         AUTOGEN_BANNER,
         `#include "ui.h"`,
         `#include "ui_bindings.h"`,
         `#include <stdio.h>`,
+        `#include <string.h>`,
         ``,
         `/* Backing storage definitions. */`,
         ...definitions,
@@ -289,6 +338,10 @@ export function generateBindingsSource(project: EmbfProject): string | null {
         `void ui_bindings_apply(void)`,
         `{`,
         ...(applyBody.length > 0 ? applyBody : ["    /* No bound widgets. */"]),
+        invalidateActiveScreen,
+        `    if (scr != NULL) {`,
+        `        lv_obj_invalidate(scr);`,
+        `    }`,
         `}`,
         ``,
         ...setterImpls,
@@ -400,16 +453,32 @@ function escapeC(s: string): string {
         .replace(/\t/g, "\\t");
 }
 
-/** Page-level helper: list of init calls inserted into `ui_init()`. */
-export function bindingsInitCalls(project: EmbfProject): string[] {
+/** Initialise backing storage — call after all screens are created, before the first load. */
+export function bindingsInitOnlyCalls(project: EmbfProject): string[] {
     if (!project.dataModel?.fields?.length) {
         return [];
     }
-    return [
-        `    ui_bindings_init();`,
-        `    /* Apply initial values after every screen is created. */`,
-        `    ui_bindings_apply();`
-    ];
+    return [`    ui_bindings_init();`];
+}
+
+/** Push bound values to widgets — call after `lv_screen_load` so labels/widgets refresh. */
+export function bindingsApplyCall(project: EmbfProject): string | null {
+    if (!project.dataModel?.fields?.length) {
+        return null;
+    }
+    return `    ui_bindings_apply();`;
+}
+
+/** @deprecated Use {@link bindingsInitOnlyCalls} + {@link bindingsApplyCall} in ui_init. */
+export function bindingsInitCalls(project: EmbfProject): string[] {
+    const init = bindingsInitOnlyCalls(project);
+    const apply = bindingsApplyCall(project);
+    if (init.length === 0) {
+        return [];
+    }
+    return apply
+        ? [...init, `    /* Apply initial values after every screen is created. */`, apply]
+        : init;
 }
 
 /** Page navigation may need to re-apply bindings; expose the source list separately. */

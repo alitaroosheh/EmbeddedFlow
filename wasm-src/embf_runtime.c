@@ -23,6 +23,13 @@ static uint8_t *g_framebuffer = NULL; /* RGBA8888, width * height * 4 */
 static lv_display_t *g_display = NULL;
 static lv_color_t   *g_draw_buf1 = NULL;
 static lv_color_t   *g_draw_buf2 = NULL;
+static bool g_lvgl_initialized = false;
+
+static lv_indev_t *g_pointer_indev = NULL;
+static lv_indev_t *g_wheel_indev   = NULL;
+static lv_obj_t   *g_poll_obj      = NULL;
+static uint32_t    g_poll_code     = 0;
+static int32_t     g_poll_value    = 0;
 
 /* flush_cb: copy the rendered area into the RGBA framebuffer */
 static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
@@ -71,6 +78,49 @@ static lv_color_t unpack_color(uint32_t argb)
     return lv_color_make(r, g, b);
 }
 
+/* ── LVGL lifecycle ─────────────────────────────────────────────────────── */
+
+static void embf_discard_pending_events(void);
+
+static void embf_shutdown_lvgl(void)
+{
+    if (!g_lvgl_initialized) {
+        return;
+    }
+    embf_discard_pending_events();
+    g_poll_obj   = NULL;
+    g_poll_code  = 0;
+    g_poll_value = 0;
+    g_pointer_indev = NULL;
+    g_wheel_indev   = NULL;
+    if (g_display) {
+        lv_display_delete(g_display);
+        g_display = NULL;
+    }
+    if (g_draw_buf1) {
+        free(g_draw_buf1);
+        g_draw_buf1 = NULL;
+    }
+    if (g_draw_buf2) {
+        free(g_draw_buf2);
+        g_draw_buf2 = NULL;
+    }
+    if (g_framebuffer) {
+        free(g_framebuffer);
+        g_framebuffer = NULL;
+    }
+    g_width  = 0;
+    g_height = 0;
+    lv_deinit();
+    g_lvgl_initialized = false;
+}
+
+EMSCRIPTEN_KEEPALIVE
+void embf_deinit(void)
+{
+    embf_shutdown_lvgl();
+}
+
 /* ── Public API ─────────────────────────────────────────────────────────── */
 
 /**
@@ -86,6 +136,8 @@ EMSCRIPTEN_KEEPALIVE
 void embf_init(int width, int height, int dark_theme,
                uint32_t primary_argb, uint32_t secondary_argb)
 {
+    embf_shutdown_lvgl();
+
     g_width  = width;
     g_height = height;
 
@@ -126,6 +178,35 @@ void embf_init(int width, int height, int dark_theme,
     lv_theme_t *theme = lv_theme_default_init(
         g_display, primary, secondary, dark_theme ? true : false, LV_FONT_DEFAULT);
     lv_display_set_theme(g_display, theme);
+
+#if LV_USE_SYSMON
+    /* LVGL may auto-attach a perf overlay on display create; keep the preview canvas clean. */
+#if LV_USE_PERF_MONITOR
+    lv_sysmon_hide_performance(g_display);
+#endif
+#if LV_USE_MEM_MONITOR
+    lv_sysmon_hide_memory(g_display);
+#endif
+#endif
+
+    g_lvgl_initialized = true;
+}
+
+/** Full refresh of the active screen (needed after resize / screen load with partial buffers). */
+EMSCRIPTEN_KEEPALIVE
+void embf_force_redraw(void)
+{
+    if (!g_display) {
+        return;
+    }
+    lv_obj_t *scr = lv_screen_active();
+    if (!scr) {
+        scr = lv_display_get_screen_active(g_display);
+    }
+    if (scr) {
+        lv_obj_invalidate(scr);
+    }
+    lv_refr_now(g_display);
 }
 
 EMSCRIPTEN_KEEPALIVE
@@ -144,8 +225,6 @@ uint8_t *embf_get_buffer(void)
 {
     return g_framebuffer;
 }
-
-static void embf_discard_pending_events(void);
 
 EMSCRIPTEN_KEEPALIVE
 void embf_clear_screen(void)
@@ -168,7 +247,12 @@ EMSCRIPTEN_KEEPALIVE
 void embf_load_screen(lv_obj_t *screen)
 {
     lv_screen_load(screen);
-    lv_obj_invalidate(screen);
+    if (screen) {
+        lv_obj_invalidate(screen);
+    }
+    if (g_display) {
+        lv_refr_now(g_display);
+    }
     embf_discard_pending_events();
 }
 
@@ -179,6 +263,24 @@ void embf_load_screen_anim(lv_obj_t *screen, int anim_type, uint32_t time, uint3
     lv_obj_invalidate(screen);
   /* Do NOT call lv_refr_now() — it runs lv_anim_refr_now() and finishes the transition instantly. */
     embf_discard_pending_events();
+}
+
+/* ── Scroll helpers ─────────────────────────────────────────────────────── */
+
+EMSCRIPTEN_KEEPALIVE
+void embf_obj_set_scroll_dir(lv_obj_t *obj, int dir_mask)
+{
+    if(!obj) return;
+    if(dir_mask == 0) {
+        lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_scroll_dir(obj, LV_DIR_NONE);
+        return;
+    }
+    lv_obj_add_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+    lv_dir_t d = LV_DIR_NONE;
+    if(dir_mask & 1) d |= LV_DIR_HOR; /* bit0 */
+    if(dir_mask & 2) d |= LV_DIR_VER; /* bit1 */
+    lv_obj_set_scroll_dir(obj, d);
 }
 
 /* ── Object position / size helpers ────────────────────────────────────── */
@@ -695,11 +797,6 @@ static void generic_event_cb(lv_event_t *e)
     }
 }
 
-/* Static poll-result slots — JS reads these after embf_poll_event() returns 1 */
-static lv_obj_t *g_poll_obj   = NULL;
-static uint32_t  g_poll_code  = 0;
-static int32_t   g_poll_value = 0;
-
 EMSCRIPTEN_KEEPALIVE
 void embf_register_event(lv_obj_t *obj, uint32_t event_code)
 {
@@ -724,8 +821,6 @@ EMSCRIPTEN_KEEPALIVE int32_t   *embf_poll_value_ptr(void) { return &g_poll_value
 
 /* ── Input events ───────────────────────────────────────────────────────── */
 
-static lv_indev_t      *g_pointer_indev = NULL;
-static lv_indev_t      *g_wheel_indev   = NULL;
 static lv_point_t       g_pointer_point = {0, 0};
 static lv_indev_state_t g_pointer_state = LV_INDEV_STATE_RELEASED;
 static int32_t          g_wheel_delta   = 0;

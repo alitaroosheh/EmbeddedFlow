@@ -91,18 +91,12 @@ const btnPlayAnimations = document.getElementById("btn-play-animations");
 const widgetTreeEl = document.getElementById("widget-tree");
 const paletteSearch = /** @type {HTMLInputElement | null} */ (document.getElementById("palette-search"));
 const previewBezelCheck = /** @type {HTMLInputElement | null} */ (document.getElementById("preview-bezel"));
-const fpsLabel = document.getElementById("fps-label");
 const insertWidgetPicker = document.getElementById("insert-widget-picker");
 const btnOpenProjectSettings = document.getElementById("btn-open-project-settings");
 
 const PALETTE_DRAG_MIME = "application/x-embeddedflow-widget";
 
 /** @type {number} */
-let fpsAccumMs = 0;
-/** @type {number} */
-let fpsFrameCount = 0;
-/** @type {number} */
-let fpsLastTs = 0;
 const displayWrapper = document.getElementById("display-wrapper");
 const imagePreviewLayer = document.getElementById("image-preview-layer");
 const toolbarShell = document.getElementById("toolbar-shell");
@@ -233,6 +227,57 @@ let loadedWasmJsUri = null;
  * set by the `set_theme` flow action (toolbar toggle persists to JSON instead, see below).
  */
 let previewDarkOverride = null;
+
+/** Last display size passed to `_embf_init` for the current WASM module. */
+let lastWasmInitWidth = 0;
+let lastWasmInitHeight = 0;
+
+/** Tear down LVGL and re-init the display (safe resize without reloading the WASM module). */
+function resizeWasmPreview(width, height, darkTheme) {
+    if (!WasmModule || !wasmReady) {
+        return;
+    }
+    stopLoop();
+    cancelPreviewTransition();
+    clearPageScreenCache();
+    idToObjPtr.clear();
+    objPtrToId.clear();
+    frameCanvas = null;
+    frameCtx = null;
+
+    const theme = currentProject?.theme ?? {};
+    const primaryArgb = theme.primaryColor ? parseColor(theme.primaryColor) : 0;
+    const secondaryArgb = theme.secondaryColor ? parseColor(theme.secondaryColor) : 0;
+
+    if (typeof WasmModule._embf_deinit === "function") {
+        WasmModule._embf_deinit();
+    }
+    WasmModule._embf_init(width, height, darkTheme ? 1 : 0, primaryArgb, secondaryArgb);
+    lastWasmInitWidth = width;
+    lastWasmInitHeight = height;
+    if (previewZoomMode === "auto") {
+        updatePreviewZoom();
+    }
+    applyPreviewLayout();
+}
+
+/** Pump LVGL and refresh the RGBA framebuffer after screen build / resize. */
+function pumpPreviewRedraw(frames = 4) {
+    const wasm = WasmModule;
+    if (!wasm || !wasmReady) {
+        return;
+    }
+    if (typeof wasm._embf_force_redraw === "function") {
+        wasm._embf_force_redraw();
+    }
+    const tick = wasm._embf_main_loop ?? wasm._mainLoop;
+    if (typeof tick !== "function") {
+        return;
+    }
+    for (let i = 0; i < frames; i++) {
+        tick();
+    }
+}
 
 /** Skip duplicate rebuild when `pageSelect.value` is set from code (navigate). */
 let pageSelectProgrammatic = false;
@@ -428,7 +473,8 @@ async function handleLoad(payload) {
     // action for in-session runtime theming.
     previewDarkOverride = null;
 
-    if (!quietReload) {
+    const typingInInspector = isInspectorFieldFocused();
+    if (!quietReload && !typingInInspector) {
         showLoading(true);
     }
     hideError();
@@ -470,6 +516,14 @@ async function handleLoad(payload) {
         }
     }
 
+    if (
+        wasmReady &&
+        loadedWasmJsUri === payload.wasmJsUri &&
+        (displayWidth !== lastWasmInitWidth || displayHeight !== lastWasmInitHeight)
+    ) {
+        resizeWasmPreview(displayWidth, displayHeight, payload.project.theme?.dark ?? false);
+    }
+
     cancelPreviewTransition();
     clearPageScreenCache();
 
@@ -483,6 +537,7 @@ async function handleLoad(payload) {
     }
 
     buildUiFromProject(currentProject, currentPageIndex);
+    pumpPreviewRedraw(6);
     scheduleImageOverlaySync();
 
     resizeDesignOverlay();
@@ -501,9 +556,12 @@ async function handleLoad(payload) {
             page && findComponentById(page.components, sid) ? [sid] : [];
     }
     drawDesignOverlay();
-    renderInspector();
-    renderToolbarWidgetSelect();
-    renderWidgetTree();
+    // Avoid blowing away focused inspector inputs during preview reloads while typing.
+    if (!typingInInspector) {
+        renderInspector();
+        renderToolbarWidgetSelect();
+        renderWidgetTree();
+    }
     } catch (e) {
         showError(`Preview error: ${e.message ?? e}`);
         log("error", `handleLoad: ${e}`);
@@ -529,19 +587,33 @@ function getPreviewDpr() {
     return Math.min(Math.max(1, Math.round(window.devicePixelRatio || 1)), 3);
 }
 
+/** Padding and ruler/bezel space reserved when fitting the display in the preview pane. */
+function getPreviewFitInsets() {
+    let pad = 24;
+    if (canvasContainer?.classList.contains("show-bezel")) {
+        pad += 32;
+    }
+    const rulerExtra = designRulersEnabled ? RULER_THICKNESS : 0;
+    return { pad, rulerExtra };
+}
+
+/** Scale so the full display (plus ruler chrome) fits inside the visible canvas area. */
 function computeAutoZoom() {
     if (!canvasContainer || !displayWidth || !displayHeight) {
         return 1;
     }
-    const pad = 24;
+    const { pad, rulerExtra } = getPreviewFitInsets();
     const cw = canvasContainer.clientWidth - pad;
     const ch = canvasContainer.clientHeight - pad;
     if (cw <= 0 || ch <= 0) {
         return 1;
     }
-    const zoomX = Math.floor(cw / displayWidth);
-    const zoomY = Math.floor(ch / displayHeight);
-    return Math.max(1, Math.min(zoomX, zoomY, 4));
+    const totalW = displayWidth + rulerExtra;
+    const totalH = displayHeight + rulerExtra;
+    const zoomX = cw / totalW;
+    const zoomY = ch / totalH;
+    const zoom = Math.min(zoomX, zoomY, PREVIEW_ZOOM_MAX);
+    return Math.max(PREVIEW_ZOOM_MIN, zoom);
 }
 
 function updatePreviewZoom() {
@@ -599,12 +671,25 @@ function applyPreviewLayout() {
     if (displayWrapper) {
         displayWrapper.style.width = `${cssW}px`;
         displayWrapper.style.height = `${cssH}px`;
+        // IMPORTANT: apply round clipping only to the actual rendered display layers,
+        // not the wrapper itself. The rulers sit outside the display bounds (negative
+        // top/left offsets), so clipping the wrapper hides rulers on round displays.
+        const cpTargets = [canvas, imagePreviewLayer, designOverlay].filter(Boolean);
         if (displayRound && cssW > 0 && cssH > 0) {
             const r = Math.min(cssW, cssH) / 2;
             const cp = `circle(${r}px at ${cssW / 2}px ${cssH / 2}px)`;
-            displayWrapper.style.clipPath = cp;
-            displayWrapper.style.webkitClipPath = cp;
+            for (const el of cpTargets) {
+                el.style.clipPath = cp;
+                el.style.webkitClipPath = cp;
+            }
+            // Ensure wrapper itself doesn't clip children (rulers).
+            displayWrapper.style.clipPath = "";
+            displayWrapper.style.webkitClipPath = "";
         } else {
+            for (const el of cpTargets) {
+                el.style.clipPath = "";
+                el.style.webkitClipPath = "";
+            }
             displayWrapper.style.clipPath = "";
             displayWrapper.style.webkitClipPath = "";
         }
@@ -620,7 +705,7 @@ function initPreviewLayoutObserver() {
     previewLayoutObserver = new ResizeObserver(() => {
         if (previewZoomMode === "auto") {
             const next = computeAutoZoom();
-            if (next !== previewZoom) {
+            if (Math.abs(next - previewZoom) > 0.0005) {
                 previewZoom = next;
                 applyPreviewLayout();
                 drawDesignOverlay();
@@ -875,6 +960,8 @@ async function loadWasm(jsUri, wasmBinUri, width, height, darkTheme) {
     const primaryArgb   = theme.primaryColor   ? parseColor(theme.primaryColor)   : 0;
     const secondaryArgb = theme.secondaryColor ? parseColor(theme.secondaryColor) : 0;
     WasmModule._embf_init(width, height, darkTheme ? 1 : 0, primaryArgb, secondaryArgb);
+    lastWasmInitWidth = width;
+    lastWasmInitHeight = height;
 
     // Cache addresses of poll result slots (static C globals, stable for module lifetime)
     pPollObj   = WasmModule._embf_poll_obj_ptr();
@@ -930,7 +1017,12 @@ function copyFramebuffer() {
     if (!addr) {
         return null;
     }
-    const n = displayWidth * displayHeight * 4;
+    const w = lastWasmInitWidth || displayWidth;
+    const h = lastWasmInitHeight || displayHeight;
+    const n = w * h * 4;
+    if (addr + n > wasm.HEAPU8.buffer.byteLength) {
+        return null;
+    }
     return new Uint8ClampedArray(wasm.HEAPU8.buffer.slice(addr, addr + n));
 }
 
@@ -985,8 +1077,6 @@ function applyPageSwitch(project, pageIndex, navOpts) {
         return;
     }
 
-    applyEmbfThemeFromProject(project);
-
     const page = project.pages[pageIndex];
     if (!page) {
         return;
@@ -1000,9 +1090,9 @@ function applyPageSwitch(project, pageIndex, navOpts) {
     idToObjPtr = entry.idToObjPtr;
 
     wasm._embf_load_screen(entry.screenPtr);
-    if (typeof wasm._embf_main_loop === "function") {
-        wasm._embf_main_loop();
-    }
+    applyEmbfThemeFromProject(project);
+    refreshPreviewBindings(page);
+    pumpPreviewRedraw(6);
 }
 
 /**
@@ -1125,12 +1215,20 @@ function ensurePageScreenBuilt(project, pageIndex) {
     if (page.backgroundColor) {
         wasm._embf_obj_set_style_bg_color(screenObj, parseColor(page.backgroundColor));
     }
+    if (typeof wasm._embf_obj_set_scroll_dir === "function") {
+        const dirMask = (page.scrollX ? 1 : 0) | (page.scrollY ? 2 : 0);
+        if (page.scrollX !== undefined || page.scrollY !== undefined) {
+            wasm._embf_obj_set_scroll_dir(screenObj, dirMask);
+        }
+    }
 
     for (const comp of page.components) {
         buildComponentEmbf(wasm, comp, screenObj);
     }
 
     registerPageEvents(wasm, page);
+
+    refreshPreviewBindings(page);
 
     idToObjPtr = prevId;
     objPtrToId = prevObj;
@@ -1287,6 +1385,90 @@ function resolveBoundNumber(comp, prop, fallback) {
     return Number.isFinite(n) ? n : fallback;
 }
 
+/** Label text that is exactly `{{fieldId}}` (matches firmware codegen). */
+function singleBindingFieldInLabel(text) {
+    if (typeof text !== "string" || text.indexOf("{{") === -1) {
+        return null;
+    }
+    const fields = [];
+    const re = /\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+        if (!fields.includes(m[1])) {
+            fields.push(m[1]);
+        }
+    }
+    if (fields.length !== 1) {
+        return null;
+    }
+    const trimmed = text.replace(/\s/g, "");
+    return trimmed === `{{${fields[0]}}}` ? fields[0] : null;
+}
+
+function setDataModelField(fieldId, value) {
+    const fields = currentProject?.dataModel?.fields;
+    if (!Array.isArray(fields)) {
+        return false;
+    }
+    const f = fields.find(x => x && x.id === fieldId);
+    if (!f) {
+        return false;
+    }
+    switch (f.type) {
+        case "string":
+            f.default = String(value);
+            return true;
+        case "int":
+            f.default = Math.round(Number(value));
+            return true;
+        case "float":
+            f.default = Number(value);
+            return true;
+        case "bool":
+            f.default = !!value;
+            return true;
+    }
+    return false;
+}
+
+/** Mirror firmware `ui_bindings_apply()` for the live preview after button actions. */
+function refreshPreviewBindings(page) {
+    if (!page || !WasmModule || !(currentProject?.dataModel?.fields?.length)) {
+        return;
+    }
+    const wasm = WasmModule;
+
+    function walk(comps) {
+        for (const c of comps ?? []) {
+            const ptr = idToObjPtr.get(c.id);
+            if (ptr) {
+                if (c.type === "label" && typeof c.text === "string" && c.text.indexOf("{{") !== -1) {
+                    const strPtr = wasm.stringToNewUTF8(applyBindingTemplates(c.text));
+                    wasm._embf_label_set_text(ptr, strPtr);
+                    wasm._free(strPtr);
+                } else if (c.type === "button" && typeof c.label === "string" && c.label.indexOf("{{") !== -1) {
+                    const strPtr = wasm.stringToNewUTF8(applyBindingTemplates(c.label));
+                    wasm._embf_button_set_label?.(ptr, strPtr);
+                    wasm._free(strPtr);
+                } else if (c.type === "slider") {
+                    wasm._embf_slider_set_value?.(
+                        ptr,
+                        resolveBoundNumber(c, "value", c.value)
+                    );
+                } else if (c.type === "bar") {
+                    wasm._embf_bar_set_value?.(ptr, resolveBoundNumber(c, "value", c.value));
+                } else if (c.type === "arc" || c.type === "knob") {
+                    wasm._embf_arc_set_value?.(ptr, resolveBoundNumber(c, "value", c.value));
+                }
+            }
+            if (c.children?.length) {
+                walk(c.children);
+            }
+        }
+    }
+    walk(page.components);
+}
+
 function buildComponentEmbf(wasm, comp, parent) {
     if (comp.hidden) return;
     let obj = 0;
@@ -1430,6 +1612,15 @@ function buildComponentEmbf(wasm, comp, parent) {
         idToObjPtr.set(comp.id, obj);
     }
 
+    // Scroll direction flags (optional per widget)
+    if (obj && typeof wasm._embf_obj_set_scroll_dir === "function") {
+        const dirMask = (comp.scrollX ? 1 : 0) | (comp.scrollY ? 2 : 0);
+        // Only apply when explicitly set; otherwise keep LVGL defaults.
+        if (comp.scrollX !== undefined || comp.scrollY !== undefined) {
+            wasm._embf_obj_set_scroll_dir(obj, dirMask);
+        }
+    }
+
     applyStylesEmbf(wasm, obj, comp.styles ?? {});
 }
 
@@ -1492,7 +1683,6 @@ function loop() {
 
         // Drain the LVGL event queue and dispatch actions
         drainEventQueue();
-        updateFpsCounter();
 
         // Read pixel buffer and blit to canvas
         let bufAddr = 0;
@@ -1503,12 +1693,15 @@ function loop() {
         }
 
         if (!previewJsTransition && bufAddr !== 0 && frameCtx && frameCanvas && ctx) {
-            const pixels = new Uint8ClampedArray(
-                WasmModule.HEAPU8.buffer,
-                bufAddr,
-                displayWidth * displayHeight * 4
-            );
-            const imageData = new ImageData(pixels, displayWidth, displayHeight);
+            const w = lastWasmInitWidth || displayWidth;
+            const h = lastWasmInitHeight || displayHeight;
+            const byteLen = w * h * 4;
+            if (!w || !h || bufAddr + byteLen > WasmModule.HEAPU8.buffer.byteLength) {
+                rafHandle = requestAnimationFrame(loop);
+                return;
+            }
+            const pixels = new Uint8ClampedArray(WasmModule.HEAPU8.buffer, bufAddr, byteLen);
+            const imageData = new ImageData(pixels, w, h);
             frameCtx.putImageData(imageData, 0, 0);
             blitFrameCanvasToDisplay();
         }
@@ -1598,27 +1791,78 @@ function dispatchAction(action, eventValue, currentPage) {
             break;
         }
         case "set_text": {
+            const page = currentProject.pages[currentPageIndex];
+            const targetComp = page ? findComponentById(page.components, action.target) : null;
+            const bindField =
+                targetComp?.type === "label" && typeof targetComp.text === "string"
+                    ? singleBindingFieldInLabel(targetComp.text)
+                    : null;
+            if (bindField) {
+                setDataModelField(bindField, action.text);
+                refreshPreviewBindings(page);
+                break;
+            }
             const ptr = idToObjPtr.get(action.target);
             if (!ptr) return;
             const strPtr = wasm.stringToNewUTF8(action.text);
-            wasm._embf_label_set_text(ptr, strPtr);
+            if (targetComp?.type === "button") {
+                wasm._embf_button_set_label?.(ptr, strPtr);
+            } else {
+                wasm._embf_label_set_text(ptr, strPtr);
+            }
             wasm._free(strPtr);
             break;
         }
         case "set_value": {
+            const page = currentProject.pages[currentPageIndex];
+            const targetComp = page ? findComponentById(page.components, action.target) : null;
+            const v = Math.round(Number(action.value));
+            if (!Number.isFinite(v)) return;
+            const bindField = targetComp?.bindings?.value;
+            if (typeof bindField === "string") {
+                setDataModelField(bindField, v);
+            }
             const ptr = idToObjPtr.get(action.target);
             if (!ptr) return;
-            // Try all value-bearing widgets
-            wasm._embf_slider_set_value?.(ptr, action.value);
-            wasm._embf_bar_set_value?.(ptr, action.value);
-            wasm._embf_arc_set_value?.(ptr, action.value);
+            // Must call the setter matching the widget type — calling slider/bar setters on an
+            // arc (or vice versa) corrupts LVGL and can flash a solid color over the framebuffer.
+            switch (targetComp?.type) {
+                case "slider":
+                    wasm._embf_slider_set_value?.(ptr, v);
+                    break;
+                case "bar":
+                    wasm._embf_bar_set_value?.(ptr, v);
+                    break;
+                case "arc":
+                case "knob":
+                    wasm._embf_arc_set_value?.(ptr, v);
+                    break;
+                default:
+                    log("warn", `set_value: "${action.target}" is not a numeric widget`);
+                    break;
+            }
+            if (typeof bindField === "string") {
+                refreshPreviewBindings(page);
+            }
             break;
         }
         case "set_checked": {
             const ptr = idToObjPtr.get(action.target);
             if (!ptr) return;
-            wasm._embf_switch_set_state?.(ptr, action.checked ? 1 : 0);
-            wasm._embf_checkbox_set_state?.(ptr, action.checked ? 1 : 0);
+            const page = currentProject.pages[currentPageIndex];
+            const targetComp = page ? findComponentById(page.components, action.target) : null;
+            const on = action.checked ? 1 : 0;
+            switch (targetComp?.type) {
+                case "switch":
+                    wasm._embf_switch_set_state?.(ptr, on);
+                    break;
+                case "checkbox":
+                    wasm._embf_checkbox_set_state?.(ptr, on);
+                    break;
+                default:
+                    log("warn", `set_checked: "${action.target}" is not a switch/checkbox`);
+                    break;
+            }
             break;
         }
         case "set_hidden": {
@@ -2919,23 +3163,6 @@ function zOrderInspectorHtml() {
     );
 }
 
-function updateFpsCounter() {
-    const now = performance.now();
-    if (!fpsLastTs) {
-        fpsLastTs = now;
-    }
-    const dt = now - fpsLastTs;
-    fpsLastTs = now;
-    fpsAccumMs += dt;
-    fpsFrameCount += 1;
-    if (fpsAccumMs >= 400 && fpsLabel) {
-        const fps = Math.round((1000 * fpsFrameCount) / fpsAccumMs);
-        fpsLabel.textContent = `${fps} FPS`;
-        fpsAccumMs = 0;
-        fpsFrameCount = 0;
-    }
-}
-
 function syncPreviewBezel() {
     if (!canvasContainer || !displayWrapper) {
         return;
@@ -3732,6 +3959,7 @@ function renderPageInspectorHtml(page, project) {
         fieldText("page_display_name", "Tab / page name", page.name ?? "") +
         `<div class="field"><p style="font-size:11px;color:#888;margin:0 0 8px;line-height:1.35;">Leave background empty so the LVGL default theme (light/dark) sets the screen color.</p></div>` +
         fieldColor("page_backgroundColor", "Screen background (#hex)", page.backgroundColor ?? "") +
+        `<div class="row2">${fieldCheck("page_scrollX", "Scroll X", !!page.scrollX)}${fieldCheck("page_scrollY", "Scroll Y", !!page.scrollY)}</div>` +
         `<div class="inspector-group-title">Project</div>` +
         fieldText("proj_name", "Name", (project.project && project.project.name) || "") +
         fieldSelect(
@@ -3905,6 +4133,40 @@ function esc(s) {
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
         .replace(/"/g, "&quot;");
+}
+
+// ── LVGL symbol helpers (for Roller options) ──────────────────────────────────
+// LVGL's built-in symbols are FontAwesome glyphs stored in the private-use area
+// (see `lv_symbol_def.h`). Many editor fonts render them as □, so we present a
+// readable token in the inspector textarea and convert back on save.
+const LV_SYMBOL_TOKENS = [
+    ["LV_SYMBOL_SETTINGS", "\uf013"],
+    ["LV_SYMBOL_EYE_OPEN", "\uf06e"],
+    ["LV_SYMBOL_TINT", "\uf043"],
+    ["LV_SYMBOL_LIST", "\uf00b"],
+    ["LV_SYMBOL_POWER", "\uf011"],
+    ["LV_SYMBOL_EDIT", "\uf304"]
+];
+const LV_SYMBOL_TO_GLYPH = new Map(LV_SYMBOL_TOKENS);
+const LV_GLYPH_TO_SYMBOL = new Map(LV_SYMBOL_TOKENS.map(([k, v]) => [v, k]));
+
+function displayRollerOptionLine(line) {
+    if (!line) return line;
+    const first = line[0];
+    const sym = LV_GLYPH_TO_SYMBOL.get(first);
+    if (!sym) return line;
+    // Replace leading glyph with a readable token; keep spacing stable.
+    return line.replace(first, sym);
+}
+
+function storeRollerOptionLine(line) {
+    const t = String(line ?? "");
+    for (const [sym, glyph] of LV_SYMBOL_TOKENS) {
+        if (t.startsWith(sym)) {
+            return glyph + t.slice(sym.length);
+        }
+    }
+    return t;
 }
 
 /** Consensus sentinel for homogeneous multi-inspector fields. */
@@ -4361,7 +4623,8 @@ function inspectorLayoutFieldsHtml(layoutM) {
         `<div class="inspector-group-title">Layout</div>` +
         `<div class="row2">${mixNum("x", "X", layoutM.x)}${mixNum("y", "Y", layoutM.y)}</div>` +
         `<div class="row2">${mixNum("width", "Width", layoutM.width)}${mixNum("height", "Height", layoutM.height)}</div>` +
-        `${mixCheck("hidden", "Hidden", layoutM.hidden)}`
+        `${mixCheck("hidden", "Hidden", layoutM.hidden)}` +
+        `<div class="row2">${mixCheck("scrollX", "Scroll X", layoutM.scrollX)}${mixCheck("scrollY", "Scroll Y", layoutM.scrollY)}</div>`
     );
 }
 
@@ -4468,12 +4731,17 @@ function widgetTypeSpecificFieldsHtml(type, m) {
             html += mixNum("selectedIndex", "Selected index", /** @type {unknown} */ (m.selectedIndex) ?? 0);
             break;
         case "roller":
+            // LVGL symbol glyphs live in the private-use area (e.g. \uF013). Most editor fonts
+            // don't render them, so show readable tokens in the inspector while still storing
+            // the real LVGL symbols in the `.embf`.
             html += mixTextarea(
                 "options",
                 "Options (one per line)",
                 isInspMixed(/** @type {unknown} */ (m.options))
                     ? INSP_MIXED
-                    : (/** @type {unknown[]} */ (m.options ?? [])).join("\n")
+                    : (/** @type {unknown[]} */ (m.options ?? []))
+                        .map(v => displayRollerOptionLine(String(v ?? "")))
+                        .join("\n")
             );
             html += mixNum("selectedIndex", "Selected index", /** @type {unknown} */ (m.selectedIndex) ?? 0);
             html += mixSelect("roller_mode", "Mode", [
@@ -4776,6 +5044,19 @@ function fieldNumFloatOpt(name, label, value, step = "any") {
  * }} InspectorFocusSnap
  */
 
+/** True when focus is in an editable inspector control (typing in Properties). */
+function isInspectorFieldFocused() {
+    const ae = document.activeElement;
+    return (
+        !!inspectorForm &&
+        ae instanceof HTMLElement &&
+        inspectorForm.contains(ae) &&
+        (ae instanceof HTMLInputElement ||
+            ae instanceof HTMLTextAreaElement ||
+            ae instanceof HTMLSelectElement)
+    );
+}
+
 /** @returns {InspectorFocusSnap | null} */
 function snapshotInspectorFocus() {
     if (!inspectorForm) {
@@ -4961,7 +5242,9 @@ function renderInspector() {
         y: comp.y,
         width: comp.width,
         height: comp.height,
-        hidden: !!comp.hidden
+        hidden: !!comp.hidden,
+        scrollX: !!comp.scrollX,
+        scrollY: !!comp.scrollY
     });
     html += zOrderInspectorHtml();
     {
@@ -5128,6 +5411,11 @@ function readInspectorPatch() {
     if (!inspectorForm) {
         return {};
     }
+    const page = currentProject?.pages?.[currentPageIndex];
+    const selectedId = selectedComponentOrder.length === 1 ? selectedComponentOrder[0] : null;
+    const selectedComp =
+        selectedId && page ? findComponentById(page.components, selectedId) : null;
+    const selectedType = selectedComp?.type ?? "";
     /** @type {Record<string, unknown>} */
     const patch = {};
     const num = name => {
@@ -5209,10 +5497,14 @@ function readInspectorPatch() {
     const optionsEl = inspectorForm.elements.namedItem("options");
     if (optionsEl instanceof HTMLTextAreaElement) {
         if (!(optionsEl.closest("[data-inspector-mixed]") && optionsEl.value.trim() === "")) {
-            patch.options = optionsEl.value
+            const rawLines = optionsEl.value
                 .split("\n")
                 .map(s => s.trim())
                 .filter(Boolean);
+            patch.options =
+                selectedType === "roller"
+                    ? rawLines.map(storeRollerOptionLine)
+                    : rawLines;
         }
     }
 
@@ -5397,6 +5689,15 @@ function readPageInspectorPatch() {
     if (bgIn instanceof HTMLInputElement) {
         const t = bgIn.value.trim();
         patch.backgroundColor = t === "" ? null : t;
+    }
+
+    const sx = inspectorForm.elements.namedItem("page_scrollX");
+    if (sx instanceof HTMLInputElement) {
+        patch.pageScrollX = sx.checked;
+    }
+    const sy = inspectorForm.elements.namedItem("page_scrollY");
+    if (sy instanceof HTMLInputElement) {
+        patch.pageScrollY = sy.checked;
     }
 
     const projName = inspectorForm.elements.namedItem("proj_name");
@@ -5678,7 +5979,7 @@ if (inspectorForm) {
         inspectorDebounce = setTimeout(() => {
             inspectorDebounce = null;
             commitInspector();
-        }, 450);
+        }, 550);
     });
     inspectorForm.addEventListener("change", e => {
         if (inspectorSyncing) {
@@ -6216,11 +6517,11 @@ function setupDesignOverlay() {
         const moved = Math.abs(dx) > DESIGN_DRAG_THRESHOLD || Math.abs(dy) > DESIGN_DRAG_THRESHOLD;
         if (moved) {
             const moves = dragState.items.map(it => {
-                let absX = Math.max(0, Math.round(it.startAbsX + dx));
-                let absY = Math.max(0, Math.round(it.startAbsY + dy));
+                let absX = Math.round(it.startAbsX + dx);
+                let absY = Math.round(it.startAbsY + dy);
                 if (designGridEnabled) {
-                    absX = Math.max(0, snapToGrid(absX));
-                    absY = Math.max(0, snapToGrid(absY));
+                    absX = snapToGrid(absX);
+                    absY = snapToGrid(absY);
                 }
                 return { componentId: it.id, absX, absY };
             });
@@ -6761,6 +7062,7 @@ if (designRulersCheck) {
         if (displayWrapper) {
             displayWrapper.classList.toggle("no-rulers", !designRulersEnabled);
         }
+        refreshPreviewLayoutAfterPanelChange();
         drawRulers();
     });
 }
@@ -7023,7 +7325,10 @@ if (paletteSearch) {
 }
 
 if (previewBezelCheck) {
-    previewBezelCheck.addEventListener("change", () => syncPreviewBezel());
+    previewBezelCheck.addEventListener("change", () => {
+        syncPreviewBezel();
+        refreshPreviewLayoutAfterPanelChange();
+    });
 }
 
 if (btnOpenProjectSettings) {

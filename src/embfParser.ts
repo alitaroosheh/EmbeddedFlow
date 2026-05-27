@@ -550,6 +550,7 @@ function validateComponentDeep(comp: unknown, path: string): void {
     validateOptionalStyleRefs(o, path);
     validateOptionalAnimations(o, path);
     validateOptionalBindings(o, path);
+    validateOptionalScroll(o, path);
 
     const t = o["type"] as string;
     switch (t) {
@@ -845,6 +846,15 @@ function validateOptionalBindings(o: Record<string, unknown>, path: string): voi
     }
 }
 
+function validateOptionalScroll(o: Record<string, unknown>, path: string): void {
+    for (const k of ["scrollX", "scrollY"] as const) {
+        if (o[k] === undefined) continue;
+        if (typeof o[k] !== "boolean") {
+            throw new EmbfParseError(`${path}.${k} must be a boolean when set`);
+        }
+    }
+}
+
 function validateBindingTemplates(value: string, path: string): void {
     const ids = componentContext.fieldIds;
     let m: RegExpExecArray | null;
@@ -1002,6 +1012,11 @@ function validatePagesDeep(pages: unknown[]): void {
         }
         if (p["backgroundColor"] !== undefined && typeof p["backgroundColor"] !== "string") {
             throw new EmbfParseError(`${path}.backgroundColor must be a string when set`);
+        }
+        for (const k of ["scrollX", "scrollY"] as const) {
+            if (p[k] !== undefined && typeof p[k] !== "boolean") {
+                throw new EmbfParseError(`${path}.${k} must be a boolean when set`);
+            }
         }
         if (!Array.isArray(p["components"])) {
             throw new EmbfParseError(`${path}.components must be an array`);

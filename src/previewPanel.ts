@@ -185,8 +185,11 @@ export class EmbfPreviewPanel {
     private _inspectorReloadTimer: ReturnType<typeof setTimeout> | undefined;
     private _inspectorReloadPageIndex = 0;
     private _inspectorReloadSelectionIds: string[] | undefined;
+    /** Ignore file-watcher / editor-buffer refresh while an inspector write is being coalesced. */
+    private _coalesceExternalReloadUntil = 0;
 
-    private static readonly _inspectorReloadDebounceMs = 280;
+    private static readonly _inspectorReloadDebounceMs = 400;
+    private static readonly _inspectorCoalesceWindowMs = 900;
 
     static createOrShow(filePath: string, extensionUri: vscode.Uri): EmbfPreviewPanel {
         const existing = EmbfPreviewPanel._panels.get(filePath);
@@ -358,6 +361,9 @@ export class EmbfPreviewPanel {
 
     /** Reload from the open .embf editor buffer (or disk); keeps the current preview page. */
     refreshFromEmbfSource(): void {
+        if (this.shouldCoalesceExternalReload()) {
+            return;
+        }
         try {
             const project = readEmbfProject(this._filePath);
             this.sendProject(project, { suppressLoadingSpinner: true });
@@ -366,6 +372,16 @@ export class EmbfPreviewPanel {
             this.sendError(m);
             embeddedFlowLog("preview", "warn", `refresh from editor: ${m}`);
         }
+    }
+
+    /** Skip redundant reloads from fs.watch / editor sync right after an inspector patch. */
+    shouldCoalesceExternalReload(): boolean {
+        return Date.now() < this._coalesceExternalReloadUntil;
+    }
+
+    private markInspectorDrivenFileWrite(): void {
+        this._coalesceExternalReloadUntil =
+            Date.now() + EmbfPreviewPanel._inspectorCoalesceWindowMs;
     }
 
     updateTitle(fileName: string): void {
@@ -523,6 +539,7 @@ export class EmbfPreviewPanel {
             }
             void updateWidgetInEmbfFile(this._filePath, pageIndex, componentId, patch).then(ok => {
                 if (ok) {
+                    this.markInspectorDrivenFileWrite();
                     this.scheduleReloadPreviewAfterInspectorEdit(pageIndex, [componentId]);
                     this.sendHistoryState();
                 }
@@ -549,9 +566,8 @@ export class EmbfPreviewPanel {
             }
             void bulkPatchWidgetsInEmbfFile(this._filePath, pageIndex, norm).then(ok => {
                 if (ok) {
-                    this.reloadPreviewNow(pageIndex, {
-                        selectedComponentIds: norm.map(u => u.componentId)
-                    });
+                    this.markInspectorDrivenFileWrite();
+                    this.scheduleReloadPreviewAfterInspectorEdit(pageIndex, norm.map(u => u.componentId));
                     this.sendHistoryState();
                 }
             });
@@ -563,6 +579,7 @@ export class EmbfPreviewPanel {
             }
             void updatePageInEmbfFile(this._filePath, pageIndex, patch).then(ok => {
                 if (ok) {
+                    this.markInspectorDrivenFileWrite();
                     this.scheduleReloadPreviewAfterInspectorEdit(pageIndex);
                     this.sendHistoryState();
                 }
@@ -971,6 +988,7 @@ export class EmbfPreviewPanel {
         pageIndex: number,
         selectedComponentIds?: string[]
     ): void {
+        this.markInspectorDrivenFileWrite();
         this._inspectorReloadPageIndex = pageIndex;
         this._inspectorReloadSelectionIds = selectedComponentIds?.length ? [...selectedComponentIds] : undefined;
         if (this._inspectorReloadTimer !== undefined) {
@@ -1601,12 +1619,6 @@ export class EmbfPreviewPanel {
             background: #094771;
             color: #fff;
         }
-        #fps-label {
-            font-size: 11px;
-            color: #888;
-            min-width: 52px;
-            text-align: right;
-        }
         #property-inspector {
             flex: 0 0 220px;
             width: 220px;
@@ -2159,8 +2171,8 @@ export class EmbfPreviewPanel {
         <button type="button" class="tb-btn" id="btn-play-animations" title="Run widget animations[] on the current page (LVGL preview)">Play animations</button>
         <label for="preview-zoom">Zoom:</label>
         <button type="button" class="tb-btn" id="btn-generate-code" title="Generate C UI files for this project">Generate C Code</button>
-        <select id="preview-zoom" title="Preview scale only — device resolution stays in .embf">
-            <option value="auto" selected>Auto</option>
+        <select id="preview-zoom" title="Preview scale only — device resolution stays in .embf. Auto scales to fit the visible preview area.">
+            <option value="auto" selected>Auto (fit)</option>
             <option value="0.1">10%</option>
             <option value="0.25">25%</option>
             <option value="0.5">50%</option>
@@ -2176,7 +2188,6 @@ export class EmbfPreviewPanel {
             <input type="checkbox" id="preview-bezel" />
             Bezel
         </label>
-        <span id="fps-label" title="Preview frame rate">— FPS</span>
         <span id="status">Waiting for project…</span>
         </div>
     </div>

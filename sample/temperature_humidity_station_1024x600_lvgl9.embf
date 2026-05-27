@@ -1,0 +1,759 @@
+{
+  "version": "1.0",
+  "project": {
+    "name": "Temperature / Humidity Station",
+    "lvglVersion": "9.5.0",
+    "lvglInclude": "lvgl.h",
+    "description": "Fancy LVGL 9.5 preview: temperature & humidity with a clock and interactive demo buttons"
+  },
+  "display": {
+    "width": 1024,
+    "height": 600,
+    "bitDepth": 32,
+    "colorFormat": "ARGB8888",
+    "orientation": "landscape",
+    "direction": "ltr",
+    "dpi": 120,
+    "round": false
+  },
+  "theme": {
+    "dark": true,
+    "primaryColor": "#2dd4ff",
+    "secondaryColor": "#a78bfa"
+  },
+  "styles": [
+    {
+      "id": "app_bg",
+      "name": "App background",
+      "props": {
+        "bgColor": "#070a12",
+        "bgOpacity": 255,
+        "borderRadius": 0
+      }
+    },
+    {
+      "id": "header_card",
+      "name": "Header card",
+      "props": {
+        "bgColor": "#0f172a",
+        "bgOpacity": 235,
+        "borderColor": "#1f2a44",
+        "borderWidth": 2,
+        "borderRadius": 18,
+        "padding": 14
+      }
+    },
+    {
+      "id": "metric_card",
+      "name": "Metric card",
+      "props": {
+        "bgColor": "#0b1222",
+        "bgOpacity": 235,
+        "borderColor": "#1f2a44",
+        "borderWidth": 2,
+        "borderRadius": 22,
+        "padding": 18
+      }
+    },
+    {
+      "id": "muted_text",
+      "name": "Muted text",
+      "props": {
+        "textColor": "#94a3b8",
+        "fontSize": 18,
+        "align": "left"
+      }
+    },
+    {
+      "id": "title_text",
+      "name": "Title text",
+      "props": {
+        "textColor": "#e5e7eb",
+        "fontSize": 28,
+        "align": "left"
+      }
+    },
+    {
+      "id": "value_glow",
+      "name": "Value glow text",
+      "props": {
+        "textColor": "#2dd4ff",
+        "fontSize": 76,
+        "align": "center"
+      }
+    },
+    {
+      "id": "unit_text",
+      "name": "Unit text",
+      "props": {
+        "textColor": "#a78bfa",
+        "fontSize": 30,
+        "align": "center"
+      }
+    },
+    {
+      "id": "chip",
+      "name": "Info chip",
+      "props": {
+        "bgColor": "#0f172a",
+        "bgOpacity": 240,
+        "borderColor": "#1f2a44",
+        "borderWidth": 1,
+        "borderRadius": 16,
+        "padding": 10,
+        "textColor": "#e5e7eb"
+      }
+    },
+    {
+      "id": "divider_line",
+      "name": "Divider line",
+      "props": {
+        "bgColor": "#1f2a44",
+        "bgOpacity": 255,
+        "borderColor": "#1f2a44",
+        "borderWidth": 2,
+        "borderRadius": 8
+      }
+    }
+  ],
+  "dataModel": {
+    "fields": [
+      { "id": "temp_c", "type": "int", "default": 24 },
+      { "id": "humidity", "type": "int", "default": 56 },
+      { "id": "temp_low", "type": "int", "default": 18 },
+      { "id": "temp_high", "type": "int", "default": 28 },
+      { "id": "clock_h", "type": "string", "default": "08" },
+      { "id": "clock_m", "type": "string", "default": "41" },
+      { "id": "date_day", "type": "string", "default": "Wed" },
+      { "id": "date_date", "type": "string", "default": "27" },
+      { "id": "date_mon", "type": "string", "default": "May" },
+      { "id": "humidity_band", "type": "string", "default": "Comfort" }
+    ]
+  },
+  "pages": [
+    {
+      "id": "page_station",
+      "name": "Station",
+      "backgroundColor": "#070a12",
+      "components": [
+        {
+          "id": "cont_root",
+          "type": "container",
+          "x": 0,
+          "y": 0,
+          "width": 1024,
+          "height": 600,
+          "layout": "none",
+          "styleRefs": [
+            "app_bg"
+          ],
+          "children": [
+            {
+              "id": "cont_header",
+              "type": "container",
+              "x": 24,
+              "y": 18,
+              "width": 976,
+              "height": 64,
+              "layout": "none",
+              "styleRefs": [
+                "header_card"
+              ],
+              "children": [
+                {
+                  "id": "lbl_app_title",
+                  "type": "label",
+                  "x": 14,
+                  "y": 10,
+                  "width": 340,
+                  "height": 32,
+                  "text": "Weather Station",
+                  "styles": {
+                    "fontSize": 26,
+                    "textColor": "#e5e7eb"
+                  },
+                  "events": []
+                },
+                {
+                  "id": "lbl_clock",
+                  "type": "label",
+                  "x": 720,
+                  "y": 12,
+                  "width": 210,
+                  "height": 32,
+                  "text": "{{clock_h}}:{{clock_m}}",
+                  "styles": {
+                    "fontSize": 26,
+                    "textColor": "#e5e7eb",
+                    "align": "right"
+                  },
+                  "animations": [
+                    {
+                      "property": "opacity",
+                      "from": 180,
+                      "to": 255,
+                      "duration": 700,
+                      "easing": "ease_in_out",
+                      "repeat": -1
+                    }
+                  ]
+                },
+                {
+                  "id": "spn_refresh",
+                  "type": "spinner",
+                  "x": 668,
+                  "y": 14,
+                  "width": 38,
+                  "height": 38,
+                  "speed": 900,
+                  "arcLength": 62,
+                  "styles": {
+                    "indicatorColor": "#a78bfa",
+                    "bgColor": "#0f172a",
+                    "borderColor": "#1f2a44",
+                    "textColor": "#94a3b8"
+                  },
+                  "hidden": false,
+                  "events": []
+                },
+                {
+                  "id": "sw_night",
+                  "type": "switch",
+                  "x": 660,
+                  "y": 16,
+                  "width": 48,
+                  "height": 28,
+                  "checked": true,
+                  "events": [
+                    {
+                      "trigger": "value_changed",
+                      "actions": [
+                        {
+                          "type": "set_theme"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "id": "lbl_night",
+                  "type": "label",
+                  "x": 604,
+                  "y": 18,
+                  "width": 80,
+                  "height": 28,
+                  "text": "Night",
+                  "styles": {
+                    "fontSize": 18,
+                    "textColor": "#94a3b8",
+                    "align": "left"
+                  }
+                }
+              ]
+            },
+
+            {
+              "id": "ln_header_sep",
+              "type": "line",
+              "x": 0,
+              "y": 92,
+              "width": 1024,
+              "height": 6,
+              "rounded": true,
+              "points": [
+                { "x": 24, "y": 0 },
+                { "x": 1000, "y": 0 }
+              ]
+            },
+
+            {
+              "id": "cont_main_left",
+              "type": "container",
+              "x": 24,
+              "y": 110,
+              "width": 476,
+              "height": 360,
+              "layout": "none",
+              "styleRefs": [
+                "metric_card"
+              ],
+              "children": [
+                {
+                  "id": "lbl_temp_title",
+                  "type": "label",
+                  "x": 18,
+                  "y": 10,
+                  "width": 250,
+                  "height": 26,
+                  "text": "TEMPERATURE",
+                  "styles": {
+                    "fontSize": 22,
+                    "textColor": "#e5e7eb"
+                  }
+                },
+                {
+                  "id": "arc_temp_gauge",
+                  "type": "arc",
+                  "x": 52,
+                  "y": 46,
+                  "width": 372,
+                  "height": 192,
+                  "min": -10,
+                  "max": 50,
+                  "value": 24,
+                  "startAngle": 220,
+                  "endAngle": 20,
+                  "mode": "normal",
+                  "styles": {
+                    "indicatorColor": "#2dd4ff",
+                    "bgColor": "#0f172a",
+                    "bgOpacity": 255,
+                    "borderRadius": 110
+                  },
+                  "bindings": {
+                    "value": "temp_c"
+                  },
+                  "animations": [
+                    {
+                      "property": "opacity",
+                      "from": 180,
+                      "to": 255,
+                      "duration": 900,
+                      "easing": "ease_in_out",
+                      "repeat": -1
+                    }
+                  ]
+                },
+                {
+                  "id": "lbl_temp_value",
+                  "type": "label",
+                  "x": 170,
+                  "y": 132,
+                  "width": 136,
+                  "height": 70,
+                  "text": "{{temp_c}}",
+                  "styles": {
+                    "fontSize": 72,
+                    "textColor": "#2dd4ff",
+                    "align": "center"
+                  }
+                },
+                {
+                  "id": "lbl_temp_unit",
+                  "type": "label",
+                  "x": 292,
+                  "y": 204,
+                  "width": 80,
+                  "height": 30,
+                  "text": "°C",
+                  "styles": {
+                    "fontSize": 28,
+                    "textColor": "#a78bfa",
+                    "align": "left"
+                  }
+                },
+                {
+                  "id": "lbl_temp_range",
+                  "type": "label",
+                  "x": 18,
+                  "y": 222,
+                  "width": 440,
+                  "height": 26,
+                  "text": "Range: {{temp_low}}..{{temp_high}}",
+                  "styles": {
+                    "fontSize": 18,
+                    "textColor": "#94a3b8",
+                    "align": "left"
+                  }
+                },
+                {
+                  "id": "cont_temp_buttons",
+                  "type": "container",
+                  "x": 18,
+                  "y": 256,
+                  "width": 440,
+                  "height": 86,
+                  "layout": "none",
+                  "children": [
+                    {
+                      "id": "btn_cool_1",
+                      "type": "button",
+                      "x": 0,
+                      "y": 0,
+                      "width": 110,
+                      "height": 36,
+                      "label": "Cool",
+                      "styles": {
+                        "textColor": "#e5e7eb",
+                        "bgColor": "#0f172a",
+                        "indicatorColor": "#2dd4ff",
+                        "borderColor": "#1f2a44",
+                        "borderWidth": 2,
+                        "borderRadius": 12
+                      },
+                      "events": [
+                        {
+                          "trigger": "clicked",
+                          "actions": [
+                            { "type": "set_value", "target": "arc_temp_gauge", "value": 20 }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "btn_mild_1",
+                      "type": "button",
+                      "x": 116,
+                      "y": 0,
+                      "width": 110,
+                      "height": 36,
+                      "label": "Mild",
+                      "styles": {
+                        "textColor": "#e5e7eb",
+                        "bgColor": "#0f172a",
+                        "indicatorColor": "#a78bfa",
+                        "borderColor": "#1f2a44",
+                        "borderWidth": 2,
+                        "borderRadius": 12
+                      },
+                      "events": [
+                        {
+                          "trigger": "clicked",
+                          "actions": [
+                            { "type": "set_value", "target": "arc_temp_gauge", "value": 24 }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "btn_hot_1",
+                      "type": "button",
+                      "x": 232,
+                      "y": 0,
+                      "width": 110,
+                      "height": 36,
+                      "label": "Hot",
+                      "styles": {
+                        "textColor": "#0f172a",
+                        "bgColor": "#2dd4ff",
+                        "indicatorColor": "#2dd4ff",
+                        "borderColor": "#2dd4ff",
+                        "borderWidth": 2,
+                        "borderRadius": 12
+                      },
+                      "events": [
+                        {
+                          "trigger": "clicked",
+                          "actions": [
+                            { "type": "set_value", "target": "arc_temp_gauge", "value": 30 }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "btn_reset_temp",
+                      "type": "button",
+                      "x": 0,
+                      "y": 44,
+                      "width": 220,
+                      "height": 36,
+                      "label": "Reset",
+                      "styles": {
+                        "textColor": "#e5e7eb",
+                        "bgColor": "#0f172a",
+                        "indicatorColor": "#1f2a44",
+                        "borderColor": "#1f2a44",
+                        "borderWidth": 2,
+                        "borderRadius": 12
+                      },
+                      "events": [
+                        {
+                          "trigger": "clicked",
+                          "actions": [
+                            { "type": "set_value", "target": "arc_temp_gauge", "value": 24 }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "btn_play_anim_hint",
+                      "type": "button",
+                      "x": 232,
+                      "y": 44,
+                      "width": 220,
+                      "height": 36,
+                      "label": "Play anims (toolbar)",
+                      "styles": {
+                        "textColor": "#e5e7eb",
+                        "bgColor": "#0f172a",
+                        "indicatorColor": "#a78bfa",
+                        "borderColor": "#1f2a44",
+                        "borderWidth": 2,
+                        "borderRadius": 12
+                      },
+                      "events": []
+                    }
+                  ]
+                }
+              ]
+            },
+
+            {
+              "id": "cont_main_right",
+              "type": "container",
+              "x": 524,
+              "y": 110,
+              "width": 476,
+              "height": 360,
+              "layout": "none",
+              "styleRefs": [
+                "metric_card"
+              ],
+              "children": [
+                {
+                  "id": "lbl_hum_title",
+                  "type": "label",
+                  "x": 18,
+                  "y": 10,
+                  "width": 250,
+                  "height": 26,
+                  "text": "HUMIDITY",
+                  "styles": {
+                    "fontSize": 22,
+                    "textColor": "#e5e7eb"
+                  }
+                },
+                {
+                  "id": "bar_hum",
+                  "type": "bar",
+                  "x": 18,
+                  "y": 56,
+                  "width": 440,
+                  "height": 28,
+                  "min": 0,
+                  "max": 100,
+                  "value": 56,
+                  "mode": "normal",
+                  "styles": {
+                    "bgColor": "#0f172a",
+                    "bgOpacity": 255,
+                    "indicatorColor": "#a78bfa"
+                  },
+                  "bindings": {
+                    "value": "humidity"
+                  },
+                  "animations": [
+                    {
+                      "property": "opacity",
+                      "from": 180,
+                      "to": 255,
+                      "duration": 900,
+                      "easing": "ease_in_out",
+                      "repeat": -1
+                    }
+                  ]
+                },
+                {
+                  "id": "lbl_hum_value",
+                  "type": "label",
+                  "x": 18,
+                  "y": 94,
+                  "width": 200,
+                  "height": 60,
+                  "text": "{{humidity}}",
+                  "styles": {
+                    "fontSize": 64,
+                    "textColor": "#a78bfa",
+                    "align": "left"
+                  }
+                },
+                {
+                  "id": "lbl_hum_unit",
+                  "type": "label",
+                  "x": 200,
+                  "y": 108,
+                  "width": 120,
+                  "height": 40,
+                  "text": "%",
+                  "styles": {
+                    "fontSize": 30,
+                    "textColor": "#e5e7eb",
+                    "align": "left"
+                  }
+                },
+
+                {
+                  "id": "lbl_hum_status",
+                  "type": "label",
+                  "x": 18,
+                  "y": 152,
+                  "width": 200,
+                  "height": 42,
+                  "text": "{{humidity_band}}",
+                  "styleRefs": [
+                    "chip"
+                  ],
+                  "styles": {
+                    "fontSize": 22,
+                    "textColor": "#e5e7eb",
+                    "align": "left"
+                  }
+                },
+                {
+                  "id": "cont_hum_buttons",
+                  "type": "container",
+                  "x": 18,
+                  "y": 200,
+                  "width": 440,
+                  "height": 44,
+                  "layout": "none",
+                  "children": [
+                    {
+                      "id": "btn_hum_dry",
+                      "type": "button",
+                      "x": 0,
+                      "y": 52,
+                      "width": 132,
+                      "height": 36,
+                      "label": "Dry",
+                      "styles": {
+                        "textColor": "#e5e7eb",
+                        "bgColor": "#0f172a",
+                        "indicatorColor": "#a78bfa",
+                        "borderColor": "#1f2a44",
+                        "borderWidth": 2,
+                        "borderRadius": 12
+                      },
+                      "events": [
+                        {
+                          "trigger": "clicked",
+                          "actions": [
+                            { "type": "set_value", "target": "bar_hum", "value": 35 },
+                            { "type": "set_text", "target": "lbl_hum_status", "text": "Dry" }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "btn_hum_comfort",
+                      "type": "button",
+                      "x": 154,
+                      "y": 52,
+                      "width": 132,
+                      "height": 36,
+                      "label": "Comfort",
+                      "styles": {
+                        "textColor": "#e5e7eb",
+                        "bgColor": "#0f172a",
+                        "indicatorColor": "#2dd4ff",
+                        "borderColor": "#1f2a44",
+                        "borderWidth": 2,
+                        "borderRadius": 12
+                      },
+                      "events": [
+                        {
+                          "trigger": "clicked",
+                          "actions": [
+                            { "type": "set_value", "target": "bar_hum", "value": 56 },
+                            { "type": "set_text", "target": "lbl_hum_status", "text": "Comfort" }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "id": "btn_hum_humid",
+                      "type": "button",
+                      "x": 308,
+                      "y": 52,
+                      "width": 132,
+                      "height": 36,
+                      "label": "Humid",
+                      "styles": {
+                        "textColor": "#0f172a",
+                        "bgColor": "#a78bfa",
+                        "indicatorColor": "#a78bfa",
+                        "borderColor": "#a78bfa",
+                        "borderWidth": 2,
+                        "borderRadius": 12
+                      },
+                      "events": [
+                        {
+                          "trigger": "clicked",
+                          "actions": [
+                            { "type": "set_value", "target": "bar_hum", "value": 78 },
+                            { "type": "set_text", "target": "lbl_hum_status", "text": "Humid" }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+
+                {
+                  "id": "ln_trend",
+                  "type": "line",
+                  "x": 18,
+                  "y": 264,
+                  "width": 440,
+                  "height": 74,
+                  "rounded": true,
+                  "points": [
+                    { "x": 0, "y": 60 },
+                    { "x": 60, "y": 46 },
+                    { "x": 120, "y": 50 },
+                    { "x": 180, "y": 32 },
+                    { "x": 240, "y": 34 },
+                    { "x": 300, "y": 18 },
+                    { "x": 380, "y": 26 },
+                    { "x": 440, "y": 14 }
+                  ]
+                }
+              ]
+            },
+
+            {
+              "id": "cont_footer",
+              "type": "container",
+              "x": 24,
+              "y": 486,
+              "width": 976,
+              "height": 92,
+              "layout": "none",
+              "children": [
+                {
+                  "id": "lbl_date",
+                  "type": "label",
+                  "x": 18,
+                  "y": 14,
+                  "width": 460,
+                  "height": 36,
+                  "text": "{{date_day}} {{date_date}} {{date_mon}}",
+                  "styles": {
+                    "fontSize": 26,
+                    "textColor": "#94a3b8",
+                    "align": "left"
+                  }
+                },
+                {
+                  "id": "lbl_footer_hint",
+                  "type": "label",
+                  "x": 500,
+                  "y": 16,
+                  "width": 470,
+                  "height": 60,
+                  "text": "Tip: Use the toolbar to Play animations. Buttons update the gauges.",
+                  "styles": {
+                    "fontSize": 18,
+                    "textColor": "#94a3b8",
+                    "align": "right"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+

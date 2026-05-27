@@ -53,7 +53,7 @@ describe("generateBindingsHeader/Source", () => {
 
     it("emits externs, setters, getters and init in header", () => {
         const h = generateBindingsHeader(projectWithBindings())!;
-        expect(h).toContain("extern const char *ui_data_username;");
+        expect(h).toContain("extern char ui_data_username[");
         expect(h).toContain("extern int32_t ui_data_score;");
         expect(h).toContain("extern float ui_data_ratio;");
         expect(h).toContain("extern bool ui_data_active;");
@@ -66,7 +66,7 @@ describe("generateBindingsHeader/Source", () => {
 
     it("initialises backing storage from default values in source", () => {
         const c = generateBindingsSource(projectWithBindings())!;
-        expect(c).toContain('ui_data_username = "Alita";');
+        expect(c).toContain('strncpy(ui_data_username, "Alita"');
         expect(c).toContain("ui_data_score = 42;");
         expect(c).toContain("ui_data_ratio = 1.25f;");
         expect(c).toContain("ui_data_active = true;");
@@ -103,6 +103,10 @@ describe("generateCode integration with bindings", () => {
         const uiC = getFileByBasename(r.files, "ui.c")!;
         expect(uiC).toContain("ui_bindings_init();");
         expect(uiC).toContain("ui_bindings_apply();");
+        const loadIdx = uiC.indexOf("lv_screen_load");
+        const applyIdx = uiC.lastIndexOf("ui_bindings_apply();");
+        expect(loadIdx).toBeGreaterThan(-1);
+        expect(applyIdx).toBeGreaterThan(loadIdx);
     });
 
     it("rewires bound numeric widgets (slider/bar/arc/knob) via ui_bindings_apply", () => {

@@ -306,6 +306,31 @@
               ]
             }
           ]
+        },
+        {
+          "id": "btn_settings",
+          "type": "button",
+          "x": 172,
+          "y": 380,
+          "width": 136,
+          "height": 40,
+          "label": "Settings",
+          "styles": {
+            "borderRadius": 14
+          },
+          "events": [
+            {
+              "trigger": "clicked",
+              "actions": [
+                {
+                  "type": "navigate",
+                  "target": "page_settings",
+                  "anim": "move_top",
+                  "time": 260
+                }
+              ]
+            }
+          ]
         }
       ]
     },
@@ -466,6 +491,72 @@
               ]
             }
           ]
+        },
+        {
+          "id": "btn_settings_2",
+          "type": "button",
+          "x": 172,
+          "y": 426,
+          "width": 136,
+          "height": 40,
+          "label": "Settings",
+          "styles": {
+            "borderRadius": 14
+          },
+          "events": [
+            {
+              "trigger": "clicked",
+              "actions": [
+                {
+                  "type": "navigate",
+                  "target": "page_settings",
+                  "anim": "move_left",
+                  "time": 260
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "page_settings",
+      "name": "Settings",
+      "swipes": [
+        {
+          "direction": "left",
+          "target": "page_home",
+          "anim": "move_right",
+          "time": 260
+        }
+      ],
+      "components": [
+        {
+          "id": "rol_settings",
+          "type": "roller",
+          "x": 80,
+          "y": 150,
+          "width": 320,
+          "height": 180,
+          "options": [
+            "\uf013   Settings",
+            "\uf06e   Display",
+            "\uf043   Brightness",
+            "\uf00b   Focus",
+            "\uf011   Sleep",
+            "\uf304   About"
+          ],
+          "selectedIndex": 0,
+          "mode": "infinite",
+          "styles": {
+            "bgColor": "#ffffff",
+            "bgOpacity": 255,
+            "borderRadius": 28,
+            "padding": 18,
+            "fontSize": 24,
+            "textColor": "#0d0f14",
+            "align": "center"
+          }
         }
       ]
     }

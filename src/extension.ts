@@ -9,7 +9,13 @@ import { EmbfPreviewPanel } from "./previewPanel";
 import { EmbfParseError, parseEmbf, parseEmbfSource, watchEmbf } from "./embfParser";
 import { lintEmbfProject } from "./embfSemanticLint";
 import { EmbfProject } from "./types/embf";
-import { generateCode, resolveCodegenOutputDir, writeGeneratedFiles, type CodeGenResult } from "./codeGen/index";
+import { resolveCodegenOutputDir } from "./codeGen/outputDir";
+import type { CodeGenResult } from "./codeGen/index";
+
+/** Lazy-load codegen + image converters (pulls in pngjs/jpeg-js). Keeps activate() working if deps fail. */
+async function loadCodeGenModule() {
+    return import("./codeGen/index");
+}
 import { ensureCodegenOutputPath } from "./embfCodegenSetup";
 import { registerEmbeddedFlowOutput, embeddedFlowLog } from "./outputLog";
 import { resolveEmbfForPreview } from "./embfPreviewResolve";
@@ -399,6 +405,7 @@ async function runLiveCodeGen(filePath: string): Promise<void> {
     }
 
     const outDir = resolveCodegenOutputDir(project, filePath, workspaceCodegenOutputSetting());
+    const { generateCode, writeGeneratedFiles } = await loadCodeGenModule();
     const result = generateCode(project, filePath, outDir);
     logCodegenImageWarnings(result, project);
     try {
@@ -461,6 +468,7 @@ async function runCodeGen(filePath: string): Promise<void> {
     }
     project = setup.project;
     const outputDir = setup.outputDir;
+    const { generateCode, writeGeneratedFiles } = await loadCodeGenModule();
     const result = generateCode(project, filePath, outputDir);
     logCodegenImageWarnings(result, project);
 

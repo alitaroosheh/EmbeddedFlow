@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { ImageDef } from "../types/embf";
-import { isSupportedImagePath, supportedImageExtensions } from "./bitmapReader";
+import { isSupportedImagePath, supportedImageExtensions } from "./imageFormats";
 
 function normalizeRelPath(p: string): string {
     return p.replace(/\\/g, "/");

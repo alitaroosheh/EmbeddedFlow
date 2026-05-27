@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.1.1
+
+- **Fix:** VSIX again bundles runtime dependencies (`pngjs`, `jpeg-js`) so the extension activates and **EmbeddedFlow: Open Preview** registers in the Command Palette.
+- **Fix:** Codegen/image modules load lazily on activate so preview commands work even if image libraries fail to load.
+
+## 1.1.0
+
+- **Codegen:** screen-load animations always emit `LV_SCR_LOAD_ANIM_*` (works on LVGL 8 and 9 with `lv_api_map`); fixes builds that failed on `LV_SCREEN_LOAD_ANIM_*`.
+- **Codegen:** `ui_bindings_apply()` runs after the first `lv_screen_load` / `lv_scr_load` so `{{field}}` labels show initial values on device.
+- **Preview:** **Auto (fit)** zoom scales the display to the visible pane (fractional zoom, not only 100%+); rulers/bezel accounted for.
+- **Preview:** bound labels refresh after page build and theme changes; type-correct `set_value` for arc/bar/slider.
+- **Preview:** removed on-canvas FPS counter; LVGL perf overlay hidden in WASM runtime.
+- **Sample:** `temperature_humidity_station_1024x600_lvgl9.embf` — literal demo values, **Settings** page (display, alerts, device name), navigate with slide transitions.
+
 ## 1.0.1
 
 - Preview toolbar: **Play animations** to run widget `animations[]` on the current page (preview WASM).

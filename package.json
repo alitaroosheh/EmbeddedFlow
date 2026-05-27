@@ -2,8 +2,8 @@
   "name": "embf-lvgl",
   "publisher": "erminity",
   "displayName": "embeddedflow (an LVGL Design tool)",
-  "description": "Design LVGL UIs in .embf projects — live preview, named styles, data bindings, animations, knob widget, and C codegen for LVGL 8/9.",
-  "version": "1.0.1",
+  "description": "Design LVGL UIs in .embf projects with a live WASM preview (see README screenshot), named styles, bindings, animations, and C codegen for LVGL 8/9.",
+  "version": "1.1.1",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -202,7 +202,7 @@
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
-    "package": "vsce package",
+    "package": "vsce package --allow-missing-repository",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "test": "vitest run",

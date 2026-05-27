@@ -570,6 +570,78 @@ void embf_set_theme(int dark_theme, uint32_t primary_argb, uint32_t secondary_ar
     lv_obj_report_style_change(NULL);
 }
 
+/* ── Widget property animations (preview "Play animations") ─────────────── */
+
+static void embf_anim_opa_cb(void * obj, int32_t v)
+{
+    lv_obj_set_style_opa((lv_obj_t *)obj, (lv_opa_t)v, LV_PART_MAIN | LV_STATE_DEFAULT);
+}
+
+/**
+ * Start one LVGL property animation on `obj`.
+ * @param prop 0=x, 1=y, 2=width, 3=height, 4=opacity
+ * @param easing_id 0=linear … 6=step (matches webview / codegen)
+ * @param repeat -1=infinite, 0=once, N=repeat count
+ */
+EMSCRIPTEN_KEEPALIVE
+void embf_anim_start(void * obj, int prop, int32_t from, int32_t to,
+                     uint32_t time_ms, uint32_t delay_ms, int easing_id, int repeat, int playback)
+{
+    if(!obj || time_ms == 0) return;
+
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, obj);
+
+    switch(prop) {
+        case 0: lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_obj_set_x); break;
+        case 1: lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_obj_set_y); break;
+        case 2: lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_obj_set_width); break;
+        case 3: lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_obj_set_height); break;
+        case 4: lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)embf_anim_opa_cb); break;
+        default: return;
+    }
+
+    lv_anim_set_values(&a, from, to);
+    lv_anim_set_time(&a, time_ms);
+    if(delay_ms > 0) lv_anim_set_delay(&a, delay_ms);
+
+    lv_anim_path_cb_t path = lv_anim_path_linear;
+    switch(easing_id) {
+        case 1: path = lv_anim_path_ease_in; break;
+        case 2: path = lv_anim_path_ease_out; break;
+        case 3: path = lv_anim_path_ease_in_out; break;
+        case 4: path = lv_anim_path_overshoot; break;
+        case 5: path = lv_anim_path_bounce; break;
+        case 6: path = lv_anim_path_step; break;
+        default: break;
+    }
+    lv_anim_set_path_cb(&a, path);
+
+    if(repeat < 0) {
+        lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+    }
+    else if(repeat > 0) {
+        lv_anim_set_repeat_count(&a, (uint32_t)repeat);
+    }
+
+    if(playback) {
+        lv_anim_set_playback_time(&a, time_ms);
+    }
+
+    /* Start from `from` so the motion is visible (layout may already be at `to`). */
+    switch(prop) {
+        case 0: lv_obj_set_x((lv_obj_t *)obj, (lv_coord_t)from); break;
+        case 1: lv_obj_set_y((lv_obj_t *)obj, (lv_coord_t)from); break;
+        case 2: lv_obj_set_width((lv_obj_t *)obj, (lv_coord_t)from); break;
+        case 3: lv_obj_set_height((lv_obj_t *)obj, (lv_coord_t)from); break;
+        case 4: lv_obj_set_style_opa((lv_obj_t *)obj, (lv_opa_t)from, LV_PART_MAIN | LV_STATE_DEFAULT); break;
+        default: break;
+    }
+
+    lv_anim_start(&a);
+}
+
 /* ── Event queue ────────────────────────────────────────────────────────── */
 
 #define EMBF_EVENT_QUEUE_SIZE 32

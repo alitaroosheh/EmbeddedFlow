@@ -8,7 +8,7 @@
   },
   "display": {
     "width": 800,
-    "height": 600,
+    "height": 480,
     "bitDepth": 16,
     "colorFormat": "RGB565",
     "orientation": "landscape",
@@ -18,8 +18,8 @@
   },
   "theme": {
     "dark": false,
-    "primaryColor": "#d04981",
-    "secondaryColor": "#715b5b"
+    "primaryColor": "#49c7d0",
+    "secondaryColor": "#5b5f71"
   },
   "pages": [
     {
@@ -33,16 +33,16 @@
           "y": 10,
           "width": 200,
           "height": 30,
-          "text": "Hello, EmbeddedFlow!"
-        },
-        {
-          "id": "sw_1",
-          "x": 245,
-          "y": 170,
-          "width": 52,
-          "height": 28,
-          "type": "switch",
-          "checked": false
+          "text": "Hello, EmbeddedFlow!",
+          "animations": [
+            {
+              "property": "x",
+              "from": -120,
+              "to": 10,
+              "duration": 900,
+              "easing": "ease_out"
+            }
+          ]
         },
         {
           "id": "ta_1",
@@ -54,43 +54,9 @@
           "text": ""
         },
         {
-          "id": "lbl_1",
-          "x": 119,
-          "y": 139,
-          "width": 120,
-          "height": 28,
-          "type": "label",
-          "text": "Label"
-        },
-        {
-          "id": "dd_1",
-          "x": 325,
-          "y": 155,
-          "width": 140,
-          "height": 36,
-          "type": "dropdown",
-          "options": [
-            "One",
-            "Two",
-            "Three"
-          ],
-          "selectedIndex": 0
-        },
-        {
-          "id": "sld_1",
-          "x": 290,
-          "y": 305,
-          "width": 140,
-          "height": 24,
-          "type": "slider",
-          "min": 0,
-          "max": 100,
-          "value": 50
-        },
-        {
           "id": "btn_1",
-          "x": 670,
-          "y": 526,
+          "x": 671,
+          "y": 410,
           "width": 88,
           "height": 36,
           "type": "button",
@@ -102,11 +68,196 @@
               "actions": [
                 {
                   "type": "navigate",
-                  "target": "page_settings"
+                  "target": "page_settings",
+                  "anim": "move_left"
                 }
               ]
             }
           ]
+        },
+        {
+          "id": "lbl_1",
+          "x": 149,
+          "y": 209,
+          "width": 120,
+          "height": 28,
+          "type": "label",
+          "text": "Label"
+        },
+        {
+          "id": "chk_1",
+          "x": 491,
+          "y": 58,
+          "width": 140,
+          "height": 28,
+          "type": "checkbox",
+          "text": "Check",
+          "checked": true,
+          "hidden": false,
+          "events": []
+        },
+        {
+          "id": "card1_1",
+          "type": "container",
+          "x": 39,
+          "y": 320,
+          "width": 299,
+          "height": 110,
+          "layout": "none",
+          "hidden": false,
+          "children": [
+            {
+              "id": "card1_2",
+              "x": 10,
+              "y": 17,
+              "width": 52,
+              "height": 28,
+              "type": "switch",
+              "checked": false
+            },
+            {
+              "id": "card1_3",
+              "x": 25,
+              "y": 54,
+              "width": 140,
+              "height": 36,
+              "type": "dropdown",
+              "options": [
+                "One",
+                "Two",
+                "Three"
+              ],
+              "selectedIndex": 0
+            },
+            {
+              "id": "card1_4",
+              "x": 145,
+              "y": 80,
+              "width": 140,
+              "height": 24,
+              "type": "slider",
+              "min": 0,
+              "max": 100,
+              "value": 50
+            }
+          ]
+        },
+        {
+          "id": "card1_5",
+          "type": "container",
+          "x": 374,
+          "y": 110,
+          "width": 299,
+          "height": 110,
+          "layout": "none",
+          "hidden": false,
+          "children": [
+            {
+              "id": "card1_6",
+              "x": -56,
+              "y": -27,
+              "width": 52,
+              "height": 28,
+              "type": "switch",
+              "checked": false
+            },
+            {
+              "id": "card1_7",
+              "x": 90,
+              "y": 2,
+              "width": 140,
+              "height": 36,
+              "type": "dropdown",
+              "options": [
+                "One",
+                "Two",
+                "Three"
+              ],
+              "selectedIndex": 0
+            },
+            {
+              "id": "card1_8",
+              "x": 145,
+              "y": 80,
+              "width": 140,
+              "height": 24,
+              "type": "slider",
+              "min": 0,
+              "max": 100,
+              "value": 50
+            }
+          ],
+          "animations": [
+            {
+              "property": "x",
+              "easing": "ease_out",
+              "from": 0,
+              "to": 80,
+              "duration": 700
+            }
+          ],
+          "events": [],
+          "flexFlow": "row_wrap"
+        },
+        {
+          "id": "img_1",
+          "x": 349,
+          "y": 353,
+          "width": 48,
+          "height": 48,
+          "type": "image",
+          "src": "logo",
+          "hidden": false,
+          "events": [],
+          "animations": []
+        },
+        {
+          "id": "img_2",
+          "x": 531,
+          "y": 282,
+          "width": 48,
+          "height": 48,
+          "type": "image",
+          "src": "logo",
+          "hidden": false,
+          "events": []
+        },
+        {
+          "id": "knob_1",
+          "x": 108,
+          "y": 100,
+          "width": 80,
+          "height": 80,
+          "type": "knob",
+          "min": 0,
+          "max": 100,
+          "value": 50,
+          "startAngle": 135,
+          "endAngle": 45
+        },
+        {
+          "id": "arc_1",
+          "x": 284,
+          "y": 124,
+          "width": 80,
+          "height": 80,
+          "type": "arc",
+          "min": 0,
+          "max": 100,
+          "value": 30
+        },
+        {
+          "id": "knob_2",
+          "x": 357,
+          "y": 193,
+          "width": 80,
+          "height": 80,
+          "type": "knob",
+          "min": 0,
+          "max": 100,
+          "value": 50,
+          "startAngle": 135,
+          "endAngle": 45
         }
       ]
     },
@@ -116,8 +267,8 @@
       "components": [
         {
           "id": "ta_2",
-          "x": 302,
-          "y": 249,
+          "x": 230,
+          "y": 204,
           "width": 160,
           "height": 72,
           "type": "textarea",
@@ -131,8 +282,99 @@
           "height": 28,
           "type": "switch",
           "checked": false
+        },
+        {
+          "id": "btn_2",
+          "x": 681,
+          "y": 421,
+          "width": 88,
+          "height": 36,
+          "type": "button",
+          "label": "Home",
+          "hidden": false,
+          "events": [
+            {
+              "trigger": "clicked",
+              "actions": [
+                {
+                  "type": "navigate",
+                  "target": "page_main",
+                  "anim": "move_right"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "sw_3",
+          "x": 278,
+          "y": 123,
+          "width": 52,
+          "height": 28,
+          "type": "switch",
+          "checked": false
         }
       ]
+    }
+  ],
+  "componentLibrary": [
+    {
+      "id": "card1",
+      "name": "card1",
+      "width": 299,
+      "height": 110,
+      "root": {
+        "id": "box_1",
+        "type": "container",
+        "x": 0,
+        "y": 0,
+        "width": 299,
+        "height": 110,
+        "layout": "none",
+        "hidden": false,
+        "children": [
+          {
+            "id": "sw_1",
+            "x": 10,
+            "y": 17,
+            "width": 52,
+            "height": 28,
+            "type": "switch",
+            "checked": false
+          },
+          {
+            "id": "dd_1",
+            "x": 90,
+            "y": 2,
+            "width": 140,
+            "height": 36,
+            "type": "dropdown",
+            "options": [
+              "One",
+              "Two",
+              "Three"
+            ],
+            "selectedIndex": 0
+          },
+          {
+            "id": "sld_1",
+            "x": 145,
+            "y": 80,
+            "width": 140,
+            "height": 24,
+            "type": "slider",
+            "min": 0,
+            "max": 100,
+            "value": 50
+          }
+        ]
+      }
+    }
+  ],
+  "images": [
+    {
+      "id": "logo",
+      "path": "main/ui/assets/logo.png"
     }
   ]
 }

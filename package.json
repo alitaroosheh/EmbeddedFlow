@@ -2,7 +2,7 @@
   "name": "embf-lvgl",
   "publisher": "erminity",
   "displayName": "embeddedflow (an LVGL Design tool)",
-  "description": "Design LVGL UIs in .embf projects — live WASM preview, visual editor with groups & flows, and C codegen for LVGL 8/9.",
+  "description": "Design LVGL UIs in .embf projects — live preview, named styles, data bindings, animations, knob widget, and C codegen for LVGL 8/9.",
   "version": "1.0.0",
   "license": "MIT",
   "repository": {
@@ -61,7 +61,7 @@
     "commands": [
       {
         "command": "embeddedflow.openPreview",
-        "title": "embeddedflow: Open UI Preview",
+        "title": "EmbeddedFlow: Open Preview",
         "icon": "$(preview)"
       },
       {

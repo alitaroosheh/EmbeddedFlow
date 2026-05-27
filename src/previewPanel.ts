@@ -2156,6 +2156,7 @@ export class EmbfPreviewPanel {
             Rulers
         </label>
         <button type="button" class="tb-btn" id="btn-theme-toggle" title="Toggle light/dark preview theme">Theme</button>
+        <button type="button" class="tb-btn" id="btn-play-animations" title="Run widget animations[] on the current page (LVGL preview)">Play animations</button>
         <label for="preview-zoom">Zoom:</label>
         <button type="button" class="tb-btn" id="btn-generate-code" title="Generate C UI files for this project">Generate C Code</button>
         <select id="preview-zoom" title="Preview scale only — device resolution stays in .embf">

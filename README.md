@@ -4,16 +4,18 @@ Design touch UIs for embedded devices without leaving your editor. **embeddedflo
 
 ---
 
-## What's new (recent releases)
+## What's new in v1.0.0
 
-**v0.3.4** updates marketplace documentation. **v0.3.3** improves grouped-widget design and extension packaging stability.
+**v1.0.0** is the first feature-complete release for day-to-day LVGL UI design in VS Code: edit named styles, data fields, bindings, and animations in the Properties panel, generate matching C, and use the new **knob** widget.
 
-- **Grouped widgets stay united** — Clicking any child inside a container/panel group selects the **whole group** so you move and edit it as one unit. Marquee selection and the toolbar widget picker follow the same rule.
-- **Edit group contents** — Double-click a group, use **Edit contents** in the inspector, or finish with **Esc** / **Done editing group** to adjust individual children (position, size, properties) without breaking the group.
-- **Toolbar widget picker** — Dropdown next to zoom lists widgets on the current page; choosing one selects it in the preview (scoped to the group while in group-edit mode).
-- **Image preview alignment** — Bitmap overlays line up with LVGL layout in the preview (zoom, coordinates, and overlay layering fixes).
-- **New Project** — Wizard from the command palette, editor toolbar, explorer, and preview toolbar; creates a starter `.embf` with your chosen LVGL version.
-- **Marketplace / VSIX reliability (v0.3.2+)** — Extension package ships required dependencies so commands like **New Project** and **Open Preview** register correctly after install (older builds omitted `node_modules` and failed to activate).
+- **Knob widget** — rotary control in the palette; codegen emits a styled `lv_arc` with sensible defaults.
+- **Data model & bindings** — declare fields once; bind labels with `{{field_id}}` and numeric widgets (slider, bar, arc, knob) with **Value bound to**. Generated `ui_bindings_apply()` keeps UI in sync.
+- **Named styles & animations** — reusable `project.styles[]`, per-widget `styleRefs`, and `animations[]` with full inspector editors and `ui_styles.c` / `lv_anim_t` codegen.
+- **Fonts** — **Add Font to Project**; optional TTF/OTF → `.c` via `lv_font_conv` when installed.
+- **Sidebar** — **Tree** (widget hierarchy with drag-reparent) and **Settings** (project, display, codegen) panels work from the left rail.
+- **Theme** — toolbar light/dark toggle writes `project.theme.dark` to your `.embf` so the preview stays consistent while you edit widgets.
+
+Earlier highlights (still included): grouped widgets, canvas rulers & pan, page flows, `ui_fonts` codegen, image assets, undo/redo, and live WASM preview for LVGL 8/9.
 
 If you installed an older Marketplace build and see **"command not found"**, install **v0.3.3** or newer and reload the window.
 
@@ -74,7 +76,7 @@ Open **embeddedflow: Open UI Preview** on any `.embf` file. The preview runs LVG
 
 **Widget palette**
 
-Add widgets from the sidebar: label, button, slider, switch, bar, arc, checkbox, dropdown, roller, textarea, line, image, container, panel, spinner.
+Add widgets from the sidebar: label, button, slider, switch, bar, arc, **knob**, checkbox, dropdown, roller, textarea, line, image, container, panel, spinner.
 
 **Property inspector**
 
@@ -82,7 +84,8 @@ Add widgets from the sidebar: label, button, slider, switch, bar, arc, checkbox,
 - Type-specific fields (text, ranges, options, etc.)
 - **Appearances** — styles/events where applicable
 - **Images** — asset id combobox, browse to register files into `project.images[]`
-- **Page inspector** — page name/id, codegen output folder picker, theme when nothing is selected
+- **Page inspector** — page name, display, theme, codegen path; **named styles** and **data fields** lists
+- **Widget inspector** — `styleRefs`, numeric **bindings**, and **animations** where applicable
 
 **Groups (container / panel)**
 
@@ -145,6 +148,7 @@ Configure in `.embf`:
 | **embeddedflow: Open UI Preview** | Live LVGL canvas for the current `.embf` |
 | **embeddedflow: New Project** | Wizard: folder, name, LVGL version → new `.embf` |
 | **embeddedflow: Generate C Code** | Export C sources |
+| **embeddedflow: Add Font to Project** | Register a font; optional `lv_font_conv` conversion |
 | **embeddedflow: Show Output Log** | Extension log |
 
 ---

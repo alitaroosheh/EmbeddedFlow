@@ -87,6 +87,7 @@ const designRulersCheck = /** @type {HTMLInputElement | null} */ (document.getEl
 const rulerTop = /** @type {HTMLCanvasElement | null} */ (document.getElementById("ruler-top"));
 const rulerLeft = /** @type {HTMLCanvasElement | null} */ (document.getElementById("ruler-left"));
 const btnThemeToggle = document.getElementById("btn-theme-toggle");
+const btnPlayAnimations = document.getElementById("btn-play-animations");
 const widgetTreeEl = document.getElementById("widget-tree");
 const paletteSearch = /** @type {HTMLInputElement | null} */ (document.getElementById("palette-search"));
 const previewBezelCheck = /** @type {HTMLInputElement | null} */ (document.getElementById("preview-bezel"));
@@ -1170,6 +1171,76 @@ function triggerToLvCode(trigger) {
         case "value_changed": return LV_EVENT_VALUE_CHANGED;
         default:              return LV_EVENT_CLICKED;
     }
+}
+
+/** Maps `AnimationDef.property` → `embf_anim_start` prop id (must match embf_runtime.c). */
+const ANIM_PROP_ID = { x: 0, y: 1, width: 2, height: 3, opacity: 4 };
+const ANIM_EASING_ID = {
+    linear: 0,
+    ease_in: 1,
+    ease_out: 2,
+    ease_in_out: 3,
+    overshoot: 4,
+    bounce: 5,
+    step: 6
+};
+
+/**
+ * Run all `animations[]` on the current page via WASM `embf_anim_start`.
+ * Requires a rebuilt preview runtime (wasm-src/build.ps1) exporting `_embf_anim_start`.
+ */
+function playWidgetAnimationsOnCurrentPage() {
+    if (!wasmReady || !WasmModule || !currentProject) {
+        return { ok: false, reason: "Preview not ready." };
+    }
+    if (typeof WasmModule._embf_anim_start !== "function") {
+        return {
+            ok: false,
+            reason: "Rebuild the WASM preview (wasm-src/build.ps1) to enable Play animations."
+        };
+    }
+    const page = currentProject.pages[currentPageIndex];
+    if (!page) {
+        return { ok: false, reason: "No active page." };
+    }
+
+    let started = 0;
+    for (const comp of flatComponents(page.components)) {
+        const anims = comp.animations;
+        if (!Array.isArray(anims) || anims.length === 0) {
+            continue;
+        }
+        const ptr = idToObjPtr.get(comp.id);
+        if (!ptr) {
+            continue;
+        }
+        for (const a of anims) {
+            const propId = ANIM_PROP_ID[a.property];
+            if (propId === undefined) {
+                continue;
+            }
+            const from = Math.round(Number(a.from));
+            const to = Math.round(Number(a.to));
+            if (!Number.isFinite(from) || !Number.isFinite(to)) {
+                continue;
+            }
+            const duration = Math.max(1, Math.round(Number(a.duration ?? 500)));
+            const delay = a.delay !== undefined ? Math.max(0, Math.round(Number(a.delay))) : 0;
+            const easingId = ANIM_EASING_ID[a.easing ?? "linear"] ?? 0;
+            const repeat = a.repeat !== undefined ? Math.round(Number(a.repeat)) : 0;
+            const playback = a.playback ? 1 : 0;
+            WasmModule._embf_anim_start(ptr, propId, from, to, duration, delay, easingId, repeat, playback);
+            started++;
+        }
+    }
+
+    if (started === 0) {
+        return {
+            ok: false,
+            reason: "No animations on this page (add them in Properties → Animations, or edit traffic.embf)."
+        };
+    }
+    return { ok: true, started };
 }
 
 /**
@@ -6863,6 +6934,20 @@ if (canvasContainer) {
     canvasContainer.addEventListener("pointercancel", endPan, true);
     canvasContainer.addEventListener("auxclick", ev => {
         if (ev.button === 1) ev.preventDefault();
+    });
+}
+
+if (btnPlayAnimations) {
+    btnPlayAnimations.addEventListener("click", () => {
+        const r = playWidgetAnimationsOnCurrentPage();
+        if (!r.ok && r.reason) {
+            if (status) {
+                status.textContent = r.reason;
+            }
+            log("warn", `play animations: ${r.reason}`);
+        } else if (status && r.started) {
+            status.textContent = `Playing ${r.started} animation(s)…`;
+        }
     });
 }
 

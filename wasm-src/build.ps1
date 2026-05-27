@@ -59,6 +59,7 @@ $exports = @(
     "_embf_obj_set_style_font_size",
     "_embf_obj_set_style_border_color","_embf_obj_set_style_text_align",
     "_embf_obj_set_style_border_width","_embf_obj_set_style_radius","_embf_obj_set_style_pad_all",
+    "_embf_anim_start",
     "_embf_register_event",
     "_embf_poll_event","_embf_poll_obj_ptr","_embf_poll_code_ptr","_embf_poll_value_ptr",
     "_embf_on_pointer","_embf_on_wheel","_embf_on_key",

@@ -1,6 +1,6 @@
 # Marketplace release (GitHub Actions)
 
-The **publish** job in [`.github/workflows/release.yml`](../.github/workflows/release.yml) runs when you push a semver tag (`v0.3.5`, etc.) on the **`release`** branch.
+The **publish** job in [`.github/workflows/release.yml`](../.github/workflows/release.yml) runs when you push a semver tag (`v1.0.0`, etc.) on the **`release`** branch.
 
 ## Required: `VSCE_PAT` repository secret
 
@@ -36,7 +36,7 @@ After the secret exists, either:
 - Force-push the tag again:
 
 ```bash
-git push --force origin v0.3.5
+git push --force origin v1.0.0
 ```
 
 ## Release flow (summary)
@@ -44,9 +44,10 @@ git push --force origin v0.3.5
 ```bash
 git checkout release
 git merge main
-git tag v0.3.6          # bump version in package.json first if needed
+# Ensure package.json version matches the tag (e.g. 1.0.0)
+git tag v1.0.0
 git push origin release
-git push origin v0.3.6
+git push origin v1.0.0
 ```
 
 - Push to **`release`** → **validate** only (build, test, VSIX artifact).

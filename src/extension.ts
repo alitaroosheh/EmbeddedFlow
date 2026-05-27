@@ -34,6 +34,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
     context.subscriptions.push(embfDiagnostics);
 
+    embeddedFlowLog("extension", "info", `activate (${context.extensionPath})`);
+
     // Register commands first — if later setup throws, palette commands still work.
     const runNewProjectCmd = async () => {
         await runCreateNewProjectFlow(filePath => {

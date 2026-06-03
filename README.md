@@ -201,4 +201,4 @@ CI publish needs a GitHub Actions secret **`VSCE_PAT`** (Marketplace **Manage** 
 
 ## License
 
-MIT — see [LICENSE](./LICENSE). LVGL remains under its own license where bundled for the preview runtime.
+**GPL-3.0-or-later** — see [LICENSE](./LICENSE). You may use, modify, and distribute this extension under the terms of the GNU General Public License v3 (or any later version). LVGL remains under its own license where bundled for the preview runtime.

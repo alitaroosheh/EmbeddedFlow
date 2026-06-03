@@ -2,6 +2,7 @@
 
 ## 1.1.1
 
+- **License:** project relicensed from MIT to **GPL-3.0-or-later**.
 - **Fix:** VSIX again bundles runtime dependencies (`pngjs`, `jpeg-js`) so the extension activates and **EmbeddedFlow: Open Preview** registers in the Command Palette.
 - **Fix:** Codegen/image modules load lazily on activate so preview commands work even if image libraries fail to load.
 

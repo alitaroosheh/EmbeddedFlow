@@ -1523,6 +1523,61 @@ export class EmbfPreviewPanel {
         #sidebar-panel-flow {
             display: flex;
             flex-direction: column;
+            overflow-y: hidden;
+        }
+        .flow-list {
+            flex: 1;
+            min-height: 0;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+        .flow-view-toggle {
+            display: flex;
+            gap: 4px;
+            padding: 6px 8px;
+            border-bottom: 1px solid #3c3c3c;
+            flex-shrink: 0;
+        }
+        .flow-view-btn {
+            flex: 1;
+            padding: 3px 6px;
+            font-size: 11px;
+            background: #3c3c3c;
+            color: #aaa;
+            border: 1px solid #555;
+            border-radius: 3px;
+            cursor: pointer;
+            font-family: inherit;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+        }
+        .flow-view-btn svg { width: 13px; height: 13px; pointer-events: none; }
+        .flow-view-btn.active {
+            background: #094771;
+            border-color: #007acc;
+            color: #fff;
+        }
+        .flow-view-btn:hover:not(.active) {
+            background: #4a4a4a;
+            color: #ccc;
+        }
+        #flow-graph-wrap {
+            flex: 1;
+            min-height: 0;
+            display: none;
+            position: relative;
+            background: #1e1e1e;
+        }
+        #flow-graph-wrap.visible {
+            display: block;
+        }
+        #flow-graph-canvas {
+            display: block;
+            position: absolute;
+            inset: 0;
+            cursor: default;
         }
         #sidebar-panel-components .palette-item {
             display: flex;

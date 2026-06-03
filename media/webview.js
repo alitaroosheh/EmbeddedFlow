@@ -132,6 +132,10 @@ const flowAnim = /** @type {HTMLSelectElement | null} */ (document.getElementByI
 const flowTime = /** @type {HTMLInputElement | null} */ (document.getElementById("flow-time"));
 const flowListEl = document.getElementById("flow-list");
 const btnFlowAdd = document.getElementById("btn-flow-add");
+const btnFlowViewList = document.getElementById("btn-flow-view-list");
+const btnFlowViewGraph = document.getElementById("btn-flow-view-graph");
+const flowGraphWrap = document.getElementById("flow-graph-wrap");
+const flowGraphCanvas = /** @type {HTMLCanvasElement | null} */ (document.getElementById("flow-graph-canvas"));
 
 /** Minimum pointer travel (px) to treat as a page swipe in preview. */
 const PAGE_SWIPE_MIN_PX = 48;
@@ -494,7 +498,7 @@ async function handleLoad(payload) {
     refreshLibraryPalette();
     renderPageList();
     populateFlowForm();
-    renderFlowList();
+    renderFlowPanel();
     if (pageSelect) {
         pageSelectProgrammatic = true;
         pageSelect.value = String(currentPageIndex);
@@ -892,7 +896,7 @@ function setSidebarCategory(categoryId, persist = true) {
     }
     if (categoryId === "flow") {
         populateFlowForm();
-        renderFlowList();
+        renderFlowPanel();
     }
     if (categoryId === "hierarchy") {
         renderWidgetTree();
@@ -1784,7 +1788,7 @@ function dispatchAction(action, eventValue, currentPage) {
                 renderInspector();
                 renderPageList();
                 renderToolbarWidgetSelect();
-                renderFlowList();
+                renderFlowPanel();
             } finally {
                 pageSelectProgrammatic = false;
             }
@@ -2962,6 +2966,309 @@ function populateFlowComponentSelect() {
         flowComponent.value = prev;
     }
 }
+
+// ── Navigation Graph ──────────────────────────────────────────────────────────
+
+let flowGraphMode = false;
+
+/**
+ * Computed during renderFlowGraph — used by mouse handlers for hit-testing.
+ * @type {Array<{page: object, index: number, x: number, y: number, w: number, h: number}>}
+ */
+let _fgNodes = [];
+
+/**
+ * Computed during renderFlowGraph — stores midpoint of each rendered edge for hover/delete.
+ * @type {Array<{flow: object, mx: number, my: number, flowIndex: number}>}
+ */
+let _fgEdges = [];
+
+let _fgHoverEdge = -1;
+
+const FG_NODE_W = 120;
+const FG_NODE_H = 44;
+const FG_GAP_X = 24;
+const FG_GAP_Y = 52;
+const FG_PAD = 10;
+const FG_DEL_R = 8;
+
+function setFlowViewMode(isGraph) {
+    flowGraphMode = isGraph;
+    if (btnFlowViewList) btnFlowViewList.classList.toggle("active", !isGraph);
+    if (btnFlowViewGraph) btnFlowViewGraph.classList.toggle("active", isGraph);
+    if (flowListEl) flowListEl.style.display = isGraph ? "none" : "";
+    if (flowGraphWrap) flowGraphWrap.classList.toggle("visible", isGraph);
+    if (isGraph) renderFlowGraph();
+}
+
+function renderFlowPanel() {
+    if (flowGraphMode) {
+        renderFlowGraph();
+    } else {
+        renderFlowList();
+    }
+}
+
+function _fgBezierPt(p0, p1, p2, p3, t) {
+    const mt = 1 - t;
+    return mt * mt * mt * p0 + 3 * mt * mt * t * p1 + 3 * mt * t * t * p2 + t * t * t * p3;
+}
+
+function _fgArrowHead(ctx, cpx, cpy, tx, ty, color, size) {
+    const angle = Math.atan2(ty - cpy, tx - cpx);
+    ctx.beginPath();
+    ctx.moveTo(tx, ty);
+    ctx.lineTo(tx - size * Math.cos(angle - Math.PI / 6), ty - size * Math.sin(angle - Math.PI / 6));
+    ctx.lineTo(tx - size * Math.cos(angle + Math.PI / 6), ty - size * Math.sin(angle + Math.PI / 6));
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+}
+
+function _fgTruncateText(ctx, text, maxW) {
+    if (ctx.measureText(text).width <= maxW) return text;
+    let t = text;
+    while (t.length > 1 && ctx.measureText(t + "…").width > maxW) t = t.slice(0, -1);
+    return t + "…";
+}
+
+function renderFlowGraph() {
+    if (!flowGraphCanvas || !flowGraphWrap || !currentProject) return;
+
+    const W = flowGraphWrap.clientWidth;
+    const H = flowGraphWrap.clientHeight;
+    if (W < 2 || H < 2) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    if (flowGraphCanvas.width !== W * dpr || flowGraphCanvas.height !== H * dpr) {
+        flowGraphCanvas.width = W * dpr;
+        flowGraphCanvas.height = H * dpr;
+    }
+    flowGraphCanvas.style.width = W + "px";
+    flowGraphCanvas.style.height = H + "px";
+
+    const ctx = flowGraphCanvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+
+    const pages = currentProject.pages;
+    if (!pages.length) {
+        ctx.fillStyle = "#888";
+        ctx.font = "12px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("No pages in project.", W / 2, H / 2);
+        return;
+    }
+
+    const cols = Math.max(1, Math.floor((W - FG_PAD * 2 + FG_GAP_X) / (FG_NODE_W + FG_GAP_X)));
+    _fgNodes = pages.map((page, i) => ({
+        page,
+        index: i,
+        x: FG_PAD + (i % cols) * (FG_NODE_W + FG_GAP_X),
+        y: FG_PAD + Math.floor(i / cols) * (FG_NODE_H + FG_GAP_Y),
+        w: FG_NODE_W,
+        h: FG_NODE_H
+    }));
+
+    const flows = collectAllFlowsFromProject();
+    _fgEdges = [];
+
+    // Draw edges (behind nodes)
+    flows.forEach((f, fi) => {
+        const src = _fgNodes[f.sourcePageIndex];
+        if (!src) return;
+        const tgtIdx = currentProject.pages.findIndex(p => p.id === f.targetPageId);
+        if (tgtIdx < 0 || tgtIdx === f.sourcePageIndex) return;
+        const tgt = _fgNodes[tgtIdx];
+        const isHover = (_fgHoverEdge === fi);
+
+        // Entry/exit points: bottom-center → top-center (default), or side-to-side when same row
+        const sameRow = (Math.floor(f.sourcePageIndex / cols) === Math.floor(tgtIdx / cols));
+        let sx, sy, tx, ty, cp1x, cp1y, cp2x, cp2y;
+
+        if (sameRow) {
+            const goRight = tgt.x > src.x;
+            sx = goRight ? src.x + src.w : src.x;
+            sy = src.y + src.h / 2;
+            tx = goRight ? tgt.x : tgt.x + tgt.w;
+            ty = tgt.y + tgt.h / 2;
+            const curveDrop = FG_GAP_Y * 0.65;
+            cp1x = sx + (goRight ? 16 : -16);
+            cp1y = sy + curveDrop;
+            cp2x = tx + (goRight ? -16 : 16);
+            cp2y = ty + curveDrop;
+        } else {
+            sx = src.x + src.w / 2;
+            sy = src.y + src.h;
+            tx = tgt.x + tgt.w / 2;
+            ty = tgt.y;
+            const dy = ty - sy;
+            cp1x = sx; cp1y = sy + dy * 0.45;
+            cp2x = tx; cp2y = ty - dy * 0.45;
+        }
+
+        const edgeColor = isHover ? "#4ea2e0" : "#3a7ab8";
+        const dashStyle = f.kind === "swipe" ? [5, 4] : [];
+
+        ctx.beginPath();
+        ctx.moveTo(sx, sy);
+        ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, tx, ty);
+        ctx.strokeStyle = edgeColor;
+        ctx.lineWidth = isHover ? 2.5 : 1.5;
+        ctx.setLineDash(dashStyle);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        _fgArrowHead(ctx, cp2x, cp2y, tx, ty, edgeColor, isHover ? 8 : 6);
+
+        // Midpoint for hover/delete
+        const mx = _fgBezierPt(sx, cp1x, cp2x, tx, 0.5);
+        const my = _fgBezierPt(sy, cp1y, cp2y, ty, 0.5);
+        _fgEdges.push({ flow: f, mx, my, flowIndex: fi, cp2x, cp2y, tx, ty });
+
+        // Delete button on hover
+        if (isHover) {
+            ctx.beginPath();
+            ctx.arc(mx, my, FG_DEL_R, 0, Math.PI * 2);
+            ctx.fillStyle = "#cc3333";
+            ctx.fill();
+            ctx.fillStyle = "#fff";
+            ctx.font = "bold 11px sans-serif";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText("×", mx, my + 0.5);
+        }
+    });
+
+    // Draw nodes (on top)
+    for (const node of _fgNodes) {
+        const isCurrent = node.index === currentPageIndex;
+        const r = 5;
+
+        ctx.beginPath();
+        if (ctx.roundRect) {
+            ctx.roundRect(node.x, node.y, node.w, node.h, r);
+        } else {
+            // fallback for older browsers
+            const { x, y, w, h } = node;
+            ctx.moveTo(x + r, y);
+            ctx.lineTo(x + w - r, y); ctx.arcTo(x + w, y, x + w, y + r, r);
+            ctx.lineTo(x + w, y + h - r); ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+            ctx.lineTo(x + r, y + h); ctx.arcTo(x, y + h, x, y + h - r, r);
+            ctx.lineTo(x, y + r); ctx.arcTo(x, y, x + r, y, r);
+            ctx.closePath();
+        }
+        ctx.fillStyle = isCurrent ? "#094771" : "#2a2d2e";
+        ctx.fill();
+        ctx.strokeStyle = isCurrent ? "#007acc" : "#555";
+        ctx.lineWidth = isCurrent ? 1.5 : 1;
+        ctx.stroke();
+
+        const cx = node.x + node.w / 2;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "alphabetic";
+        ctx.font = "12px sans-serif";
+        ctx.fillStyle = isCurrent ? "#fff" : "#ccc";
+        ctx.fillText(_fgTruncateText(ctx, node.page.name, node.w - 14), cx, node.y + node.h / 2 - 2);
+
+        ctx.font = "10px sans-serif";
+        ctx.fillStyle = isCurrent ? "#b3d4f5" : "#777";
+        ctx.fillText(_fgTruncateText(ctx, node.page.id, node.w - 12), cx, node.y + node.h / 2 + 12);
+    }
+
+    // Empty state hint
+    if (!flows.length) {
+        ctx.fillStyle = "#666";
+        ctx.font = "11px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        const rows = Math.ceil(pages.length / cols);
+        const graphH = FG_PAD * 2 + rows * FG_NODE_H + (rows - 1) * FG_GAP_Y;
+        ctx.fillText("No flows yet — add one in the form above.", W / 2, Math.min(H - 20, graphH + 24));
+    }
+}
+
+// ── Flow graph mouse interaction ───────────────────────────────────────────────
+
+if (flowGraphCanvas) {
+    flowGraphCanvas.addEventListener("mousemove", e => {
+        if (!flowGraphMode) return;
+        const rect = flowGraphCanvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+
+        let newHover = -1;
+        for (let i = 0; i < _fgEdges.length; i++) {
+            const ed = _fgEdges[i];
+            const dx = mx - ed.mx, dy = my - ed.my;
+            if (Math.sqrt(dx * dx + dy * dy) < 16) { newHover = i; break; }
+        }
+        if (newHover !== _fgHoverEdge) {
+            _fgHoverEdge = newHover;
+            flowGraphCanvas.style.cursor = newHover >= 0 ? "pointer" : "default";
+            renderFlowGraph();
+        }
+    });
+
+    flowGraphCanvas.addEventListener("mouseleave", () => {
+        if (_fgHoverEdge !== -1) {
+            _fgHoverEdge = -1;
+            flowGraphCanvas.style.cursor = "default";
+            renderFlowGraph();
+        }
+    });
+
+    flowGraphCanvas.addEventListener("click", e => {
+        if (!flowGraphMode || !currentProject) return;
+        const rect = flowGraphCanvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+
+        // Delete button on hovered edge?
+        if (_fgHoverEdge >= 0 && _fgHoverEdge < _fgEdges.length) {
+            const ed = _fgEdges[_fgHoverEdge];
+            const dx = mx - ed.mx, dy = my - ed.my;
+            if (Math.sqrt(dx * dx + dy * dy) < FG_DEL_R + 4) {
+                const f = ed.flow;
+                if (f.kind === "swipe") {
+                    vscode.postMessage({ type: "removePageSwipeFlow", sourcePageIndex: f.sourcePageIndex, direction: f.direction });
+                } else {
+                    vscode.postMessage({ type: "removeNavigateFlow", sourcePageIndex: f.sourcePageIndex, componentId: f.componentId, trigger: f.trigger, targetPageId: f.targetPageId });
+                }
+                _fgHoverEdge = -1;
+                return;
+            }
+        }
+
+        // Click on a page node → navigate to that page
+        for (const node of _fgNodes) {
+            if (mx >= node.x && mx <= node.x + node.w && my >= node.y && my <= node.y + node.h) {
+                navigateToPageIndex(node.index);
+                inspectorShowingPage = true;
+                selectedComponentOrder = [];
+                drawDesignOverlay();
+                renderInspector();
+                return;
+            }
+        }
+    });
+}
+
+// Toggle buttons
+if (btnFlowViewList) {
+    btnFlowViewList.addEventListener("click", () => setFlowViewMode(false));
+}
+if (btnFlowViewGraph) {
+    btnFlowViewGraph.addEventListener("click", () => setFlowViewMode(true));
+}
+
+// Redraw graph on panel resize
+if (flowGraphWrap && typeof ResizeObserver !== "undefined") {
+    new ResizeObserver(() => { if (flowGraphMode) renderFlowGraph(); }).observe(flowGraphWrap);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 function renderFlowList() {
     if (!flowListEl) {

@@ -17,15 +17,15 @@ Requirements grouped by phase and pillar. Check the box when a requirement is fu
 - [x] **V1** Multi-page projects, widget palette, inspector
 - [x] **V2** Live WASM preview, design/run modes
 - [x] **V3** Styles, themes, animations, groups
-- [ ] **V4** Navigation Graph overlay on page designer — same IR, edges = navigation transitions
+- [x] **V4** Navigation Graph overlay on page designer — same IR, edges = navigation transitions
 - [ ] **V5** Flex/grid layout authoring with codegen
 
 ### Navigation Graph
 
 - [x] **N1** Page navigate with LVGL transitions (static calls)
 - [x] **N2** Page swipe flows
-- [ ] **N3** Visual overlay on designer: nodes = pages, edges = transitions with animation + trigger metadata
-- [ ] **N4** Navigation edges stored in IR — compiler generates `ui_navigate_to_*()` static functions
+- [x] **N3** Visual overlay on designer: nodes = pages, edges = transitions with animation + trigger metadata
+- [x] **N4** Navigation edges stored in IR — compiler generates `ui_navigate_to_*()` static functions
 - [ ] **N5** Navigation stack (push/pop/back) *(Phase 3)*
 
 Navigation graph generates **only static LVGL calls** in Phase 1. No router, no stack.

@@ -98,7 +98,13 @@ ${componentsPanelHtml}
 </div>`;
         }
         if (c.id === "flow") {
+            const ICON_LIST = `<svg viewBox="0 0 14 14" aria-hidden="true"><line x1="2" y1="4" x2="12" y2="4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="2" y1="7" x2="12" y2="7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="2" y1="10" x2="9" y2="10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
+            const ICON_GRAPH = `<svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="3" cy="7" r="2" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="11" cy="3" r="2" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="11" cy="11" r="2" fill="none" stroke="currentColor" stroke-width="1.3"/><line x1="4.8" y1="6.1" x2="9.2" y2="4" stroke="currentColor" stroke-width="1.2"/><line x1="4.8" y1="7.9" x2="9.2" y2="10" stroke="currentColor" stroke-width="1.2"/></svg>`;
             return `<div id="sidebar-panel-${c.id}" class="sidebar-panel-view sidebar-panel-view-flow" data-sidebar-panel="${c.id}" role="tabpanel" hidden>
+<div class="flow-view-toggle">
+<button type="button" class="flow-view-btn active" id="btn-flow-view-list" title="List view">${ICON_LIST} List</button>
+<button type="button" class="flow-view-btn" id="btn-flow-view-graph" title="Graph view">${ICON_GRAPH} Graph</button>
+</div>
 <div class="flow-add-form">
 <label class="flow-field"><span class="flow-label">Type</span><select id="flow-kind" title="Component event or screen swipe">
 <option value="component">Component event</option>
@@ -143,6 +149,7 @@ ${componentsPanelHtml}
 <button type="button" class="tb-btn-small" id="btn-flow-add">+ Add flow</button>
 </div>
 <ul id="flow-list" class="flow-list" aria-label="Page navigation flows"></ul>
+<div id="flow-graph-wrap"><canvas id="flow-graph-canvas"></canvas></div>
 </div>`;
         }
         return `<div id="sidebar-panel-${c.id}" class="sidebar-panel-view" data-sidebar-panel="${c.id}" role="tabpanel" hidden></div>`;

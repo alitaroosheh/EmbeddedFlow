@@ -6,6 +6,7 @@
   "type": "object",
   "required": ["version", "project", "display", "pages"],
   "additionalProperties": false,
+  "description": "EmbeddedFlow compile-time IR. Single source of truth for UI, model, state, actions, and protocol bindings.",
   "properties": {
     "version": {
       "type": "string",
@@ -32,6 +33,10 @@
           "type": "string",
           "enum": ["lvgl.h", "lvgl/lvgl.h"],
           "description": "LVGL header include path emitted in generated ui*.h files."
+        },
+        "firmwarePath": {
+          "type": "string",
+          "description": "Path to firmware project root containing compile_commands.json. Used by EmbeddedFlow to spawn a dedicated clangd instance for symbol discovery (Phase 2+). Relative to the .embf file or absolute."
         }
       }
     },
@@ -104,6 +109,124 @@
       "type": "array",
       "description": "Reusable grouped widgets (saved container/panel subtrees)",
       "items": { "$ref": "#/definitions/componentLibraryEntry" }
+    },
+    "model": {
+      "type": "object",
+      "description": "Application data model. Properties are IR metadata in Phase 1 (preview mocks only). Backed by firmware C symbols in Phase 2+ via clangd symbol discovery.",
+      "additionalProperties": false,
+      "properties": {
+        "properties": {
+          "type": "array",
+          "description": "Named application properties. Phase 1: metadata + preview defaults. Phase 2+: bound to firmware C symbols.",
+          "items": {
+            "type": "object",
+            "required": ["id", "type"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string", "minLength": 1, "description": "Unique property identifier. Used in bindings, actions, and derived expressions." },
+              "type": { "type": "string", "enum": ["float", "int", "bool", "string"], "description": "C-compatible data type." },
+              "default": { "description": "Default value used for preview mocks and generated init values." },
+              "min": { "type": "number", "description": "Minimum value (float/int only). Used for range validation and transforms." },
+              "max": { "type": "number", "description": "Maximum value (float/int only). Used for range validation and transforms." },
+              "direction": {
+                "type": "string",
+                "enum": ["push", "pull"],
+                "description": "Binding direction. push = firmware calls generated setter (ui_set_<id>). pull = generated code reads extern symbol via ui_bindings_apply(). Compiler determines codegen strategy from this field."
+              },
+              "symbol": {
+                "type": "string",
+                "description": "Phase 2+: C symbol path discovered via clangd (e.g. 'app_data.temp_c'). Must exist in firmwarePath compile_commands.json."
+              }
+            }
+          }
+        },
+        "derived": {
+          "type": "array",
+          "description": "Derived boolean conditions computed from properties. Generated as inline or cached C functions. No runtime storage. Separate from FSM states.",
+          "items": {
+            "type": "object",
+            "required": ["id", "expression"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string", "minLength": 1, "description": "Unique identifier. Referenced in visibility rules and action guards." },
+              "expression": { "type": "string", "description": "C expression string evaluated over property ids (e.g. 'temp_c > 80.0'). No side effects allowed." },
+              "cached": { "type": "boolean", "default": false, "description": "If true, generate a static variable updated in update_derived_states(). If false, generate an inline function." }
+            }
+          }
+        }
+      }
+    },
+    "state": {
+      "type": "object",
+      "description": "Application FSM (Finite State Machine). Controls coarse application modes. Strictly separate from derived state in model.derived.",
+      "additionalProperties": false,
+      "properties": {
+        "fsm": {
+          "type": "object",
+          "description": "Single application FSM. Generates app_state_t enum and set_state() transition function in ui_fsm.c.",
+          "required": ["states", "initial"],
+          "additionalProperties": false,
+          "properties": {
+            "states": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "string", "minLength": 1 },
+              "description": "Named state identifiers (e.g. ['idle','connecting','connected','alarm']). Generated as STATE_<ID> enum values."
+            },
+            "initial": { "type": "string", "description": "Initial state id. Must exist in states[]." }
+          }
+        }
+      }
+    },
+    "actions": {
+      "type": "array",
+      "description": "Compiled action sequences. Each entry declares a trigger and a typed instruction sequence. Compiler flattens sequence to one deterministic C function per trigger. No runtime interpreter.",
+      "items": {
+        "type": "object",
+        "required": ["id", "trigger", "sequence"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "description": "Unique action identifier. Generated function name: action_<id>()." },
+          "trigger": { "type": "string", "description": "Trigger descriptor. Format: '<widgetId>.<event>', 'state:<stateId>.enter', 'state:<stateId>.exit', 'timer:every:<ms>', 'timer:after:<ms>', 'extern:<name>'." },
+          "sequence": {
+            "type": "array",
+            "minItems": 1,
+            "description": "Ordered list of typed instruction nodes. Compiled to sequential C statements.",
+            "items": {
+              "type": "object",
+              "required": ["type"],
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": ["navigate", "set_property", "set_state", "call_function", "publish"],
+                  "description": "Instruction type. navigate: static LVGL screen load. set_property: assign value to property. set_state: FSM transition. call_function: call validated C symbol. publish: abstract protocol publish (Phase 4)."
+                },
+                "target": { "type": "string", "description": "For navigate: page id. For set_property: property id. For set_state: state id." },
+                "value": { "type": "string", "description": "For set_property: literal value or source expression (e.g. 'slider_brightness.value')." },
+                "name": { "type": "string", "description": "For call_function: C function symbol name. Must exist in clangd symbol graph (Phase 2+)." },
+                "topic": { "type": "string", "description": "For publish: protocol topic string." },
+                "animation": { "type": "string", "description": "For navigate: LVGL screen load animation (e.g. 'move_left', 'fade', 'none')." },
+                "duration": { "type": "integer", "minimum": 0, "description": "For navigate: animation duration in milliseconds." }
+              }
+            }
+          }
+        }
+      }
+    },
+    "protocol": {
+      "type": "array",
+      "description": "Phase 4: abstract protocol binding declarations. EmbeddedFlow generates embf_protocol.h interface only. Actual transport implementation is provided by firmware or optional platform adapters. No MQTT/BLE/Modbus code is generated in core output.",
+      "items": {
+        "type": "object",
+        "required": ["id", "direction", "topic", "propertyId"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "direction": { "type": "string", "enum": ["in", "out"], "description": "in = incoming message updates property. out = property change publishes to topic." },
+          "topic": { "type": "string", "description": "Protocol topic, characteristic id, or register address. Protocol-agnostic string." },
+          "propertyId": { "type": "string", "description": "Property id from model.properties[] to bind to." }
+        }
+      }
     }
   },
   "definitions": {

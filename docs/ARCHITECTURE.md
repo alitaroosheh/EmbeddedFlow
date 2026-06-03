@@ -1,139 +1,327 @@
-# EmbeddedFlow — Architecture (Target)
+# EmbeddedFlow — Architecture
 
-**Status:** Target architecture for planning  
+**Status:** Locked decisions (confirmed 2026-06-04)  
 **Companion:** [VISION.md](./VISION.md), [REQUIREMENTS.md](./REQUIREMENTS.md)
 
 ---
 
-## Layered model
+## System identity
 
-EmbeddedFlow follows a **Model – ViewModel – View** separation adapted for embedded C and LVGL.
+EmbeddedFlow is a **compile-time embedded UI dataflow compiler**, not a UI generator and not a runtime framework.
+
+The output is always **pure C** with **LVGL as the only dependency**. No interpreter, no runtime engine, no dynamic dispatch exists on the device.
+
+---
+
+## Compiler pipeline
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  Application / Firmware (developer-owned)                    │
-│  • Business logic  • Drivers  • Protocols  • Persistence       │
-│  • Model: structs, globals, APIs (wifi_scan, sensor_read)    │
-└───────────────────────────┬─────────────────────────────────┘
-                            │ read / write (typed)
-┌───────────────────────────▼─────────────────────────────────┐
-│  EmbeddedFlow framework (generated + small runtime)            │
-│  • Properties & state store                                  │
-│  • Binding engine / refresh policies                           │
-│  • Action dispatcher (UI + timer + bus events)                 │
-│  • Settings service                                          │
-│  • Navigation controller                                       │
-└───────────────────────────┬─────────────────────────────────┘
-                            │ LVGL API
-┌───────────────────────────▼─────────────────────────────────┐
-│  View (generated from .embf)                                   │
-│  • ui_*.c object trees  • styles  • assets                     │
-└─────────────────────────────────────────────────────────────┘
+.embf (single IR file)
+        │
+        ▼
+EmbeddedFlow Compiler (VS Code extension)
+        │
+        ├── clangd instance (Phase 2+)
+        │     owned by EmbeddedFlow, headless
+        │     pointed at firmware project via compile_commands.json
+        │     invisible to developer
+        │
+        ├── IR validation
+        │     schema check, binding direction analysis,
+        │     symbol type resolution, action sequence validation
+        │
+        └── Codegen
+              │
+              ├── ui_page_*.c / .h       LVGL object trees
+              ├── ui_styles.c / .h       named styles
+              ├── ui_bindings.c / .h     push setters + pull apply
+              ├── ui_fsm.c / .h          FSM enum + transitions + derived state
+              ├── ui_actions.c / .h      flattened action functions
+              ├── ui_nav.c / .h          static navigation calls
+              ├── embf_app.c / .h        orchestration glue
+              └── embf_protocol.h        transport interface (Phase 4)
 ```
 
-### View (today: largely implemented)
+---
 
-- Source: `.embf` → `pages[]`, `components[]`, `styles[]`, `events[]`, `flows[]`
-- Output: `ui_page_*.c`, `ui_styles.c`, assets
-- Preview: WASM runtime mirrors structure
+## IR file structure
 
-### ViewModel (today: partial)
+Single `.embf` file through Phase 1–3. Logical top-level sections; no physical split until scale forces it.
 
-- Source: `dataModel`, widget `bindings`, label `{{field}}`, event `actions`
-- Output today: `ui_bindings.c`, `ui_set_*`, `ui_bindings_apply()`
-- Target: full refresh graph, list repeaters, transforms, action handlers, navigation stack
+```json
+{
+  "version": "1.x",
+  "project": {},
+  "ui": {
+    "pages": [],
+    "styles": []
+  },
+  "model": {
+    "properties": [],
+    "derived": []
+  },
+  "state": {
+    "fsm": []
+  },
+  "actions": [],
+  "protocol": []
+}
+```
 
-### Model (today: developer-owned only)
+**Why single-file:** IR must be atomic. Cross-file dependency resolution, version mismatch, and fragmented semantic graphs are rejected. One IR → one deterministic compiled artifact.
 
-- Lives in firmware C; **not** duplicated inside `.embf` except mocks for preview
-- Target: symbol references from `.embf` to workspace C (clangd/LSP), typed paths, compile-time validation
+**When splitting is valid:** Only when IR size (`>10k lines` / `>500 bindings`) or team-scale collaboration forces it. Physical split always merges into one IR at compile time.
 
 ---
 
-## Data flow (target)
+## Data model
 
-### Read path (Model → UI)
+### Properties (`model.properties`)
 
-1. Firmware or mock updates a **property** (`app.temp_c = 24`).
-2. Framework marks dependents dirty (bindings referencing `temp_c`).
-3. ViewModel runs refresh (on load, timer, or event).
-4. LVGL widgets update (label text, bar value, visibility).
+Phase 1: pure IR metadata only. Name, type, default, optional min/max, direction hint.  
+Phase 2+: backed by firmware C symbols discovered via clangd.
 
-### Write path (UI → Model)
+```json
+{
+  "id": "temp_c",
+  "type": "float",
+  "default": 25.0,
+  "min": -40,
+  "max": 125,
+  "direction": "push"
+}
+```
 
-1. User interacts (slider, textarea, toggle).
-2. **Action** updates property or calls firmware hook (`ui_set_brightness` → `settings.brightness`).
-3. Optional **persist** action writes NVS/EEPROM via registered driver.
-4. Read path propagates side effects (other bound widgets).
+Properties are **never** generated as C variables in Phase 1. They exist only to drive preview mocks and prepare binding IR.
 
-Write paths must be **explicit** in v1 (no silent two-way binding everywhere).
+### Derived state (`model.derived`)
 
----
+Pure computed expressions over properties. No storage, no transitions. Generated as inline or cached C functions.
 
-## Declarative project surface (evolving `.embf`)
+```json
+{
+  "id": "is_alarm",
+  "expression": "temp_c > 80.0"
+}
+```
 
-Current and planned declarative sections:
-
-| Section | Status | Purpose |
-|---------|--------|---------|
-| `pages` / widgets | Implemented | View layout |
-| `styles`, `theme` | Implemented | Visual chrome |
-| `dataModel.fields` | Partial | App properties (preview defaults) |
-| Widget `bindings` | Partial | Numeric `value` → field |
-| Label `{{field}}` | Partial | Text binding |
-| `events` / `actions` | Partial | navigate, set_value, set_text, set_theme |
-| `properties` (typed, sources) | Planned | Symbol-backed model |
-| `states` / `visibility` | Planned | Derived UI rules |
-| `settings` schema | Planned | Keys, types, storage backend id |
-| `repeaters` / list templates | Planned | WiFi list, log viewers |
-| `transforms` | Planned | RSSI→bars, enum→icon |
-| `refreshPolicies` | Planned | on_load, timer, on_event |
-| `commBindings` | Planned | MQTT topic → property |
-| `navigation` stack | Planned | Beyond single-shot navigate |
-
-Detailed binding requirements: [wiki/19-code-binding-and-data-model.md](../wiki/19-code-binding-and-data-model.md).
+Generated C:
+```c
+static inline bool is_alarm(float temp_c) { return temp_c > 80.0f; }
+// or cached:
+static bool is_alarm;
+void update_derived_states(void) { is_alarm = (app_data.temp_c > 80.0f); }
+```
 
 ---
 
-## Codegen vs runtime
+## State machine (`state.fsm`)
 
-| Approach | Use |
-|----------|-----|
-| **Codegen-first** | Default: bindings compile to straight C, minimal RAM |
-| **Thin runtime library** | Optional shared `embf_runtime.h` for navigation stack, property store, refresh scheduler |
-| **No interpreter** | No Lua/JS on device; no reflection |
+Named application modes. Enum + transition functions in generated C. No state engine.
 
-Preview uses **mocks** and WASM — not firmware symbols at runtime.
+```json
+{
+  "states": ["idle", "connecting", "connected", "alarm"],
+  "initial": "idle"
+}
+```
+
+Generated C:
+```c
+typedef enum { STATE_IDLE, STATE_CONNECTING, STATE_CONNECTED, STATE_ALARM } app_state_t;
+static app_state_t app_state = STATE_IDLE;
+
+void set_state(app_state_t s) {
+    app_state = s;
+    switch (app_state) { /* dispatch ui_show_* calls */ }
+}
+```
+
+**FSM vs Derived — strict separation:**
+- FSM controls *what mode the system is in*
+- Derived state controls *how UI behaves inside that mode*
+- These two layers must never be merged
 
 ---
 
-## Decision filter (mandatory for reviews)
+## Binding (code mapping)
 
-Before merging a feature, answer:
+Binding direction is a **compiler concern**, not a developer choice. The IR `direction` field determines generated strategy.
 
-1. **Framework vs designer?** Does it only help draw screens?
-2. **Declarative?** Does it reduce hand-written `lv_*_set_*` in application code?
-3. **Coupling?** Does UI stay ignorant of business logic details (only bindings)?
-4. **Embedded-fit?** Flash/RAM predictable? No desktop-only assumptions?
-5. **Incremental?** Can adopters use one screen or one binding without migrating entire app?
+### Push (firmware-driven)
+```json
+{ "source": "app_data.temp_c", "target": "lbl_temp.text", "direction": "push" }
+```
+```c
+void ui_set_temp_c(float value) {
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%.1f", value);
+    lv_label_set_text(ui_lbl_temp, buf);
+}
+```
+Firmware calls `ui_set_temp_c(sensor.temp)`. No extern, no polling.
 
-Reject or defer items that fail (1) unless they unblock a strategic pillar.
+### Pull (state-driven refresh)
+```json
+{ "source": "app_data.temp_c", "target": "lbl_temp.text", "direction": "pull" }
+```
+```c
+extern float app_data_temp_c;
+void ui_bindings_apply(void) {
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%.1f", app_data_temp_c);
+    lv_label_set_text(ui_lbl_temp, buf);
+}
+```
+Called from `embf_app_tick()` on each refresh cycle.
 
 ---
 
-## Non-goals (framework v1)
+## Actions (`actions`)
 
-- General scripting runtime on MCU
+Actions are typed IR instruction nodes compiled to flat C functions. Sequential composition is allowed in IR; the compiler flattens it to one function per trigger.
+
+```json
+{
+  "trigger": "button_save.clicked",
+  "sequence": [
+    { "type": "set_property", "target": "settings.brightness", "value": "slider_brightness.value" },
+    { "type": "call_function", "name": "nvs_save_settings" },
+    { "type": "navigate", "target": "page_home" }
+  ]
+}
+```
+
+Generated C:
+```c
+void action_button_save_clicked(void) {
+    settings.brightness = lv_slider_get_value(ui_slider_brightness);
+    nvs_save_settings();
+    ui_navigate_to_page_home();
+}
+```
+
+**Valid action types:** `navigate`, `set_property`, `set_state`, `call_function`, `publish` (Phase 4 abstract only)  
+**Valid triggers:** widget events, FSM entry/exit, timer (`every`, `after`), external events (Phase 4)  
+**Forbidden:** runtime interpreter, dynamic dispatch, scripting, reflection
+
+---
+
+## Navigation
+
+Navigation graph is an **integrated overlay** on the page designer — same IR nodes (pages), second visual layer showing edges (transitions). Not a separate canvas.
+
+Phase 1–3 generates static LVGL calls only:
+```c
+void ui_navigate_to_page_settings(void) {
+    lv_scr_load_anim(ui_page_settings, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+}
+```
+
+No navigation stack, no router, no history in Phase 1–3. Navigation stack is a Phase 3+ concern.
+
+---
+
+## Protocol bindings (`protocol`)
+
+EmbeddedFlow owns the **abstraction contract only** — never a protocol stack.
+
+Generated interface:
+```c
+// embf_protocol.h — generated
+typedef void (*embf_publish_fn)(const char *topic, const char *payload);
+typedef void (*embf_subscribe_fn)(const char *topic);
+
+extern embf_publish_fn embf_publish;
+extern embf_subscribe_fn embf_subscribe;
+```
+
+Firmware implements an adapter once per platform and wires it:
+```c
+embf_publish = my_mqtt_publish;   // developer-provided
+```
+
+Optional platform adapters (ESP-IDF MQTT, Zephyr BLE, etc.) ship as separate sidecar files — not part of core codegen.
+
+---
+
+## Generated orchestration layer (`embf_app`)
+
+Thin deterministic wiring layer. Guarantees initialization order, update sequencing, and lifecycle consistency. Fully generated, zero runtime logic.
+
+```c
+// embf_app.c — generated
+void embf_app_init(void) {
+    ui_init();
+    ui_styles_init();
+    state_init();
+    ui_bindings_init();
+    actions_init();
+}
+
+void embf_app_tick(void) {
+    update_derived_states();
+    ui_bindings_apply();
+    process_timers();
+}
+
+void embf_dispatch_event(ui_event_t *e) {
+    switch (e->id) { /* generated action calls */ }
+}
+```
+
+---
+
+## Symbol discovery (Phase 2)
+
+EmbeddedFlow spawns a **dedicated clangd instance** per firmware project. The firmware project path is configured in the `.embf` project section. clangd is treated as a headless analysis backend:
+
+```
+.embf project path
+    └── firmware_root / compile_commands.json
+              ↓
+        clangd (owned by EmbeddedFlow)
+              ↓
+        LSP symbol queries (globals, struct members, functions)
+              ↓
+        IR Symbol Graph → binding picker + type validation
+```
+
+Binding UX: **tree picker** (primary, for discovery) + **IntelliSense autocomplete** (advanced, for speed). Both resolve to the same IR binding object.
+
+---
+
+## Decision filter (mandatory for all PRs)
+
+1. **Compiler or designer?** Does it only help draw screens?
+2. **Declarative?** Does it reduce hand-written `lv_*_set_*` in firmware?
+3. **Compile-time?** Is it resolved at codegen, not at runtime?
+4. **Embedded-fit?** Flash/RAM predictable? No heap, no interpreter?
+5. **Incremental?** Can adopters use one screen without migrating entire app?
+
+Reject or defer items that fail (3) or (4) regardless of other merits.
+
+---
+
+## Hard constraints — never violated
+
+| Constraint | Rule |
+|-----------|------|
+| Output language | Pure C only |
+| External dependency | LVGL only in generated code |
+| Interpreter | None — ever |
+| Runtime dynamic dispatch | None |
+| IR compilation | One IR → one deterministic artifact |
+| clangd | Headless tool, invisible to developer |
+| Protocol stacks | Owned by firmware, never by EmbeddedFlow |
+
+---
+
+## Non-goals
+
 - Replacing LVGL with a custom renderer
-- Full visual logic editor (Blockly) — actions stay declarative JSON
-- Auto-generating entire driver stacks (WiFi, MQTT clients remain user code)
-- GDB/live RAM attach in preview (mocks first)
-
----
-
-## Integration with developer workflow
-
-- **IDE:** VS Code / Cursor extension (design, preview, lint, codegen)
-- **Firmware:** Generated files merged into ESP-IDF, Zephyr, CMake, etc.
-- **Symbols:** C/C++ extension + clangd for pickers and validation
-- **Versioning:** `.embf` schema versioned; codegen banner warns on regen
+- General scripting runtime on MCU (Lua, JS, Python)
+- Full visual logic editor (Blockly-style)
+- Auto-generating driver stacks (WiFi, MQTT clients, BLE profiles)
+- GDB / live RAM attach in preview
+- Navigation runtime stack in Phase 1–2

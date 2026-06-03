@@ -1,135 +1,136 @@
 # EmbeddedFlow — Vision
 
-**Status:** Product direction (pre-release planning)  
-**Audience:** Maintainers, contributors, and partners evaluating scope before public release.
+**Status:** Locked (confirmed 2026-06-04)  
+**Companion:** [ARCHITECTURE.md](./ARCHITECTURE.md), [REQUIREMENTS.md](./REQUIREMENTS.md), [ROADMAP.md](./ROADMAP.md)
 
 ---
 
-## Positioning
+## System identity
 
-EmbeddedFlow is **not** intended to be another LVGL UI designer.
+> **EmbeddedFlow is a compile-time embedded UI dataflow compiler.**
 
-The long-term vision is to become a **complete application framework for embedded graphical devices** — comparable in role to what **Flutter**, **React**, **WPF**, and **Qt** provide for desktop and mobile, but engineered for **MCU constraints**, **LVGL**, and **firmware workflows**.
+It is not another LVGL screen designer.  
+It is not a runtime framework.  
+It is not "Flutter for embedded" — there is no rendering engine, no widget reconciler, no virtual tree.
 
-Today, most embedded UI tools focus on:
-
-- Drawing screens
-- Placing widgets
-- Generating LVGL object trees
-
-That solves the **visual design** problem. It leaves developers with large amounts of manual work for:
-
-- State management
-- Data synchronization between UI and firmware
-- Event handling beyond simple navigation
-- Device settings and persistence
-- Communication (MQTT, BLE, Modbus, CAN, etc.)
-- Business logic integration
-
-**EmbeddedFlow aims to close this gap.**
+It is a **compiler**: takes a declarative `.embf` IR as input, produces deterministic pure C as output, with LVGL as the only dependency.
 
 ---
 
-## North star
+## The problem it solves
 
-> **EmbeddedFlow should become the “Flutter for embedded systems” — not another screen designer.**
+Every modern UI platform (React, Flutter, WPF, Qt) separates **what the UI represents** from **how it updates**. Developers declare bindings and state; the platform handles synchronization.
 
-Every architectural decision should be evaluated with:
-
-> **Does this move EmbeddedFlow closer to a complete embedded application framework, or does it only improve the screen designer?**
-
-| Priority | Focus |
-|----------|--------|
-| **Strategic** | Reducing application complexity, state-management complexity, and UI–business-logic coupling |
-| **Secondary** | Features that only improve drawing screens |
-
----
-
-## Paradigm shift
-
-Move embedded UI development from **imperative widget manipulation** to a **declarative, data-driven architecture**.
-
-Developers describe **what the UI represents**, not **how every widget is updated**.
-
-### Today (imperative — what we replace)
+Embedded UI has no equivalent. LVGL developers write:
 
 ```c
-/* Firmware scattered across modules */
-void on_mqtt_message(...) {
-    sensor.temp_c = parse_temp(payload);
+void on_sensor_update(float temp, float hum) {
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%.1f °C", temp);
     lv_label_set_text(lbl_temp, buf);
-    lv_bar_set_value(bar_hum, sensor.humidity, LV_ANIM_OFF);
-    if (settings.dark_mode)
-        lv_obj_add_flag(panel_adv, LV_OBJ_FLAG_HIDDEN);
-    ...
+    lv_bar_set_value(bar_hum, (int)hum, LV_ANIM_OFF);
+    if (temp > 80.0f)
+        lv_obj_clear_flag(panel_alarm, LV_OBJ_FLAG_HIDDEN);
+    else
+        lv_obj_add_flag(panel_alarm, LV_OBJ_FLAG_HIDDEN);
+    // ... 20 more lines
 }
 ```
 
-### Target (declarative — what EmbeddedFlow owns)
+This code is:
+- **Manually written** for every sensor, every widget, every screen
+- **Tightly coupled** — firmware knows widget IDs
+- **Fragile** — changing a widget name breaks firmware
+- **Unscalable** — every new property requires new glue code
 
-- **Properties** — `temp_c`, `humidity`, `wifi_connected`, `device_name`
-- **States** — `connecting`, `alarm`, `settings.dirty`
-- **Bindings** — widgets bound to properties with optional transforms
-- **Actions** — events trigger named actions (navigate, set property, persist settings, publish MQTT)
-- **Codegen + optional runtime** — framework applies changes; firmware updates the model only
-
----
-
-## Target developer experience
-
-1. **Design** screens visually (pages, widgets, styles, navigation).
-2. **Define** application properties, states, and settings schemas.
-3. **Bind** widgets to data sources (globals, struct fields, driver APIs, bus topics).
-4. **Connect** actions to events (input, timers, protocol messages).
-5. **Generate and run** — preview in VS Code; build firmware without hand-written widget sync for common cases.
-
-**Success criterion:** For typical HMI use cases (gauges, labels, lists, settings screens, status visibility), **no manual per-widget LVGL update code** is required.
+EmbeddedFlow eliminates this class of code.
 
 ---
 
-## Framework pillars (target architecture)
+## The compiler model
 
-| Pillar | Role |
-|--------|------|
-| **Visual UI designer** | `.embf` project: pages, widgets, styles, layouts — the **View** |
-| **Declarative data binding** | Model properties ↔ widget properties (read/write policies) |
-| **State management** | Application state machines, derived state, visibility rules |
-| **ViewModel generation** | Generated glue that applies bindings (today: partial `ui_bindings.c`) |
-| **Event system** | Unified events: UI, timer, protocol, hardware — not only `clicked` |
-| **Navigation framework** | Stack, tabs, modals, deep links — beyond one-off `navigate` |
-| **Settings framework** | Typed settings, defaults, persistence hooks, settings UI binding |
-| **Device communication bindings** | Map MQTT/BLE/Modbus/CAN (etc.) into properties and actions |
-| **Code generation** | LVGL 8/9 C output aligned with project and target SDK |
-| **Live preview** | WASM preview reflects bindings, mocks, and navigation |
-| **Runtime synchronization** | On device: efficient refresh policies without full desktop-style overhead |
+### Input — `.embf` IR (single file)
 
-See [ARCHITECTURE.md](./ARCHITECTURE.md) and [REQUIREMENTS.md](./REQUIREMENTS.md) for detail.
+Declares:
+- Pages and widgets (View)
+- Properties and derived conditions (Model metadata)
+- Application states (FSM)
+- Binding direction per property (push or pull)
+- Action sequences per trigger
+- Protocol binding declarations
+
+### Output — deterministic pure C
+
+```
+ui_page_*.c          LVGL object trees
+ui_styles.c          named styles
+ui_bindings.c        push setters + pull apply functions
+ui_fsm.c             FSM enum + transition + derived state functions
+ui_actions.c         compiled action functions (one per trigger)
+ui_nav.c             static navigation calls
+embf_app.c           orchestration glue (init, tick, dispatch)
+embf_protocol.h      transport interface (Phase 4)
+```
+
+All composition in the IR flattens at compile time. The MCU sees only plain functions and enums. No interpreter, no reflection, no dynamic dispatch.
 
 ---
 
-## Relationship to LVGL
+## The target developer experience
 
-LVGL is the **primary rendering engine** for v1. The framework layer sits **above** LVGL:
+**Before EmbeddedFlow (today):**
 
-- **View** → LVGL widgets (generated `ui_*.c`)
-- **ViewModel** → generated update/refresh logic
-- **Model** → developer-owned C (structs, drivers, protocols)
+1. Draw UI manually with LVGL calls
+2. Write update code for every widget
+3. Wire events to callbacks by hand
+4. Manage navigation manually
+5. Debug state sync bugs
 
-A future abstraction over multiple renderers is **out of scope** until the declarative stack is proven on LVGL.
+**With EmbeddedFlow (target):**
+
+1. Design screens visually
+2. Declare properties and states in the designer
+3. Bind widgets to properties (picker + validation)
+4. Declare action sequences for events
+5. Run codegen — firmware calls `embf_app_init()` + `embf_app_tick()`
+
+**For common HMI use cases, no manual per-widget LVGL update code is required.**
+
+---
+
+## Architectural boundaries (non-negotiable)
+
+| Boundary | Rule |
+|----------|------|
+| Output | Pure C, LVGL only |
+| Runtime | None — everything resolves at compile time |
+| Protocol stacks | Owned by firmware; EmbeddedFlow defines interface contract only |
+| Interpreter | Never — not Lua, not JS, not bytecode |
+| Symbol discovery | clangd, owned by EmbeddedFlow, headless, not user-visible |
+| IR file | Single `.embf` through Phase 1–3; split only when scale forces it |
 
 ---
 
 ## What v1.1.x is (honest scope)
 
-The current VSIX is a **strong screen designer** with **early binding primitives**:
+The current VSIX is a **strong LVGL screen designer** with **early binding primitives**. It is a valid foundation release, not the complete compiler vision.
 
-- Visual editor, preview, codegen, navigation, animations
-- `dataModel.fields[]`, `{{field}}` labels, numeric widget bindings
-- Partial `ui_bindings.c` / setters
+**Implemented:** Visual editor, preview, codegen, navigation, styles, animations, `dataModel` + `{{field}}` + numeric bindings.  
+**Not yet implemented:** Symbol-backed properties, FSM, action system, generated framework, protocol interface.
 
-It is a **foundation release**, not the full framework. Marketing and roadmap should not overclaim “complete Flutter for MCU” until pillars beyond the designer are delivered in sequence.
+---
 
-See [ROADMAP.md](./ROADMAP.md).
+## Phased delivery summary
+
+| Phase | Identity |
+|-------|---------|
+| 0 (v1.1.x) | Screen designer + binding prototype (current) |
+| 1 (v1.2) | Navigation Graph overlay + Property System in IR |
+| 2 (v1.3) | Symbol Discovery + Binding (push/pull compiler) |
+| 3 (v2.0) | State + Actions + Generated Framework |
+| 4 (v2.x) | Protocol Bindings + Adapter ecosystem |
+
+See [ROADMAP.md](./ROADMAP.md) for exit criteria per phase.
 
 ---
 
@@ -137,8 +138,8 @@ See [ROADMAP.md](./ROADMAP.md).
 
 | Document | Purpose |
 |----------|---------|
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | Layers, data flow, decision filter |
-| [REQUIREMENTS.md](./REQUIREMENTS.md) | Functional requirements by pillar |
-| [ROADMAP.md](./ROADMAP.md) | Phased delivery |
-| [OPEN_QUESTIONS.md](./OPEN_QUESTIONS.md) | Planning decisions still open |
-| [../wiki/19-code-binding-and-data-model.md](../wiki/19-code-binding-and-data-model.md) | Detailed binding PRD (Phase 2+) |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | Compiler pipeline, data flow, all locked decisions |
+| [REQUIREMENTS.md](./REQUIREMENTS.md) | Requirements by phase and pillar |
+| [ROADMAP.md](./ROADMAP.md) | Phases, exit criteria, version strategy |
+| [OPEN_QUESTIONS.md](./OPEN_QUESTIONS.md) | Remaining decisions |
+| [../wiki/19-code-binding-and-data-model.md](../wiki/19-code-binding-and-data-model.md) | Detailed binding PRD |

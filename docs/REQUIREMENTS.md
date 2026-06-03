@@ -1,159 +1,137 @@
 # EmbeddedFlow — Framework Requirements
 
-**Status:** Planning requirements (pre-release)  
+**Status:** Locked decisions (confirmed 2026-06-04)  
 **Companion:** [VISION.md](./VISION.md), [ROADMAP.md](./ROADMAP.md)
 
-Requirements are grouped by pillar. Each item is tagged:
+Requirements grouped by phase and pillar. Check the box when a requirement is fully implemented and tested.
 
-- **P0** — Required for “framework credibility” (not just designer)
-- **P1** — Important next wave
-- **P2** — Strategic, later phase
-
-**Current VSIX** satisfies mostly **View** and early **ViewModel** items marked `[today]`.
+- `[x]` — done (in current VSIX v1.1.x)
+- `[ ]` — not yet implemented
 
 ---
 
-## 1. Visual UI designer
+## Phase 1 — UI Designer + Navigation Graph + Property System
 
-| ID | Priority | Requirement | Notes |
-|----|----------|-------------|-------|
-| V1 | [today] | Multi-page projects, widget palette, inspector | Core editor |
-| V2 | [today] | Live WASM preview, design/run modes | |
-| V3 | [today] | Styles, themes, animations, groups | |
-| V4 | P1 | Flex/grid layout authoring with codegen | Reduce manual x/y |
-| V5 | P2 | Component library across projects | Reuse patterns |
+### Visual UI designer
 
-*Designer-only items are necessary but not sufficient for vision.*
+- [x] **V1** Multi-page projects, widget palette, inspector
+- [x] **V2** Live WASM preview, design/run modes
+- [x] **V3** Styles, themes, animations, groups
+- [ ] **V4** Navigation Graph overlay on page designer — same IR, edges = navigation transitions
+- [ ] **V5** Flex/grid layout authoring with codegen
 
----
+### Navigation Graph
 
-## 2. Declarative data binding
+- [x] **N1** Page navigate with LVGL transitions (static calls)
+- [x] **N2** Page swipe flows
+- [ ] **N3** Visual overlay on designer: nodes = pages, edges = transitions with animation + trigger metadata
+- [ ] **N4** Navigation edges stored in IR — compiler generates `ui_navigate_to_*()` static functions
+- [ ] **N5** Navigation stack (push/pop/back) *(Phase 3)*
 
-| ID | Priority | Requirement | Notes |
-|----|----------|-------------|-------|
-| B1 | [today] | `dataModel.fields[]` with types and defaults | Preview + init |
-| B2 | [today] | Label `{{field}}` → generated format/apply | |
-| B3 | [today] | Slider/bar/arc/knob `bindings.value` | |
-| B4 | [today] | `ui_set_*` + `ui_bindings_apply()` on device | |
-| B5 | P0 | Bind to **workspace C symbols** (globals, struct members) | Not only inline defaults |
-| B6 | P0 | Inspector: pick symbol with validation (LSP/clangd) | See wiki/19 |
-| B7 | P0 | **Transforms** (range map, format string, enum→resource) | RSSI bars, units |
-| B8 | P1 | **Visibility binding** (`visible when property/state`) | Replace manual HIDDEN |
-| B9 | P1 | **List repeaters** (template row × array/API) | WiFi scans, logs |
-| B10 | P1 | Explicit **write** bindings (slider → property) | |
-| B11 | P2 | Refresh policies: timer, on_event, manual | |
+Navigation graph generates **only static LVGL calls** in Phase 1. No router, no stack.
+
+### Property System *(IR metadata only in Phase 1)*
+
+- [ ] **PR1** `model.properties[]` in `.embf`: id, type, default, min, max, direction hint
+- [ ] **PR2** Properties used for preview mocks only — zero codegen in Phase 1
+- [ ] **PR3** Inspector: add/edit/delete properties
+- [ ] **PR4** Preview substitutes property defaults into bound widgets
 
 ---
 
-## 3. State management
+## Phase 2 — Symbol Discovery + Binding
 
-| ID | Priority | Requirement | Notes |
-|----|----------|-------------|-------|
-| S1 | P0 | Named **application states** (enum or flags) in project | `connecting`, `fault` |
-| S2 | P0 | Widget/page rules: show/hide/enable from state | Declarative |
-| S3 | P1 | Derived properties (expressions without full scripting) | e.g. `temp_f = celsius_to_f(temp_c)` |
-| S4 | P2 | Optional state machine editor | |
+### Symbol discovery
 
----
+- [ ] **SD1** EmbeddedFlow spawns dedicated clangd instance per project
+- [ ] **SD2** Firmware project path configured in `.embf` `project.firmwarePath`
+- [ ] **SD3** clangd pointed at `compile_commands.json` — headless, no user IDE dependency
+- [ ] **SD4** LSP queries: globals, struct members, function signatures
+- [ ] **SD5** Symbol graph built and cached per session
 
-## 4. ViewModel generation
+### Binding UX
 
-| ID | Priority | Requirement | Notes |
-|----|----------|-------------|-------|
-| VM1 | [today] | Per-field setters calling `ui_bindings_apply()` | |
-| VM2 | P0 | Single **refresh entry** (`ui_refresh_all` / dirty flags) | |
-| VM3 | P0 | Generated code only touches bound widgets | No full-tree walk |
-| VM4 | P1 | Per-page refresh scopes | Performance |
-| VM5 | P1 | Generated action stubs from event table | |
+- [ ] **BU1** Tree picker: widget → "Bind Data" → browse symbol tree
+- [ ] **BU2** IntelliSense autocomplete for manual symbol path entry
+- [ ] **BU3** Both UIs resolve to the same IR binding object
+- [ ] **BU4** Type validation at bind time (e.g. float symbol → float property)
 
----
+### Code mapping
 
-## 5. Event system
-
-| ID | Priority | Requirement | Notes |
-|----|----------|-------------|-------|
-| E1 | [today] | Widget events: click, value_changed | |
-| E2 | [today] | Actions: navigate, set_value, set_text, set_theme | |
-| E3 | P0 | **Named actions** reusable across widgets | `action: "save_settings"` |
-| E4 | P1 | **Timer events** in project (periodic refresh) | |
-| E5 | P1 | **External events** hook (firmware calls `ui_on_mqtt(...)`) | |
-| E6 | P2 | Action parameters and guards (if state == X) | |
+- [ ] **CM1** Binding `direction` field in IR: `push` or `pull`
+- [ ] **CM2** `push` → generate `ui_set_<id>(T value)` setter function
+- [ ] **CM3** `pull` → generate `extern T symbol` + `ui_bindings_apply()` entry
+- [ ] **CM4** Direction determined by IR — developer does not choose per-binding manually
+- [ ] **CM5** Transforms: range map, format string, enum→resource
+- [ ] **CM6** Visibility binding: `visible when property/state` *(Phase 3)*
 
 ---
 
-## 6. Navigation framework
+## Phase 3 — State + Actions + Generated Framework
 
-| ID | Priority | Requirement | Notes |
-|----|----------|-------------|-------|
-| N1 | [today] | Page navigate with LVGL transitions | |
-| N2 | [today] | Page swipe flows | |
-| N3 | P0 | **Navigation stack** (push/pop/replace) | Back button |
-| N4 | P1 | Pass parameters to next screen (context struct) | |
-| N5 | P2 | Tab/bar navigation patterns | |
+### State — FSM
 
----
+- [ ] **SF1** `state.fsm` in `.embf`: named states, initial state
+- [ ] **SF2** Generate `app_state_t` enum + `set_state()` transition function in `ui_fsm.c`
+- [ ] **SF3** State entry/exit triggers actions (IR-declared)
+- [ ] **SF4** FSM and derived state are strictly separate layers — never merged
 
-## 7. Settings framework
+### State — Derived
 
-| ID | Priority | Requirement | Notes |
-|----|----------|-------------|-------|
-| ST1 | P1 | `settings` schema in `.embf` (keys, types, defaults) | |
-| ST2 | P1 | Bind settings screen widgets to schema | |
-| ST3 | P1 | **Persistence adapter** interface in generated code | NVS, EEPROM, file |
-| ST4 | P2 | Settings validation and migration | |
+- [ ] **DV1** `model.derived[]` in `.embf`: id + C expression string
+- [ ] **DV2** Generate inline function (no storage) or cached variable updated in `update_derived_states()`
+- [ ] **DV3** Derived state referenced in visibility rules and action guards
 
----
+### Actions
 
-## 8. Device communication bindings
+- [x] **A1** `navigate` action (static call)
+- [x] **A2** `set_value`, `set_text`, `set_theme` actions
+- [ ] **A3** `actions[]` top-level in `.embf`: trigger + typed instruction sequence
+- [ ] **A4** Action types: `navigate`, `set_property`, `set_state`, `call_function`
+- [ ] **A5** Triggers: widget events, FSM entry/exit, timer (`every:<ms>`, `after:<ms>`)
+- [ ] **A6** Sequential composition in IR — flattened to one C function per trigger at compile time
+- [ ] **A7** `call_function`: symbol validated against clangd symbol graph
+- [ ] **A8** `publish` action type defined in IR (Phase 4 implements transport)
 
-| ID | Priority | Requirement | Notes |
-|----|----------|-------------|-------|
-| C1 | P1 | Declarative **comm sources** (MQTT topic, BLE char, Modbus reg) | |
-| C2 | P1 | Incoming message → update property → UI refresh | |
-| C3 | P2 | Outgoing: action publishes to topic | |
-| C4 | P2 | Protocol-specific assistants in IDE | |
+**Constraint:** no runtime interpreter, no dynamic dispatch, no scripting, no reflection — in any action context.
 
-*Firmware still owns stacks; EmbeddedFlow wires data plane to properties.*
+### Generated Framework
 
----
-
-## 9. Code generation
-
-| ID | Priority | Requirement | Notes |
-|----|----------|-------------|-------|
-| G1 | [today] | LVGL 8/9 C, per-page files, `ui_bindings` | |
-| G2 | [today] | `LV_SCR_LOAD_ANIM_*`, screen load order | |
-| G3 | P0 | Stable **public generated API** (`ui_init`, setters, refresh) | Documented |
-| G4 | P1 | CMake/IDF export templates | |
-| G5 | P1 | Diff-friendly codegen (minimal churn) | |
+- [ ] **GF1** Generate `embf_app.c` / `embf_app.h` as orchestration glue
+- [ ] **GF2** `embf_app_init()`: calls `ui_init`, `ui_styles_init`, `state_init`, `ui_bindings_init`, `actions_init` in correct order
+- [ ] **GF3** `embf_app_tick()`: calls `update_derived_states`, `ui_bindings_apply`, `process_timers`
+- [ ] **GF4** `embf_dispatch_event(ui_event_t *)`: routes events to compiled action functions
+- [ ] **GF5** Generated framework contains zero runtime logic — deterministic wiring only
 
 ---
 
-## 10. Live preview
+## Phase 4 — Protocol Bindings
 
-| ID | Priority | Requirement | Notes |
-|----|----------|-------------|-------|
-| P1 | [today] | WASM LVGL preview | |
-| P2 | [today] | Run mode: navigation, buttons | |
-| P3 | P0 | Preview honors **same binding rules** as firmware | |
-| P4 | P1 | Mock profiles (sensor scenarios) | |
-| P5 | P1 | Edit property mocks in inspector → live update | |
+### Interface contract
 
----
+- [ ] **PC1** `protocol[]` in `.embf`: abstract direction + topic + propertyId binding declarations
+- [ ] **PC2** Generate `embf_protocol.h`: `embf_publish_fn` and `embf_subscribe_fn` typedefs + extern pointers
+- [ ] **PC3** EmbeddedFlow owns interface definition only — never generates a protocol stack
+- [ ] **PC4** Firmware wires adapter once: `embf_publish = my_mqtt_publish`
+- [ ] **PC5** Core generated code compiles and links without any adapter present
 
-## 11. Runtime synchronization (on device)
+### Adapter ecosystem
 
-| ID | Priority | Requirement | Notes |
-|----|----------|-------------|-------|
-| R1 | P0 | No dynamic allocation in default refresh path | |
-| R2 | P1 | Configurable refresh rate / coalesce | |
-| R3 | P2 | Optional LVGL observer integration (v9) | |
+- [ ] **PA1** Optional sidecar adapter for ESP-IDF MQTT
+- [ ] **PA2** Optional sidecar adapter for Zephyr BLE / networking
+- [ ] **PA3** Optional sidecar adapter for Modbus
+- [ ] **PA4** Adapters are not part of core codegen — separate distribution
 
 ---
 
-## Success metrics (framework release)
+## Hard constraints (all phases)
 
-- Sample app (e.g. station + settings) updates **only via properties** — no hand-written label updates in app code.
-- New screen added by editing `.embf` + model fields only.
-- Third-party example: WiFi list from C array via repeater binding.
-- Documentation reads as **framework**, not “EEZ-like designer”.
+These are non-negotiable at every phase. No PR may violate them.
+
+- [x] Output language: pure C only
+- [x] External dependency in generated code: LVGL only
+- [x] No runtime interpreter — ever
+- [x] No dynamic dispatch on device
+- [x] One IR → one deterministic compiled artifact
+- [x] clangd: headless, EmbeddedFlow-owned, never user-visible *(enforced from Phase 2)*
+- [x] Protocol stacks: firmware-owned; EmbeddedFlow defines interface only *(enforced from Phase 4)*

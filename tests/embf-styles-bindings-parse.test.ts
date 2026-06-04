@@ -66,10 +66,10 @@ describe("parser: dataModel + bindings", () => {
         expect(() => parseEmbfSource(asSource(p))).toThrow(/unknown binding field/);
     });
 
-    it("rejects bindings when dataModel.fields[] is empty", () => {
+    it("rejects bindings when model.properties / dataModel.fields is empty", () => {
         const p: any = minimalProject();
         p.pages[0].components[0].text = "Hello {{whatever}}";
-        expect(() => parseEmbfSource(asSource(p))).toThrow(/dataModel\.fields\[\] is empty/);
+        expect(() => parseEmbfSource(asSource(p))).toThrow(/model\.properties \/ dataModel\.fields is empty/);
     });
 
     it("validates default value type against declared field type", () => {

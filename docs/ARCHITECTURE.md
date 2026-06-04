@@ -39,7 +39,11 @@ EmbeddedFlow Compiler (VS Code extension)
               ├── ui_actions.c / .h      flattened action functions
               ├── ui_nav.c / .h          static navigation calls
               ├── embf_app.c / .h        orchestration glue
-              └── embf_protocol.h        transport interface (Phase 4)
+              ├── embf_protocol.h        transport interface (Phase 4)
+              ├── ui_strings_ids.h       string key X-Macro list
+              ├── ui_strings_<locale>.def per-locale X(UI_STR_*, "…") list
+              ├── ui_strings.h / .c      enum + ui_get_string() table (X-Macro)
+              └── ui_page_*.c            labels use ui_get_string(UI_STR_*)
 ```
 
 ---
@@ -51,7 +55,9 @@ Single `.embf` file through Phase 1–3. Logical top-level sections; no physical
 ```json
 {
   "version": "1.x",
-  "project": {},
+  "project": {
+    "stringsPath": "i18n/strings.res"
+  },
   "ui": {
     "pages": [],
     "styles": []
@@ -67,6 +73,8 @@ Single `.embf` file through Phase 1–3. Logical top-level sections; no physical
   "protocol": []
 }
 ```
+
+**String resources (`.res` file):** Translations live in `i18n/strings.res` (or `project.stringsPath`; **`.res` extension required**). The extension provides a **table editor** (keys × locales). Codegen emits **X-Macro** artifacts (`ui_strings_ids.h`, `ui_strings_<locale>.def`, `ui_strings.c`) so enum ids and `const char *` tables stay in sync; widgets call `ui_get_string(UI_STR_<key>)`. No `.res` parser on device. See [REQUIREMENTS.md](./REQUIREMENTS.md) § Internationalization.
 
 **Why single-file:** IR must be atomic. Cross-file dependency resolution, version mismatch, and fragmented semantic graphs are rejected. One IR → one deterministic compiled artifact.
 

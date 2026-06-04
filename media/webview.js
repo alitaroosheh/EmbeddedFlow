@@ -118,7 +118,7 @@ const SIDEBAR_PANEL_LABELS = {
     settings: "Settings",
     flow: "Flow"
 };
-const SIDEBAR_PANEL_WIDE = new Set(["pages", "flow", "settings", "hierarchy"]);
+const SIDEBAR_PANEL_WIDE = new Set(["pages", "settings", "hierarchy"]);
 const SIDEBAR_PANEL_MEDIUM = "components";
 const flowKind = /** @type {HTMLSelectElement | null} */ (document.getElementById("flow-kind"));
 const flowFromPage = /** @type {HTMLSelectElement | null} */ (document.getElementById("flow-from-page"));
@@ -130,8 +130,24 @@ const flowSwipeDirection = /** @type {HTMLSelectElement | null} */ (document.get
 const flowToPage = /** @type {HTMLSelectElement | null} */ (document.getElementById("flow-to-page"));
 const flowAnim = /** @type {HTMLSelectElement | null} */ (document.getElementById("flow-anim"));
 const flowTime = /** @type {HTMLInputElement | null} */ (document.getElementById("flow-time"));
-const flowListEl = document.getElementById("flow-list");
 const btnFlowAdd = document.getElementById("btn-flow-add");
+const btnFlowCancelEdit = document.getElementById("btn-flow-cancel-edit");
+const flowGraphWrap = document.getElementById("flow-graph-wrap");
+const flowGraphCanvas = /** @type {HTMLCanvasElement | null} */ (document.getElementById("flow-graph-canvas"));
+const btnFlowAddLink = document.getElementById("btn-flow-add-link");
+const flowLinkHint = document.getElementById("flow-link-hint");
+const flowPageInspector = document.getElementById("flow-page-inspector");
+const flowPageInspectorTitle = document.getElementById("flow-page-inspector-title");
+const btnFlowInspectorClose = document.getElementById("btn-flow-inspector-close");
+const flowPageTransitionsEl = document.getElementById("flow-page-transitions");
+const btnFlowNewTransition = document.getElementById("btn-flow-new-transition");
+const flowTransitionEditor = document.getElementById("flow-transition-editor");
+const flowTransitionEditorTitle = document.getElementById("flow-transition-editor-title");
+const btnFlowOpenPagePreview = document.getElementById("btn-flow-open-page-preview");
+const workspacePanelPreview = document.getElementById("workspace-panel-preview");
+const workspacePanelFlow = document.getElementById("workspace-panel-flow");
+const workspaceTabsListEl = document.getElementById("workspace-tabs-list");
+const btnWorkspaceTabAdd = document.getElementById("btn-workspace-tab-add");
 
 /** Minimum pointer travel (px) to treat as a page swipe in preview. */
 const PAGE_SWIPE_MIN_PX = 48;
@@ -179,8 +195,21 @@ function formatPreviewZoomPct(zoom) {
 }
 /** @type {ResizeObserver | null} */
 let previewLayoutObserver = null;
+/** @type {number} */
+let previewLayoutResizeRaf = 0;
 /** @type {import("../src/types/embf").EmbfProject | null} */
 let currentProject = null;
+
+/**
+ * Closable workspace tabs (page previews + optional navigation flow).
+ * Must be declared before early `ready` / `handleLoad`.
+ * @typedef {{ id: string, kind: "page", pageId: string } | { id: string, kind: "flow" }} WorkspaceTabEntry
+ */
+/** @type {WorkspaceTabEntry[]} */
+let workspaceTabs = [];
+/** @type {string} */
+let activeWorkspaceTabId = "";
+let workspaceTabIdSeq = 0;
 
 /** @type {Map<string, { screenPtr: number, idToObjPtr: Map<string, number>, objPtrToId: Map<number, string> }>} */
 const pageScreenCache = new Map();
@@ -383,16 +412,59 @@ const LV_EVENT_VALUE_CHANGED = 35; /* after DRAW_TASK_ADDED */
 const LV_PART_INDICATOR = 0x020000;
 
 // ── Entry point ────────────────────────────────────────────────────────────────
+/** Ignore stale async `handleLoad` when a newer project message arrives. */
+let loadGeneration = 0;
+
 window.addEventListener("message", event => {
     const msg = event.data;
     if (msg.type === "load") {
-        handleLoad(msg.payload);
+        const gen = ++loadGeneration;
+        void handleLoad(msg.payload, gen).catch(e => {
+            if (gen !== loadGeneration) {
+                return;
+            }
+            showError(`Load failed: ${e?.message ?? e}`);
+            log("error", `handleLoad unhandled: ${e}`);
+            showLoading(false);
+        });
     } else if (msg.type === "error") {
         showError(msg.message);
     } else if (msg.type === "historyState") {
         updateHistoryButtons(!!msg.canUndo, !!msg.canRedo);
     }
 });
+
+function isBenignWebviewError(message) {
+    const m = String(message ?? "");
+    return (
+        m.includes("ResizeObserver loop") ||
+        m.includes("ResizeObserver loop limit")
+    );
+}
+
+window.addEventListener("error", ev => {
+    const text = ev.message || String(ev.error ?? "Unknown error");
+    if (isBenignWebviewError(text)) {
+        return;
+    }
+    log("error", `webview: ${text}`);
+    showError(text);
+});
+window.addEventListener("unhandledrejection", ev => {
+    const text = ev.reason?.message ?? String(ev.reason ?? "Unhandled promise rejection");
+    if (isBenignWebviewError(text)) {
+        return;
+    }
+    log("error", `webview: ${text}`);
+    showError(text);
+});
+
+// Host queues `load` until this fires — do not wait for palette/flow/inspector wiring.
+if (!canvas) {
+    log("error", "Preview DOM missing #lvgl-canvas — reload the window");
+}
+showLoading(false);
+vscode.postMessage({ type: "ready" });
 
 function updateHistoryButtons(canUndo, canRedo) {
     if (btnUndo) {
@@ -447,7 +519,10 @@ function applyEmbfThemeFromProject(project) {
 }
 
 // ── Load handler ───────────────────────────────────────────────────────────────
-async function handleLoad(payload) {
+async function handleLoad(payload, generation = loadGeneration) {
+    if (generation !== loadGeneration) {
+        return;
+    }
     currentProject = payload.project;
     codegenOutputResolved =
         typeof payload.codegenOutputResolved === "string" ? payload.codegenOutputResolved : "";
@@ -485,16 +560,44 @@ async function handleLoad(payload) {
 
     // Populate page selector and stay on the current page when possible
     const pages = payload.project.pages;
+    const wasFlowTabActive = isWorkspaceFlowActive();
+    const preservedFlowPageIndex = _fgSelectedPageIndex;
     const requestedPage =
         typeof payload.pageIndex === "number" && Number.isFinite(payload.pageIndex)
             ? payload.pageIndex
             : currentPageIndex;
     populatePageSelect(pages);
     currentPageIndex = Math.min(Math.max(0, requestedPage), Math.max(0, pages.length - 1));
+    if (!quietReload) {
+        if (wasFlowTabActive) {
+            pruneWorkspaceTabs();
+            renderWorkspaceTabs();
+        } else {
+            resetWorkspaceTabsForProject(currentPageIndex);
+        }
+    } else {
+        pruneWorkspaceTabs();
+        renderWorkspaceTabs();
+    }
     refreshLibraryPalette();
     renderPageList();
     populateFlowForm();
-    renderFlowList();
+    renderFlowPanel();
+    if (wasFlowTabActive && preservedFlowPageIndex >= 0 && preservedFlowPageIndex < pages.length) {
+        _fgSelectedPageIndex = preservedFlowPageIndex;
+        if (flowPageInspector) {
+            flowPageInspector.hidden = false;
+        }
+        if (btnFlowOpenPagePreview) {
+            btnFlowOpenPagePreview.hidden = false;
+        }
+        const page = pages[preservedFlowPageIndex];
+        if (flowPageInspectorTitle && page) {
+            flowPageInspectorTitle.textContent = page.name || page.id;
+        }
+        renderFlowPageTransitions(preservedFlowPageIndex);
+        renderFlowGraph();
+    }
     if (pageSelect) {
         pageSelectProgrammatic = true;
         pageSelect.value = String(currentPageIndex);
@@ -563,10 +666,29 @@ async function handleLoad(payload) {
         renderWidgetTree();
     }
     } catch (e) {
+        if (generation !== loadGeneration) {
+            return;
+        }
         showError(`Preview error: ${e.message ?? e}`);
         log("error", `handleLoad: ${e}`);
     } finally {
-        showLoading(false);
+        if (generation === loadGeneration) {
+            showLoading(false);
+        }
+    }
+
+    if (generation !== loadGeneration) {
+        return;
+    }
+
+    if (wasmReady) {
+        hideError();
+        if (isWorkspacePageActive()) {
+            refreshPreviewLayoutAfterPanelChange();
+            schedulePreviewAutoZoomReflowAfterLayout();
+            pumpPreviewRedraw(4);
+            drawDesignOverlay();
+        }
     }
 
     const disp = currentProject.display;
@@ -597,16 +719,31 @@ function getPreviewFitInsets() {
     return { pad, rulerExtra };
 }
 
-/** Scale so the full display (plus ruler chrome) fits inside the visible canvas area. */
+/** Pane below workspace tabs — stable size for auto-fit (not the shrink-wrapped device frame). */
+function getPreviewFitHost() {
+    if (isWorkspacePageActive()) {
+        const body = document.getElementById("workspace-body");
+        if (body) {
+            return body;
+        }
+        if (workspacePanelPreview) {
+            return workspacePanelPreview;
+        }
+    }
+    return canvasContainer;
+}
+
 function computeAutoZoom() {
-    if (!canvasContainer || !displayWidth || !displayHeight) {
-        return 1;
+    const fitHost = getPreviewFitHost();
+    if (!fitHost || !displayWidth || !displayHeight) {
+        return previewZoom > 0 ? previewZoom : 1;
     }
     const { pad, rulerExtra } = getPreviewFitInsets();
-    const cw = canvasContainer.clientWidth - pad;
-    const ch = canvasContainer.clientHeight - pad;
-    if (cw <= 0 || ch <= 0) {
-        return 1;
+    const cw = fitHost.clientWidth - pad;
+    const ch = fitHost.clientHeight - pad;
+    // Layout not ready yet — avoid clamping to 10% on a transient tiny measure.
+    if (cw < 120 || ch < 120) {
+        return previewZoom >= 0.15 ? previewZoom : 1;
     }
     const totalW = displayWidth + rulerExtra;
     const totalH = displayHeight + rulerExtra;
@@ -671,6 +808,9 @@ function applyPreviewLayout() {
     if (displayWrapper) {
         displayWrapper.style.width = `${cssW}px`;
         displayWrapper.style.height = `${cssH}px`;
+        const rulerPad = designRulersEnabled ? RULER_THICKNESS : 0;
+        displayWrapper.style.marginTop = rulerPad ? `${rulerPad}px` : "";
+        displayWrapper.style.marginLeft = rulerPad ? `${rulerPad}px` : "";
         // IMPORTANT: apply round clipping only to the actual rendered display layers,
         // not the wrapper itself. The rulers sit outside the display bounds (negative
         // top/left offsets), so clipping the wrapper hides rulers on round displays.
@@ -698,21 +838,48 @@ function applyPreviewLayout() {
     scheduleImageOverlaySync();
 }
 
+function schedulePreviewAutoZoomReflow() {
+    if (previewLayoutResizeRaf) {
+        cancelAnimationFrame(previewLayoutResizeRaf);
+    }
+    previewLayoutResizeRaf = requestAnimationFrame(() => {
+        previewLayoutResizeRaf = 0;
+        if (previewZoomMode !== "auto" || !isWorkspacePageActive()) {
+            return;
+        }
+        const next = computeAutoZoom();
+        if (Math.abs(next - previewZoom) > 0.0005) {
+            previewZoom = next;
+            applyPreviewLayout();
+            drawDesignOverlay();
+        }
+    });
+}
+
+/** Re-measure after flex layout settles (initial open often reports a tiny pane once). */
+function schedulePreviewAutoZoomReflowAfterLayout() {
+    schedulePreviewAutoZoomReflow();
+    requestAnimationFrame(() => {
+        schedulePreviewAutoZoomReflow();
+        requestAnimationFrame(schedulePreviewAutoZoomReflow);
+    });
+}
+
 function initPreviewLayoutObserver() {
-    if (!canvasContainer || previewLayoutObserver) {
+    if (previewLayoutObserver) {
+        return;
+    }
+    const fitTarget = document.getElementById("workspace-body") ?? workspacePanelPreview;
+    if (!fitTarget) {
         return;
     }
     previewLayoutObserver = new ResizeObserver(() => {
-        if (previewZoomMode === "auto") {
-            const next = computeAutoZoom();
-            if (Math.abs(next - previewZoom) > 0.0005) {
-                previewZoom = next;
-                applyPreviewLayout();
-                drawDesignOverlay();
-            }
-        }
+        schedulePreviewAutoZoomReflow();
     });
-    previewLayoutObserver.observe(canvasContainer);
+    previewLayoutObserver.observe(fitTarget);
+    if (canvasContainer && fitTarget !== canvasContainer) {
+        previewLayoutObserver.observe(canvasContainer);
+    }
 }
 
 if (previewZoomSelect) {
@@ -790,12 +957,16 @@ function savePanelCollapseState() {
 function refreshPreviewLayoutAfterPanelChange() {
     if (previewZoomMode === "auto") {
         updatePreviewZoom();
+        applyPreviewLayout();
+        drawDesignOverlay();
+        schedulePreviewAutoZoomReflowAfterLayout();
+        return;
     }
     applyPreviewLayout();
     drawDesignOverlay();
 }
 
-function applyPanelCollapseState() {
+function applyPanelCollapseState(restoreLayoutOnly = false) {
     if (toolbarShell) {
         toolbarShell.classList.toggle("collapsed", panelCollapseState.toolbarCollapsed);
     }
@@ -814,7 +985,7 @@ function applyPanelCollapseState() {
         btnToggleLeftSidebar.textContent = collapsed ? "›" : "‹";
         btnToggleLeftSidebar.title = collapsed ? "Show sidebar" : "Hide sidebar";
     }
-    setSidebarCategory(activeSidebarCategory, false);
+    setSidebarCategory(activeSidebarCategory, false, { switchWorkspace: !restoreLayoutOnly });
     if (propertyInspector) {
         propertyInspector.classList.toggle("collapsed", panelCollapseState.inspectorCollapsed);
     }
@@ -828,7 +999,7 @@ function applyPanelCollapseState() {
 }
 
 loadPanelCollapseState();
-applyPanelCollapseState();
+applyPanelCollapseState(true);
 
 if (btnToggleToolbar) {
     btnToggleToolbar.addEventListener("click", () => {
@@ -854,10 +1025,15 @@ if (btnToggleLeftSidebar) {
     });
 }
 
-function setSidebarCategory(categoryId, persist = true) {
+/**
+ * @param {{ switchWorkspace?: boolean }} [options]
+ *   When `switchWorkspace` is false, only the left sidebar panel changes (used on restore).
+ */
+function setSidebarCategory(categoryId, persist = true, options = {}) {
     if (!(categoryId in SIDEBAR_PANEL_LABELS)) {
         return;
     }
+    const switchWorkspace = options.switchWorkspace !== false;
     activeSidebarCategory = categoryId;
     if (persist) {
         panelCollapseState.sidebarCategory = categoryId;
@@ -886,13 +1062,17 @@ function setSidebarCategory(categoryId, persist = true) {
     if (sidebarPanel) {
         sidebarPanel.classList.toggle("wide", SIDEBAR_PANEL_WIDE.has(categoryId));
         sidebarPanel.classList.toggle("panel-medium", categoryId === SIDEBAR_PANEL_MEDIUM);
+        sidebarPanel.hidden = categoryId === "flow";
     }
     if (categoryId === "pages") {
         renderPageList();
     }
     if (categoryId === "flow") {
+        if (switchWorkspace) {
+            openFlowWorkspaceTab(true);
+        }
         populateFlowForm();
-        renderFlowList();
+        renderFlowPanel();
     }
     if (categoryId === "hierarchy") {
         renderWidgetTree();
@@ -1341,29 +1521,45 @@ function playWidgetAnimationsOnCurrentPage() {
     return { ok: true, started };
 }
 
+/** Preview properties: `model.properties` when set, else legacy `dataModel.fields`. */
+function getPreviewProperties() {
+    if (!currentProject) return [];
+    if (currentProject.model?.properties !== undefined) {
+        return currentProject.model.properties;
+    }
+    const legacy = currentProject.dataModel?.fields;
+    return Array.isArray(legacy) ? legacy : [];
+}
+
+function formatPropertyDefault(f) {
+    if (!f) return "";
+    if (f.default === undefined || f.default === null) {
+        switch (f.type) {
+            case "int":
+            case "float":
+                return "0";
+            case "bool":
+                return "false";
+            default:
+                return "";
+        }
+    }
+    if (typeof f.default === "boolean") return f.default ? "true" : "false";
+    return String(f.default);
+}
+
 /**
- * Substitute `{{field}}` references with the matching `dataModel.fields[].default`
- * (or a `<id>` placeholder when missing) so the live preview shows realistic copy.
+ * Substitute `{{field}}` with `model.properties` / `dataModel.fields` defaults (preview only).
  */
 function applyBindingTemplates(text) {
     if (typeof text !== "string" || text.indexOf("{{") === -1) {
         return text;
     }
-    const fields = currentProject?.dataModel?.fields;
+    const fields = getPreviewProperties();
     return text.replace(/\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g, (_full, id) => {
-        if (!Array.isArray(fields)) return `<${id}>`;
         const f = fields.find(x => x && x.id === id);
         if (!f) return `<${id}>`;
-        if (f.default === undefined || f.default === null) {
-            switch (f.type) {
-                case "int":
-                case "float": return "0";
-                case "bool":  return "false";
-                default:      return "";
-            }
-        }
-        if (typeof f.default === "boolean") return f.default ? "true" : "false";
-        return String(f.default);
+        return formatPropertyDefault(f);
     });
 }
 
@@ -1374,8 +1570,8 @@ function applyBindingTemplates(text) {
 function resolveBoundNumber(comp, prop, fallback) {
     const fieldId = comp?.bindings?.[prop];
     if (typeof fieldId !== "string") return fallback;
-    const fields = currentProject?.dataModel?.fields;
-    if (!Array.isArray(fields)) return fallback;
+    const fields = getPreviewProperties();
+    if (!fields.length) return fallback;
     const f = fields.find(x => x && x.id === fieldId);
     if (!f) return fallback;
     if (f.default === undefined || f.default === null) {
@@ -1406,8 +1602,8 @@ function singleBindingFieldInLabel(text) {
 }
 
 function setDataModelField(fieldId, value) {
-    const fields = currentProject?.dataModel?.fields;
-    if (!Array.isArray(fields)) {
+    const fields = getPreviewProperties();
+    if (!fields.length) {
         return false;
     }
     const f = fields.find(x => x && x.id === fieldId);
@@ -1433,7 +1629,7 @@ function setDataModelField(fieldId, value) {
 
 /** Mirror firmware `ui_bindings_apply()` for the live preview after button actions. */
 function refreshPreviewBindings(page) {
-    if (!page || !WasmModule || !(currentProject?.dataModel?.fields?.length)) {
+    if (!page || !WasmModule || !getPreviewProperties().length) {
         return;
     }
     const wasm = WasmModule;
@@ -1758,6 +1954,9 @@ function dispatchAction(action, eventValue, currentPage) {
 
     switch (action.type) {
         case "navigate": {
+            if (isWorkspaceFlowActive()) {
+                break;
+            }
             const targetIdx = currentProject.pages.findIndex(p => p.id === action.target);
             if (targetIdx < 0) {
                 log("warn", `navigate: page "${action.target}" not found`);
@@ -1784,7 +1983,7 @@ function dispatchAction(action, eventValue, currentPage) {
                 renderInspector();
                 renderPageList();
                 renderToolbarWidgetSelect();
-                renderFlowList();
+                renderFlowPanel();
             } finally {
                 pageSelectProgrammatic = false;
             }
@@ -2927,7 +3126,11 @@ function populateFlowForm() {
             flowFromPage.appendChild(opt);
         });
         flowFromPage.value =
-            prev && pages[Number(prev)] !== undefined ? prev : String(currentPageIndex);
+            prev && pages[Number(prev)] !== undefined
+                ? prev
+                : isWorkspaceFlowActive() && _fgSelectedPageIndex >= 0
+                  ? String(_fgSelectedPageIndex)
+                  : String(currentPageIndex);
     }
     if (flowToPage) {
         flowToPage.innerHTML = "";
@@ -2963,87 +3166,1269 @@ function populateFlowComponentSelect() {
     }
 }
 
-function renderFlowList() {
-    if (!flowListEl) {
+// ── Workspace tabs (closable page tabs + navigation flow) ───────────────────
+
+function nextWorkspaceTabId() {
+    workspaceTabIdSeq += 1;
+    return `ws-tab-${workspaceTabIdSeq}`;
+}
+
+/** @returns {WorkspaceTabEntry | undefined} */
+function getActiveWorkspaceTab() {
+    return workspaceTabs.find(t => t.id === activeWorkspaceTabId) ?? workspaceTabs[0];
+}
+
+function isWorkspacePageActive() {
+    return getActiveWorkspaceTab()?.kind === "page";
+}
+
+function isWorkspaceFlowActive() {
+    return getActiveWorkspaceTab()?.kind === "flow";
+}
+
+function resolveWorkspacePageIndex(pageId) {
+    if (!currentProject) {
+        return -1;
+    }
+    return currentProject.pages.findIndex(p => p.id === pageId);
+}
+
+function getWorkspaceTabLabel(tab) {
+    if (tab.kind === "flow") {
+        return "Navigation flow";
+    }
+    const idx = resolveWorkspacePageIndex(tab.pageId);
+    const page = idx >= 0 ? currentProject?.pages[idx] : null;
+    return page?.name || page?.id || "Page";
+}
+
+function applyWorkspacePanelsForActiveTab() {
+    const tab = getActiveWorkspaceTab();
+    const showFlow = tab?.kind === "flow";
+    if (workspacePanelPreview) {
+        workspacePanelPreview.classList.toggle("active", !showFlow);
+        workspacePanelPreview.hidden = showFlow;
+    }
+    if (workspacePanelFlow) {
+        workspacePanelFlow.classList.toggle("active", !!showFlow);
+        workspacePanelFlow.hidden = !showFlow;
+    }
+    if (showFlow) {
+        populateFlowForm();
+        renderFlowPanel();
+        requestAnimationFrame(() => {
+            if (isWorkspaceFlowActive()) {
+                renderFlowGraph();
+            }
+        });
+    } else {
+        refreshPreviewLayoutAfterPanelChange();
+        schedulePreviewAutoZoomReflowAfterLayout();
+        drawDesignOverlay();
+    }
+}
+
+function renderWorkspaceTabs() {
+    if (!workspaceTabsListEl) {
         return;
     }
-    flowListEl.innerHTML = "";
-    const flows = collectAllFlowsFromProject();
+    workspaceTabsListEl.innerHTML = "";
+    for (const tab of workspaceTabs) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className =
+            "workspace-tab-item" +
+            (tab.id === activeWorkspaceTabId ? " active" : "") +
+            (tab.kind === "flow" ? " flow-tab" : "");
+        btn.setAttribute("role", "tab");
+        btn.setAttribute("aria-selected", tab.id === activeWorkspaceTabId ? "true" : "false");
+        btn.dataset.tabId = tab.id;
+
+        const label = document.createElement("span");
+        label.className = "workspace-tab-label";
+        label.textContent = getWorkspaceTabLabel(tab);
+        btn.appendChild(label);
+
+        const close = document.createElement("button");
+        close.type = "button";
+        close.className = "workspace-tab-close";
+        close.setAttribute("aria-label", `Close ${getWorkspaceTabLabel(tab)}`);
+        close.textContent = "×";
+        close.dataset.tabClose = tab.id;
+        btn.appendChild(close);
+
+        workspaceTabsListEl.appendChild(btn);
+    }
+}
+
+function activateWorkspaceTab(tabId) {
+    if (!workspaceTabs.some(t => t.id === tabId)) {
+        return;
+    }
+    activeWorkspaceTabId = tabId;
+    renderWorkspaceTabs();
+    const tab = getActiveWorkspaceTab();
+    if (!tab || !currentProject) {
+        applyWorkspacePanelsForActiveTab();
+        return;
+    }
+    if (tab.kind === "flow") {
+        applyWorkspacePanelsForActiveTab();
+        return;
+    }
+    const idx = resolveWorkspacePageIndex(tab.pageId);
+    if (idx < 0) {
+        applyWorkspacePanelsForActiveTab();
+        return;
+    }
+    if (idx !== currentPageIndex) {
+        navigateToPageIndex(idx, { skipTabSync: true });
+    } else {
+        applyWorkspacePanelsForActiveTab();
+        renderPageList();
+        renderInspector();
+        renderToolbarWidgetSelect();
+    }
+}
+
+function closeWorkspaceTab(tabId) {
+    const idx = workspaceTabs.findIndex(t => t.id === tabId);
+    if (idx < 0) {
+        return;
+    }
+    const closing = workspaceTabs[idx];
+    if (workspaceTabs.length === 1) {
+        if (closing.kind === "flow" && currentProject?.pages.length) {
+            const page = currentProject.pages[currentPageIndex] ?? currentProject.pages[0];
+            workspaceTabs = [{ id: nextWorkspaceTabId(), kind: "page", pageId: page.id }];
+            activeWorkspaceTabId = workspaceTabs[0].id;
+            renderWorkspaceTabs();
+            activateWorkspaceTab(activeWorkspaceTabId);
+        }
+        return;
+    }
+    const wasActive = activeWorkspaceTabId === tabId;
+    workspaceTabs.splice(idx, 1);
+    if (wasActive) {
+        activeWorkspaceTabId = workspaceTabs[Math.min(idx, workspaceTabs.length - 1)].id;
+        activateWorkspaceTab(activeWorkspaceTabId);
+    } else {
+        renderWorkspaceTabs();
+    }
+}
+
+/** @returns {WorkspaceTabEntry | undefined} */
+function ensurePageTabForIndex(pageIndex, createIfMissing = true) {
+    if (!currentProject) {
+        return undefined;
+    }
+    const page = currentProject.pages[pageIndex];
+    if (!page) {
+        return undefined;
+    }
+    let tab = workspaceTabs.find(t => t.kind === "page" && t.pageId === page.id);
+    if (!tab && createIfMissing) {
+        tab = { id: nextWorkspaceTabId(), kind: "page", pageId: page.id };
+        workspaceTabs.push(tab);
+        renderWorkspaceTabs();
+    }
+    return tab;
+}
+
+function openPageTabByIndex(pageIndex, activate = true) {
+    const tab = ensurePageTabForIndex(pageIndex, true);
+    if (!tab) {
+        return;
+    }
+    if (activate) {
+        activateWorkspaceTab(tab.id);
+    } else {
+        renderWorkspaceTabs();
+    }
+}
+
+function openPageTabByPageId(pageId, activate = true) {
+    const idx = resolveWorkspacePageIndex(pageId);
+    if (idx >= 0) {
+        openPageTabByIndex(idx, activate);
+    }
+}
+
+function openFlowWorkspaceTab(activate = true) {
+    let tab = workspaceTabs.find(t => t.kind === "flow");
+    if (!tab) {
+        tab = { id: nextWorkspaceTabId(), kind: "flow" };
+        workspaceTabs.push(tab);
+        renderWorkspaceTabs();
+    }
+    if (activate) {
+        activateWorkspaceTab(tab.id);
+    }
+}
+
+function resetWorkspaceTabsForProject(pageIndex) {
+    if (!currentProject?.pages.length) {
+        workspaceTabs = [];
+        activeWorkspaceTabId = "";
+        renderWorkspaceTabs();
+        return;
+    }
+    const idx = Math.min(Math.max(0, pageIndex), currentProject.pages.length - 1);
+    const page = currentProject.pages[idx];
+    workspaceTabs = [{ id: nextWorkspaceTabId(), kind: "page", pageId: page.id }];
+    activeWorkspaceTabId = workspaceTabs[0].id;
+    renderWorkspaceTabs();
+    applyWorkspacePanelsForActiveTab();
+}
+
+function pruneWorkspaceTabs() {
+    if (!currentProject) {
+        workspaceTabs = [];
+        activeWorkspaceTabId = "";
+        return;
+    }
+    const pageIds = new Set(currentProject.pages.map(p => p.id));
+    workspaceTabs = workspaceTabs.filter(t => t.kind === "flow" || pageIds.has(t.pageId));
+    if (!workspaceTabs.length) {
+        resetWorkspaceTabsForProject(currentPageIndex);
+        return;
+    }
+    if (!workspaceTabs.some(t => t.id === activeWorkspaceTabId)) {
+        activeWorkspaceTabId = workspaceTabs[0].id;
+    }
+}
+
+function openNextPageInNewTab() {
+    if (!currentProject?.pages.length) {
+        return;
+    }
+    for (const page of currentProject.pages) {
+        if (!workspaceTabs.some(t => t.kind === "page" && t.pageId === page.id)) {
+            const tab = { id: nextWorkspaceTabId(), kind: "page", pageId: page.id };
+            workspaceTabs.push(tab);
+            activateWorkspaceTab(tab.id);
+            return;
+        }
+    }
+    const nextIdx = (currentPageIndex + 1) % currentProject.pages.length;
+    openPageTabByIndex(nextIdx, true);
+}
+
+if (workspaceTabsListEl) {
+    workspaceTabsListEl.addEventListener("click", e => {
+        const t = e.target;
+        if (!(t instanceof Element)) {
+            return;
+        }
+        const closeBtn = t.closest("[data-tab-close]");
+        if (closeBtn instanceof HTMLElement) {
+            e.stopPropagation();
+            const tabId = closeBtn.getAttribute("data-tab-close");
+            if (tabId) {
+                closeWorkspaceTab(tabId);
+            }
+            return;
+        }
+        const tabBtn = t.closest(".workspace-tab-item[data-tab-id]");
+        if (tabBtn instanceof HTMLElement) {
+            const tabId = tabBtn.getAttribute("data-tab-id");
+            if (tabId) {
+                activateWorkspaceTab(tabId);
+            }
+        }
+    });
+}
+
+if (btnWorkspaceTabAdd) {
+    btnWorkspaceTabAdd.addEventListener("click", () => openNextPageInNewTab());
+}
+
+// ── Toolbar dropdown menus ───────────────────────────────────────────────────
+
+function closeAllToolbarMenus() {
+    document.querySelectorAll(".tb-menu-panel").forEach(p => {
+        p.hidden = true;
+    });
+    document.querySelectorAll(".tb-menu-trigger.open").forEach(t => {
+        t.classList.remove("open");
+        t.setAttribute("aria-expanded", "false");
+    });
+}
+
+function toggleToolbarMenu(triggerId, panelId) {
+    const trigger = document.getElementById(triggerId);
+    const panel = document.getElementById(panelId);
+    if (!trigger || !panel) {
+        return;
+    }
+    const willOpen = panel.hidden;
+    closeAllToolbarMenus();
+    if (willOpen) {
+        panel.hidden = false;
+        trigger.classList.add("open");
+        trigger.setAttribute("aria-expanded", "true");
+    }
+}
+
+[
+    ["tb-menu-project-trigger", "tb-menu-project"],
+    ["tb-menu-edit-trigger", "tb-menu-edit"],
+    ["tb-menu-view-trigger", "tb-menu-view"]
+].forEach(([tid, pid]) => {
+    const trigger = document.getElementById(tid);
+    if (!trigger) {
+        return;
+    }
+    trigger.addEventListener("click", e => {
+        e.stopPropagation();
+        toggleToolbarMenu(tid, pid);
+    });
+});
+
+document.querySelectorAll(".tb-menu-panel").forEach(panel => {
+    panel.addEventListener("click", e => e.stopPropagation());
+});
+
+document.addEventListener("click", e => {
+    if (e.target instanceof Element && e.target.closest(".tb-menu-wrap")) {
+        return;
+    }
+    closeAllToolbarMenus();
+});
+
+// ── Navigation Graph ──────────────────────────────────────────────────────────
+
+/**
+ * Computed during renderFlowGraph — used by mouse handlers for hit-testing.
+ * @type {Array<{page: object, index: number, x: number, y: number, w: number, h: number}>}
+ */
+let _fgNodes = [];
+
+/**
+ * Computed during renderFlowGraph — visual edges (uni- or bidirectional) for hit-testing.
+ * @type {Array<{ bidirectional: boolean, flows: object[], labels: Array<{ flow: object, flowIndex: number, mx: number, my: number }>, sx: number, sy: number, tx: number, ty: number, cp1x: number, cp1y: number, cp2x: number, cp2y: number, dashStyle: number[] }>}
+ */
+let _fgEdges = [];
+
+let _fgHoverEdge = -1;
+/** Label index within hovered edge (-1 = edge body only). */
+let _fgHoverEdgeLabel = -1;
+let _fgSelectedPageIndex = -1;
+/** @type {{ sourceIndex: number } | null} */
+let _fgLinkPick = null;
+/** @type {object | null} flow row being edited (replaced on save) */
+let _fgEditingFlow = null;
+/** @type {{ pageIndex: number, pointerX: number, pointerY: number, nodeX: number, nodeY: number, moved: boolean } | null} */
+let _fgDrag = null;
+/** @type {{ pageIndex: number, x: number, y: number } | null} */
+let _fgDragPos = null;
+let _fgSuppressClick = false;
+
+const FG_NODE_W = 148;
+const FG_NODE_H = 52;
+const FG_GAP_X = 40;
+const FG_GAP_Y = 64;
+const FG_PAD = 16;
+const FG_PAD_TOP = 52;
+const FG_DEL_R = 8;
+const FG_DRAG_THRESHOLD = 4;
+
+function getFlowsFromPage(pageIndex) {
+    return collectAllFlowsFromProject().filter(f => f.sourcePageIndex === pageIndex);
+}
+
+function _fgFlowEdgeLabel(f) {
+    if (f.kind === "swipe") {
+        const dir = f.direction === "top" ? "↑" : f.direction === "bottom" ? "↓" : f.direction === "left" ? "←" : "→";
+        return `swipe ${dir}`;
+    }
+    const trig = f.trigger === "clicked" ? "click" : f.trigger;
+    return `${f.componentId} · ${trig}`;
+}
+
+function setFlowLinkMode(on) {
+    if (flowGraphWrap) {
+        flowGraphWrap.classList.toggle("linking", on);
+    }
+    if (btnFlowAddLink) {
+        btnFlowAddLink.classList.toggle("active", on);
+    }
+    if (flowLinkHint) {
+        flowLinkHint.hidden = !on;
+    }
+    if (!on) {
+        _fgLinkPick = null;
+    }
+}
+
+function hideFlowTransitionEditor() {
+    _fgEditingFlow = null;
+    if (flowTransitionEditor) {
+        flowTransitionEditor.hidden = true;
+    }
+}
+
+function clearFlowGraphSelection() {
+    _fgSelectedPageIndex = -1;
+    if (flowPageInspector) {
+        flowPageInspector.hidden = true;
+    }
+    if (btnFlowOpenPagePreview) {
+        btnFlowOpenPagePreview.hidden = true;
+    }
+    hideFlowTransitionEditor();
+    renderFlowGraph();
+}
+
+function selectFlowGraphPage(pageIndex) {
+    _fgSelectedPageIndex = pageIndex;
+    setFlowLinkMode(false);
+    if (flowPageInspector) {
+        flowPageInspector.hidden = false;
+    }
+    if (btnFlowOpenPagePreview) {
+        btnFlowOpenPagePreview.hidden = false;
+    }
+    const page = currentProject?.pages[pageIndex];
+    if (flowPageInspectorTitle && page) {
+        flowPageInspectorTitle.textContent = page.name || page.id;
+    }
+    renderFlowPageTransitions(pageIndex);
+    hideFlowTransitionEditor();
+    renderFlowGraph();
+}
+
+function showFlowTransitionEditor(mode, sourcePageIndex, prefill) {
+    _fgEditingFlow = mode === "edit" && prefill ? prefill : null;
+    populateFlowForm();
+    if (flowFromPage) {
+        flowFromPage.value = String(sourcePageIndex);
+    }
+    if (flowTransitionEditor) {
+        flowTransitionEditor.hidden = false;
+    }
+    if (flowTransitionEditorTitle) {
+        flowTransitionEditorTitle.textContent = mode === "edit" ? "Edit transition" : "New transition";
+    }
+    if (prefill) {
+        if (prefill.kind === "swipe" && flowKind) {
+            flowKind.value = "swipe";
+            syncFlowKindFields();
+            if (flowSwipeDirection) {
+                flowSwipeDirection.value = prefill.direction;
+            }
+        } else if (flowKind) {
+            flowKind.value = "component";
+            syncFlowKindFields();
+            populateFlowComponentSelect();
+            if (flowComponent && prefill.componentId) {
+                flowComponent.value = prefill.componentId;
+            }
+            if (flowTrigger && prefill.trigger) {
+                flowTrigger.value = prefill.trigger;
+            }
+        }
+        if (flowToPage && prefill.targetPageId) {
+            flowToPage.value = prefill.targetPageId;
+        }
+        if (flowAnim && prefill.anim) {
+            flowAnim.value = prefill.anim;
+        }
+        if (flowTime != null && prefill.time != null) {
+            flowTime.value = String(prefill.time);
+        }
+    } else {
+        syncFlowKindFields();
+        const pages = currentProject?.pages ?? [];
+        if (flowToPage && pages.length > 1) {
+            const other = pages.find((_, i) => i !== sourcePageIndex);
+            if (other) {
+                flowToPage.value = other.id;
+            }
+        }
+    }
+    syncFlowTimeField();
+}
+
+function removeFlowFromProject(f) {
+    if (f.kind === "swipe") {
+        vscode.postMessage({
+            type: "removePageSwipeFlow",
+            sourcePageIndex: f.sourcePageIndex,
+            direction: f.direction
+        });
+    } else {
+        vscode.postMessage({
+            type: "removeNavigateFlow",
+            sourcePageIndex: f.sourcePageIndex,
+            componentId: f.componentId,
+            trigger: f.trigger,
+            targetPageId: f.targetPageId
+        });
+    }
+}
+
+function renderFlowPageTransitions(pageIndex) {
+    if (!flowPageTransitionsEl || !currentProject) {
+        return;
+    }
+    flowPageTransitionsEl.innerHTML = "";
+    const flows = getFlowsFromPage(pageIndex);
     if (!flows.length) {
-        const empty = document.createElement("li");
-        empty.className = "flow-list-empty";
-        empty.textContent =
-            "No page flows yet. Add a component event or swipe to switch pages.";
-        flowListEl.appendChild(empty);
+        const li = document.createElement("li");
+        li.className = "flow-page-transitions-empty";
+        li.textContent = "No transitions yet. Use + Add connection on the canvas or Add transition below.";
+        flowPageTransitionsEl.appendChild(li);
         return;
     }
     for (const f of flows) {
         const li = document.createElement("li");
-        li.className = "flow-list-item";
-
+        li.className = "flow-transition-row";
         const main = document.createElement("button");
         main.type = "button";
-        main.className = "flow-list-main";
-        const route = document.createElement("span");
-        route.className = "flow-route";
-        route.textContent = `${f.sourcePageName} → ${f.targetPageName}`;
+        main.className = "flow-transition-row-main";
+        const tgt = document.createElement("span");
+        tgt.className = "flow-transition-row-target";
+        tgt.textContent = `→ ${f.targetPageName}`;
         const meta = document.createElement("span");
-        meta.className = "flow-meta";
-        const animLabel =
-            f.anim && f.anim !== "none" ? ` · ${f.anim.replace(/_/g, " ")} ${f.time}ms` : "";
-        if (f.kind === "swipe") {
-            main.title = "Go to source page";
-            const dirLabel = f.direction === "top" ? "up" : f.direction === "bottom" ? "down" : f.direction;
-            meta.textContent = `swipe ${dirLabel}${animLabel}`;
-            main.addEventListener("click", () => {
-                navigateToPageIndex(f.sourcePageIndex);
-                inspectorShowingPage = true;
-                selectedComponentOrder = [];
-                drawDesignOverlay();
-                renderInspector();
+        meta.className = "flow-transition-row-meta";
+        meta.textContent =
+            f.kind === "swipe"
+                ? `Screen swipe ${f.direction}`
+                : `${f.componentId} · ${f.trigger}`;
+        main.appendChild(tgt);
+        main.appendChild(meta);
+        main.addEventListener("click", () => {
+            showFlowTransitionEditor("edit", pageIndex, f);
+        });
+        const del = document.createElement("button");
+        del.type = "button";
+        del.className = "flow-transition-row-del";
+        del.textContent = "×";
+        del.title = "Remove transition";
+        del.addEventListener("click", e => {
+            e.stopPropagation();
+            removeFlowFromProject(f);
+        });
+        li.appendChild(main);
+        li.appendChild(del);
+        flowPageTransitionsEl.appendChild(li);
+    }
+}
+
+function submitFlowTransition() {
+    if (!currentProject || !flowFromPage || !flowToPage) {
+        return false;
+    }
+    const sourcePageIndex = parseInt(flowFromPage.value, 10) || 0;
+    const targetPageId = flowToPage.value;
+    const anim = flowAnim?.value ?? "none";
+    const time = flowTime ? parseInt(flowTime.value, 10) : 300;
+    if (!targetPageId) {
+        return false;
+    }
+    if (_fgEditingFlow) {
+        removeFlowFromProject(_fgEditingFlow);
+        _fgEditingFlow = null;
+    }
+    const kind = flowKind?.value ?? "component";
+    if (kind === "swipe") {
+        const direction = flowSwipeDirection?.value;
+        if (!direction) {
+            return false;
+        }
+        vscode.postMessage({
+            type: "addPageSwipeFlow",
+            sourcePageIndex,
+            direction,
+            targetPageId,
+            anim,
+            time: Number.isFinite(time) ? time : 300
+        });
+    } else {
+        if (!flowComponent || !flowTrigger) {
+            return false;
+        }
+        const componentId = flowComponent.value;
+        const trigger = flowTrigger.value;
+        if (!componentId) {
+            return false;
+        }
+        vscode.postMessage({
+            type: "addNavigateFlow",
+            sourcePageIndex,
+            componentId,
+            trigger,
+            targetPageId,
+            anim,
+            time: Number.isFinite(time) ? time : 300
+        });
+    }
+    if (_fgSelectedPageIndex !== sourcePageIndex) {
+        selectFlowGraphPage(sourcePageIndex);
+    } else {
+        renderFlowPageTransitions(sourcePageIndex);
+        renderFlowGraph();
+    }
+    showFlowTransitionEditor("new", sourcePageIndex, null);
+    return true;
+}
+
+function hitTestFlowNode(mx, my) {
+    for (const node of _fgNodes) {
+        if (mx >= node.x && mx <= node.x + node.w && my >= node.y && my <= node.y + node.h) {
+            return node;
+        }
+    }
+    return null;
+}
+
+function flowGraphCols(W) {
+    return Math.max(1, Math.floor((W - FG_PAD * 2 + FG_GAP_X) / (FG_NODE_W + FG_GAP_X)));
+}
+
+function flowGridPos(pageIndex, cols) {
+    return {
+        x: FG_PAD + (pageIndex % cols) * (FG_NODE_W + FG_GAP_X),
+        y: FG_PAD_TOP + Math.floor(pageIndex / cols) * (FG_NODE_H + FG_GAP_Y)
+    };
+}
+
+function flowNodePosition(page, pageIndex, cols) {
+    if (_fgDragPos && _fgDragPos.pageIndex === pageIndex) {
+        return { x: _fgDragPos.x, y: _fgDragPos.y };
+    }
+    if (typeof page.flowX === "number" && typeof page.flowY === "number") {
+        return { x: page.flowX, y: page.flowY };
+    }
+    return flowGridPos(pageIndex, cols);
+}
+
+function clampFlowNodePos(x, y, W, H) {
+    const minX = FG_PAD;
+    const minY = FG_PAD_TOP;
+    const maxX = Math.max(minX, W - FG_PAD - FG_NODE_W);
+    const maxY = Math.max(minY, H - FG_PAD - FG_NODE_H);
+    return {
+        x: Math.min(maxX, Math.max(minX, x)),
+        y: Math.min(maxY, Math.max(minY, y))
+    };
+}
+
+function flowCanvasPoint(e) {
+    const rect = flowGraphCanvas.getBoundingClientRect();
+    return { mx: e.clientX - rect.left, my: e.clientY - rect.top };
+}
+
+function finishFlowNodeDrag() {
+    if (!_fgDrag) {
+        return;
+    }
+    const drag = _fgDrag;
+    _fgDrag = null;
+    document.removeEventListener("mousemove", onFlowNodeDragMove);
+    document.removeEventListener("mouseup", finishFlowNodeDrag);
+    if (flowGraphCanvas) {
+        flowGraphCanvas.style.cursor = "default";
+    }
+
+    if (!drag.moved || !currentProject || !flowGraphWrap) {
+        _fgDragPos = null;
+        renderFlowGraph();
+        return;
+    }
+
+    const page = currentProject.pages[drag.pageIndex];
+    if (!page || !_fgDragPos) {
+        _fgDragPos = null;
+        renderFlowGraph();
+        return;
+    }
+
+    page.flowX = _fgDragPos.x;
+    page.flowY = _fgDragPos.y;
+    _fgSuppressClick = true;
+    _fgDragPos = null;
+    renderFlowGraph();
+    vscode.postMessage({
+        type: "updatePage",
+        pageIndex: drag.pageIndex,
+        patch: { flowX: page.flowX, flowY: page.flowY }
+    });
+}
+
+function onFlowNodeDragMove(e) {
+    if (!_fgDrag || !flowGraphWrap) {
+        return;
+    }
+    const W = flowGraphWrap.clientWidth;
+    const H = flowGraphWrap.clientHeight;
+    const { mx, my } = flowCanvasPoint(e);
+    const dx = mx - _fgDrag.pointerX;
+    const dy = my - _fgDrag.pointerY;
+    if (!_fgDrag.moved && Math.hypot(dx, dy) >= FG_DRAG_THRESHOLD) {
+        _fgDrag.moved = true;
+    }
+    const pos = clampFlowNodePos(_fgDrag.nodeX + dx, _fgDrag.nodeY + dy, W, H);
+    _fgDragPos = { pageIndex: _fgDrag.pageIndex, x: pos.x, y: pos.y };
+    if (flowGraphCanvas) {
+        flowGraphCanvas.style.cursor = "grabbing";
+    }
+    renderFlowGraph();
+}
+
+function toggleFlowLinkMode() {
+    const on = !flowGraphWrap?.classList.contains("linking");
+    setFlowLinkMode(on);
+    if (on) {
+        clearFlowGraphSelection();
+    }
+    renderFlowGraph();
+}
+
+function renderFlowPanel() {
+    if (isWorkspaceFlowActive()) {
+        renderFlowGraph();
+        if (_fgSelectedPageIndex >= 0) {
+            renderFlowPageTransitions(_fgSelectedPageIndex);
+        }
+    }
+}
+
+function _fgBezierPt(p0, p1, p2, p3, t) {
+    const mt = 1 - t;
+    return mt * mt * mt * p0 + 3 * mt * mt * t * p1 + 3 * mt * t * t * p2 + t * t * t * p3;
+}
+
+function _fgArrowHead(ctx, cpx, cpy, tx, ty, color, size) {
+    const angle = Math.atan2(ty - cpy, tx - cpx);
+    ctx.beginPath();
+    ctx.moveTo(tx, ty);
+    ctx.lineTo(tx - size * Math.cos(angle - Math.PI / 6), ty - size * Math.sin(angle - Math.PI / 6));
+    ctx.lineTo(tx - size * Math.cos(angle + Math.PI / 6), ty - size * Math.sin(angle + Math.PI / 6));
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+}
+
+function _fgTruncateText(ctx, text, maxW) {
+    if (ctx.measureText(text).width <= maxW) return text;
+    let t = text;
+    while (t.length > 1 && ctx.measureText(t + "…").width > maxW) t = t.slice(0, -1);
+    return t + "…";
+}
+
+function _fgTargetPageIndex(flow) {
+    return currentProject?.pages.findIndex(p => p.id === flow.targetPageId) ?? -1;
+}
+
+function _fgFlowEdgeLabelsText(entries) {
+    if (!entries.length) {
+        return "";
+    }
+    if (entries.length === 1) {
+        return _fgFlowEdgeLabel(entries[0].flow);
+    }
+    return entries.map(e => _fgFlowEdgeLabel(e.flow)).join(" · ");
+}
+
+function _fgEdgeDashStyle(entries) {
+    return entries.length > 0 && entries.every(e => e.flow.kind === "swipe") ? [5, 4] : [];
+}
+
+/** @returns {{ sx: number, sy: number, tx: number, ty: number, cp1x: number, cp1y: number, cp2x: number, cp2y: number, startPageIndex: number, endPageIndex: number }} */
+function _fgPairGeometry(nodeFrom, nodeTo, curveOffset = 0) {
+    const sameRow = Math.abs(nodeTo.y - nodeFrom.y) < FG_NODE_H * 0.5;
+    let sx, sy, tx, ty, cp1x, cp1y, cp2x, cp2y;
+
+    if (sameRow) {
+        const goRight = nodeTo.x + nodeTo.w / 2 >= nodeFrom.x + nodeFrom.w / 2;
+        sx = goRight ? nodeFrom.x + nodeFrom.w : nodeFrom.x;
+        sy = nodeFrom.y + nodeFrom.h / 2;
+        tx = goRight ? nodeTo.x : nodeTo.x + nodeTo.w;
+        ty = nodeTo.y + nodeTo.h / 2;
+        const curveDrop = FG_GAP_Y * 0.55 + (curveOffset % 3) * 14;
+        cp1x = sx + (goRight ? 20 : -20);
+        cp1y = sy + curveDrop;
+        cp2x = tx + (goRight ? -20 : 20);
+        cp2y = ty + curveDrop;
+    } else {
+        const goDown = nodeTo.y + nodeTo.h / 2 >= nodeFrom.y + nodeFrom.h / 2;
+        sx = nodeFrom.x + nodeFrom.w / 2;
+        sy = goDown ? nodeFrom.y + nodeFrom.h : nodeFrom.y;
+        tx = nodeTo.x + nodeTo.w / 2;
+        ty = goDown ? nodeTo.y : nodeTo.y + nodeTo.h;
+        const dy = ty - sy;
+        cp1x = sx;
+        cp1y = sy + dy * 0.45;
+        cp2x = tx;
+        cp2y = ty - dy * 0.45;
+    }
+
+    return {
+        sx,
+        sy,
+        tx,
+        ty,
+        cp1x,
+        cp1y,
+        cp2x,
+        cp2y,
+        startPageIndex: nodeFrom.index,
+        endPageIndex: nodeTo.index
+    };
+}
+
+function _fgBuildVisualFlowEdges(flows) {
+    /** @type {Map<string, { low: number, high: number, lowToHigh: Array<{ flow: object, flowIndex: number }>, highToLow: Array<{ flow: object, flowIndex: number }> }>} */
+    const pairs = new Map();
+
+    flows.forEach((f, fi) => {
+        const tgtIdx = _fgTargetPageIndex(f);
+        if (tgtIdx < 0 || tgtIdx === f.sourcePageIndex) {
+            return;
+        }
+        const low = Math.min(f.sourcePageIndex, tgtIdx);
+        const high = Math.max(f.sourcePageIndex, tgtIdx);
+        const key = `${low}-${high}`;
+        if (!pairs.has(key)) {
+            pairs.set(key, { low, high, lowToHigh: [], highToLow: [] });
+        }
+        const bucket = pairs.get(key);
+        const entry = { flow: f, flowIndex: fi };
+        if (f.sourcePageIndex === low) {
+            bucket.lowToHigh.push(entry);
+        } else {
+            bucket.highToLow.push(entry);
+        }
+    });
+
+    /** @type {Array<{ bidirectional: boolean, low: number, high: number, lowToHigh: Array<{ flow: object, flowIndex: number }>, highToLow: Array<{ flow: object, flowIndex: number }> }>} */
+    const visual = [];
+    for (const bucket of pairs.values()) {
+        const bidirectional = bucket.lowToHigh.length > 0 && bucket.highToLow.length > 0;
+        if (bidirectional) {
+            visual.push({
+                bidirectional: true,
+                low: bucket.low,
+                high: bucket.high,
+                lowToHigh: bucket.lowToHigh,
+                highToLow: bucket.highToLow
             });
         } else {
-            main.title = "Go to source widget";
-            meta.textContent = `${f.componentId} (${f.componentType}) · ${f.trigger}${animLabel}`;
-            main.addEventListener("click", () => {
-                navigateToPageIndex(f.sourcePageIndex);
-                inspectorShowingPage = false;
-                selectedComponentOrder = [f.componentId];
-                drawDesignOverlay();
-                renderInspector();
-            });
-        }
-        main.appendChild(route);
-        main.appendChild(meta);
-
-        const removeBtn = document.createElement("button");
-        removeBtn.type = "button";
-        removeBtn.className = "flow-list-remove";
-        removeBtn.textContent = "×";
-        removeBtn.title = "Remove this flow";
-        removeBtn.addEventListener("click", e => {
-            e.stopPropagation();
-            if (f.kind === "swipe") {
-                vscode.postMessage({
-                    type: "removePageSwipeFlow",
-                    sourcePageIndex: f.sourcePageIndex,
-                    direction: f.direction
-                });
-            } else {
-                vscode.postMessage({
-                    type: "removeNavigateFlow",
-                    sourcePageIndex: f.sourcePageIndex,
-                    componentId: f.componentId,
-                    trigger: f.trigger,
-                    targetPageId: f.targetPageId
+            const entries = bucket.lowToHigh.length ? bucket.lowToHigh : bucket.highToLow;
+            for (let i = 0; i < entries.length; i++) {
+                visual.push({
+                    bidirectional: false,
+                    low: bucket.low,
+                    high: bucket.high,
+                    entries: [entries[i]],
+                    curveOffset: i
                 });
             }
-        });
-
-        li.appendChild(main);
-        li.appendChild(removeBtn);
-        flowListEl.appendChild(li);
+        }
     }
+    return visual;
+}
+
+function _fgDrawFlowEdge(ctx, geom, edgeColor, lineWidth, dashStyle, arrowEnds) {
+    ctx.beginPath();
+    ctx.moveTo(geom.sx, geom.sy);
+    ctx.bezierCurveTo(geom.cp1x, geom.cp1y, geom.cp2x, geom.cp2y, geom.tx, geom.ty);
+    ctx.strokeStyle = edgeColor;
+    ctx.lineWidth = lineWidth;
+    ctx.setLineDash(dashStyle);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    const headSize = lineWidth >= 2.5 ? 8 : 6;
+    if (arrowEnds.to) {
+        _fgArrowHead(ctx, geom.cp2x, geom.cp2y, geom.tx, geom.ty, edgeColor, headSize);
+    }
+    if (arrowEnds.from) {
+        _fgArrowHead(ctx, geom.cp1x, geom.cp1y, geom.sx, geom.sy, edgeColor, headSize);
+    }
+}
+
+function _fgHitTestFlowEdges(mx, my) {
+    let bestEdge = -1;
+    let bestLabel = -1;
+    let bestDist = 16;
+
+    for (let ei = 0; ei < _fgEdges.length; ei++) {
+        const ed = _fgEdges[ei];
+        for (let li = 0; li < ed.labels.length; li++) {
+            const lb = ed.labels[li];
+            const d = Math.hypot(mx - lb.mx, my - lb.my);
+            if (d < bestDist) {
+                bestDist = d;
+                bestEdge = ei;
+                bestLabel = li;
+            }
+        }
+        if (bestEdge === ei) {
+            continue;
+        }
+        const mid = ed.labels[Math.floor(ed.labels.length / 2)] ?? ed.labels[0];
+        if (mid) {
+            const d = Math.hypot(mx - mid.mx, my - mid.my);
+            if (d < bestDist) {
+                bestDist = d;
+                bestEdge = ei;
+                bestLabel = -1;
+            }
+        }
+    }
+    return { edge: bestEdge, label: bestLabel };
+}
+
+function renderFlowGraph() {
+    if (!flowGraphCanvas || !flowGraphWrap || !currentProject) return;
+
+    const W = flowGraphWrap.clientWidth;
+    const H = flowGraphWrap.clientHeight;
+    if (W < 2 || H < 2) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    if (flowGraphCanvas.width !== W * dpr || flowGraphCanvas.height !== H * dpr) {
+        flowGraphCanvas.width = W * dpr;
+        flowGraphCanvas.height = H * dpr;
+    }
+    flowGraphCanvas.style.width = W + "px";
+    flowGraphCanvas.style.height = H + "px";
+
+    const ctx = flowGraphCanvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+
+    const pages = currentProject.pages;
+    if (!pages.length) {
+        ctx.fillStyle = "#888";
+        ctx.font = "12px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("No pages in project.", W / 2, H / 2);
+        return;
+    }
+
+    const cols = flowGraphCols(W);
+    _fgNodes = pages.map((page, i) => {
+        const pos = flowNodePosition(page, i, cols);
+        const clamped = clampFlowNodePos(pos.x, pos.y, W, H);
+        return {
+            page,
+            index: i,
+            x: clamped.x,
+            y: clamped.y,
+            w: FG_NODE_W,
+            h: FG_NODE_H
+        };
+    });
+
+    const flows = collectAllFlowsFromProject();
+    const visualEdges = _fgBuildVisualFlowEdges(flows);
+    _fgEdges = [];
+
+    for (let ei = 0; ei < visualEdges.length; ei++) {
+        const ve = visualEdges[ei];
+        const nodeLow = _fgNodes[ve.low];
+        const nodeHigh = _fgNodes[ve.high];
+        if (!nodeLow || !nodeHigh) {
+            continue;
+        }
+
+        const geom = _fgPairGeometry(nodeLow, nodeHigh, 0);
+        const isHover = _fgHoverEdge === ei;
+        const edgeColor = isHover ? "#4ea2e0" : "#3a7ab8";
+        const lineWidth = isHover ? 2.5 : 1.5;
+
+        /** @type {Array<{ flow: object, flowIndex: number, mx: number, my: number, text: string }>} */
+        const labels = [];
+
+        if (ve.bidirectional) {
+            const dashStyle = _fgEdgeDashStyle([...ve.lowToHigh, ...ve.highToLow]);
+            _fgDrawFlowEdge(ctx, geom, edgeColor, lineWidth, dashStyle, { from: true, to: true });
+
+            const tLow = 0.35;
+            const tHigh = 0.65;
+            labels.push({
+                flow: ve.highToLow[0].flow,
+                flowIndex: ve.highToLow[0].flowIndex,
+                mx: _fgBezierPt(geom.sx, geom.cp1x, geom.cp2x, geom.tx, tLow),
+                my: _fgBezierPt(geom.sy, geom.cp1y, geom.cp2y, geom.ty, tLow),
+                text: _fgFlowEdgeLabelsText(ve.highToLow)
+            });
+            labels.push({
+                flow: ve.lowToHigh[0].flow,
+                flowIndex: ve.lowToHigh[0].flowIndex,
+                mx: _fgBezierPt(geom.sx, geom.cp1x, geom.cp2x, geom.tx, tHigh),
+                my: _fgBezierPt(geom.sy, geom.cp1y, geom.cp2y, geom.ty, tHigh),
+                text: _fgFlowEdgeLabelsText(ve.lowToHigh)
+            });
+
+            _fgEdges.push({
+                bidirectional: true,
+                flows: [...ve.lowToHigh, ...ve.highToLow].map(e => e.flow),
+                labels,
+                ...geom,
+                dashStyle
+            });
+        } else {
+            const entry = ve.entries[0];
+            const dashStyle = _fgEdgeDashStyle([entry]);
+            const src = _fgNodes[entry.flow.sourcePageIndex];
+            const tgtIdx = _fgTargetPageIndex(entry.flow);
+            const tgt = _fgNodes[tgtIdx];
+            if (!src || !tgt) {
+                continue;
+            }
+            const uniGeom = _fgPairGeometry(src, tgt, ve.curveOffset ?? 0);
+            _fgDrawFlowEdge(ctx, uniGeom, edgeColor, lineWidth, dashStyle, { from: false, to: true });
+
+            labels.push({
+                flow: entry.flow,
+                flowIndex: entry.flowIndex,
+                mx: _fgBezierPt(uniGeom.sx, uniGeom.cp1x, uniGeom.cp2x, uniGeom.tx, 0.5),
+                my: _fgBezierPt(uniGeom.sy, uniGeom.cp1y, uniGeom.cp2y, uniGeom.ty, 0.5),
+                text: _fgFlowEdgeLabel(entry.flow)
+            });
+
+            _fgEdges.push({
+                bidirectional: false,
+                flows: [entry.flow],
+                labels,
+                ...uniGeom,
+                dashStyle
+            });
+        }
+
+        const edge = _fgEdges[_fgEdges.length - 1];
+        ctx.font = "10px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        for (let li = 0; li < edge.labels.length; li++) {
+            const lb = edge.labels[li];
+            const labelHover = isHover && (_fgHoverEdgeLabel === li || (_fgHoverEdgeLabel < 0 && edge.labels.length === 1));
+            ctx.fillStyle = labelHover ? "#cce4f7" : "#8ab4d9";
+            const yOff = edge.bidirectional ? (li === 0 ? -10 : 10) : -10;
+            ctx.fillText(_fgTruncateText(ctx, lb.text, 72), lb.mx, lb.my + yOff);
+
+            if (labelHover || (isHover && edge.labels.length === 1)) {
+                ctx.beginPath();
+                ctx.arc(lb.mx, lb.my, FG_DEL_R, 0, Math.PI * 2);
+                ctx.fillStyle = "#cc3333";
+                ctx.fill();
+                ctx.fillStyle = "#fff";
+                ctx.font = "bold 11px sans-serif";
+                ctx.fillText("×", lb.mx, lb.my + 0.5);
+                ctx.font = "10px sans-serif";
+            }
+        }
+    }
+
+    for (const node of _fgNodes) {
+        const isSelected = node.index === _fgSelectedPageIndex;
+        const isLinkSource = _fgLinkPick && node.index === _fgLinkPick.sourceIndex;
+        const r = 6;
+
+        ctx.beginPath();
+        if (ctx.roundRect) {
+            ctx.roundRect(node.x, node.y, node.w, node.h, r);
+        } else {
+            // fallback for older browsers
+            const { x, y, w, h } = node;
+            ctx.moveTo(x + r, y);
+            ctx.lineTo(x + w - r, y); ctx.arcTo(x + w, y, x + w, y + r, r);
+            ctx.lineTo(x + w, y + h - r); ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+            ctx.lineTo(x + r, y + h); ctx.arcTo(x, y + h, x, y + h - r, r);
+            ctx.lineTo(x, y + r); ctx.arcTo(x, y, x + r, y, r);
+            ctx.closePath();
+        }
+        ctx.fillStyle = isSelected || isLinkSource ? "#094771" : "#2a2d2e";
+        ctx.fill();
+        ctx.strokeStyle = isSelected || isLinkSource ? "#007acc" : "#555";
+        ctx.lineWidth = isSelected || isLinkSource ? 2 : 1;
+        ctx.stroke();
+
+        const cx = node.x + node.w / 2;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "alphabetic";
+        ctx.font = "bold 13px sans-serif";
+        ctx.fillStyle = isSelected || isLinkSource ? "#fff" : "#ddd";
+        ctx.fillText(_fgTruncateText(ctx, node.page.name, node.w - 14), cx, node.y + node.h / 2 - 2);
+
+        ctx.font = "10px sans-serif";
+        ctx.fillStyle = isSelected || isLinkSource ? "#b3d4f5" : "#888";
+        ctx.fillText(_fgTruncateText(ctx, node.page.id, node.w - 12), cx, node.y + node.h / 2 + 14);
+    }
+
+    if (!flows.length && pages.length) {
+        ctx.fillStyle = "#666";
+        ctx.font = "12px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("+ Add connection — or drag pages to arrange · click a page to edit transitions", W / 2, H - 28);
+    }
+}
+
+// ── Flow graph mouse interaction ───────────────────────────────────────────────
+
+if (flowGraphCanvas) {
+    flowGraphCanvas.addEventListener("mousedown", e => {
+        if (!isWorkspaceFlowActive() || !currentProject || e.button !== 0) {
+            return;
+        }
+        if (flowGraphWrap?.classList.contains("linking")) {
+            return;
+        }
+        const { mx, my } = flowCanvasPoint(e);
+        const node = hitTestFlowNode(mx, my);
+        if (!node) {
+            return;
+        }
+        e.preventDefault();
+        _fgDrag = {
+            pageIndex: node.index,
+            pointerX: mx,
+            pointerY: my,
+            nodeX: node.x,
+            nodeY: node.y,
+            moved: false
+        };
+        _fgDragPos = null;
+        document.addEventListener("mousemove", onFlowNodeDragMove);
+        document.addEventListener("mouseup", finishFlowNodeDrag);
+    });
+
+    flowGraphCanvas.addEventListener("mousemove", e => {
+        if (!isWorkspaceFlowActive()) return;
+        if (_fgDrag) {
+            return;
+        }
+        const rect = flowGraphCanvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+
+        let newHover = -1;
+        let newHoverLabel = -1;
+        const hit = _fgHitTestFlowEdges(mx, my);
+        if (hit.edge >= 0) {
+            newHover = hit.edge;
+            newHoverLabel = hit.label;
+        }
+        const node = hitTestFlowNode(mx, my);
+        let cursor = "default";
+        if (newHover >= 0) {
+            cursor = "pointer";
+        } else if (node) {
+            cursor = flowGraphWrap?.classList.contains("linking") ? "crosshair" : "grab";
+        }
+        if (newHover !== _fgHoverEdge || newHoverLabel !== _fgHoverEdgeLabel) {
+            _fgHoverEdge = newHover;
+            _fgHoverEdgeLabel = newHoverLabel;
+            flowGraphCanvas.style.cursor = cursor;
+            renderFlowGraph();
+        } else if (flowGraphCanvas.style.cursor !== cursor) {
+            flowGraphCanvas.style.cursor = cursor;
+        }
+    });
+
+    flowGraphCanvas.addEventListener("mouseleave", () => {
+        if (_fgHoverEdge !== -1) {
+            _fgHoverEdge = -1;
+            _fgHoverEdgeLabel = -1;
+            flowGraphCanvas.style.cursor = "default";
+            renderFlowGraph();
+        }
+    });
+
+    flowGraphCanvas.addEventListener("click", e => {
+        if (!isWorkspaceFlowActive() || !currentProject) {
+            return;
+        }
+        if (_fgSuppressClick) {
+            _fgSuppressClick = false;
+            return;
+        }
+        const rect = flowGraphCanvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+
+        if (_fgHoverEdge >= 0 && _fgHoverEdge < _fgEdges.length) {
+            const ed = _fgEdges[_fgHoverEdge];
+            const labelIdx = _fgHoverEdgeLabel >= 0 ? _fgHoverEdgeLabel : 0;
+            const lb = ed.labels[labelIdx];
+            if (lb) {
+                const dx = mx - lb.mx;
+                const dy = my - lb.my;
+                if (Math.sqrt(dx * dx + dy * dy) < FG_DEL_R + 4) {
+                    removeFlowFromProject(lb.flow);
+                    _fgHoverEdge = -1;
+                    _fgHoverEdgeLabel = -1;
+                    return;
+                }
+                selectFlowGraphPage(lb.flow.sourcePageIndex);
+                showFlowTransitionEditor("edit", lb.flow.sourcePageIndex, lb.flow);
+                return;
+            }
+        }
+
+        const node = hitTestFlowNode(mx, my);
+        if (node) {
+            if (flowGraphWrap?.classList.contains("linking")) {
+                if (!_fgLinkPick) {
+                    _fgLinkPick = { sourceIndex: node.index };
+                    renderFlowGraph();
+                    return;
+                }
+                if (_fgLinkPick.sourceIndex !== node.index) {
+                    const src = _fgLinkPick.sourceIndex;
+                    setFlowLinkMode(false);
+                    selectFlowGraphPage(src);
+                    showFlowTransitionEditor("new", src, null);
+                    if (flowToPage) {
+                        const tgtPage = currentProject.pages[node.index];
+                        if (tgtPage) {
+                            flowToPage.value = tgtPage.id;
+                        }
+                    }
+                }
+                return;
+            }
+            selectFlowGraphPage(node.index);
+            return;
+        }
+
+        clearFlowGraphSelection();
+        setFlowLinkMode(false);
+    });
+
+    flowGraphCanvas.addEventListener("dblclick", e => {
+        if (!isWorkspaceFlowActive() || !currentProject) {
+            return;
+        }
+        const rect = flowGraphCanvas.getBoundingClientRect();
+        const node = hitTestFlowNode(e.clientX - rect.left, e.clientY - rect.top);
+        if (node) {
+            openPageTabByIndex(node.index, true);
+        }
+    });
+}
+
+// Redraw graph on panel resize (rAF avoids ResizeObserver loop warnings)
+let flowGraphResizeRaf = 0;
+if (flowGraphWrap && typeof ResizeObserver !== "undefined") {
+    new ResizeObserver(() => {
+        if (flowGraphResizeRaf) {
+            return;
+        }
+        flowGraphResizeRaf = requestAnimationFrame(() => {
+            flowGraphResizeRaf = 0;
+            if (isWorkspaceFlowActive()) {
+                renderFlowGraph();
+            }
+        });
+    }).observe(flowGraphWrap);
 }
 
 if (flowFromPage) {
@@ -3074,50 +4459,30 @@ if (flowAnim) {
 }
 
 if (btnFlowAdd) {
-    btnFlowAdd.addEventListener("click", () => {
-        if (!currentProject || !flowFromPage || !flowToPage) {
+    btnFlowAdd.addEventListener("click", () => submitFlowTransition());
+}
+if (btnFlowCancelEdit) {
+    btnFlowCancelEdit.addEventListener("click", () => hideFlowTransitionEditor());
+}
+if (btnFlowAddLink) {
+    btnFlowAddLink.addEventListener("click", () => toggleFlowLinkMode());
+}
+if (btnFlowInspectorClose) {
+    btnFlowInspectorClose.addEventListener("click", () => clearFlowGraphSelection());
+}
+if (btnFlowNewTransition) {
+    btnFlowNewTransition.addEventListener("click", () => {
+        if (_fgSelectedPageIndex < 0) {
             return;
         }
-        const sourcePageIndex = parseInt(flowFromPage.value, 10) || 0;
-        const targetPageId = flowToPage.value;
-        const anim = flowAnim?.value ?? "none";
-        const time = flowTime ? parseInt(flowTime.value, 10) : 300;
-        if (!targetPageId) {
-            return;
+        showFlowTransitionEditor("new", _fgSelectedPageIndex, null);
+    });
+}
+if (btnFlowOpenPagePreview) {
+    btnFlowOpenPagePreview.addEventListener("click", () => {
+        if (_fgSelectedPageIndex >= 0) {
+            openPageTabByIndex(_fgSelectedPageIndex, true);
         }
-        const kind = flowKind?.value ?? "component";
-        if (kind === "swipe") {
-            const direction = flowSwipeDirection?.value;
-            if (!direction) {
-                return;
-            }
-            vscode.postMessage({
-                type: "addPageSwipeFlow",
-                sourcePageIndex,
-                direction,
-                targetPageId,
-                anim,
-                time: Number.isFinite(time) ? time : 300
-            });
-            return;
-        }
-        if (!flowComponent || !flowTrigger) {
-            return;
-        }
-        const componentId = flowComponent.value;
-        const trigger = flowTrigger.value;
-        if (!componentId) {
-            return;
-        }
-        vscode.postMessage({
-            type: "addNavigateFlow",
-            sourcePageIndex,
-            componentId,
-            trigger,
-            targetPageId,
-            anim,
-            time: Number.isFinite(time) ? time : 300
-        });
     });
 }
 
@@ -3681,32 +5046,32 @@ function wireProjectStylesAndFieldsActions() {
         });
     });
 
-    const addField = inspectorForm.querySelector(`[data-proj-field-add="1"]`);
-    if (addField && !addField.dataset.wired) {
-        addField.dataset.wired = "1";
-        addField.addEventListener("click", () => {
-            const next = (currentProject.dataModel?.fields ?? []).slice();
-            const id = nextUniqueIdAmong(next.map(f => f.id), "field");
-            next.push({ id, type: "string", default: "" });
+    const addProp = inspectorForm.querySelector(`[data-proj-prop-add="1"]`);
+    if (addProp && !addProp.dataset.wired) {
+        addProp.dataset.wired = "1";
+        addProp.addEventListener("click", () => {
+            const next = getPreviewProperties().slice();
+            const id = nextUniqueIdAmong(next.map(f => f.id), "prop");
+            next.push({ id, type: "string", default: "", direction: "unknown" });
             vscode.postMessage({
                 type: "updatePage",
                 pageIndex: currentPageIndex,
-                patch: { projDataFields: next }
+                patch: { projModelProperties: next }
             });
         });
     }
-    inspectorForm.querySelectorAll(`[data-proj-field-remove]`).forEach(btn => {
+    inspectorForm.querySelectorAll(`[data-proj-prop-remove]`).forEach(btn => {
         if (btn.dataset.wired) return;
         btn.dataset.wired = "1";
         btn.addEventListener("click", () => {
-            const idx = Number(/** @type {HTMLElement} */ (btn).dataset.projFieldRemove);
+            const idx = Number(/** @type {HTMLElement} */ (btn).dataset.projPropRemove);
             if (!Number.isInteger(idx)) return;
-            const next = (currentProject.dataModel?.fields ?? []).slice();
+            const next = getPreviewProperties().slice();
             next.splice(idx, 1);
             vscode.postMessage({
                 type: "updatePage",
                 pageIndex: currentPageIndex,
-                patch: { projDataFields: next }
+                patch: { projModelProperties: next }
             });
         });
     });
@@ -4062,7 +5427,7 @@ function renderPageInspectorHtml(page, project) {
         );
 
     html += projectStylesPanelHtml(project);
-    html += projectDataModelPanelHtml(project);
+    html += projectPropertiesPanelHtml(project);
     return html;
 }
 
@@ -4096,36 +5461,60 @@ function projectStylesPanelHtml(project) {
     );
 }
 
-function projectDataModelPanelHtml(project) {
-    const fields = project.dataModel?.fields ?? [];
+function projectPropertiesPanelHtml(project) {
+    const props = getPreviewPropertiesFromProject(project);
     let inner = "";
-    if (fields.length === 0) {
-        inner += `<p style="font-size:11px;color:#888;margin:0 0 6px;">No data fields yet.</p>`;
+    if (props.length === 0) {
+        inner +=
+            `<p style="font-size:11px;color:#888;margin:0 0 6px;">No properties yet. Used for preview mocks only (Phase 1 — no codegen).</p>`;
     } else {
-        inner += `<div data-proj-fields-host="1">`;
-        fields.forEach((f, i) => {
+        inner += `<div data-proj-props-host="1">`;
+        props.forEach((f, i) => {
             const sel = (cur, opts) =>
                 opts.map(v => `<option value="${esc(v)}" ${v === cur ? "selected" : ""}>${esc(v)}</option>`).join("");
+            const showRange = f.type === "int" || f.type === "float";
+            const dir = f.direction ?? "unknown";
             inner +=
-                `<div class="proj-field-row" data-proj-field-idx="${i}">` +
+                `<div class="proj-prop-row" data-proj-prop-idx="${i}">` +
                 `<div class="row2"><div class="field"><label>id</label>` +
-                `<input type="text" data-proj-field-field="id" value="${esc(f.id)}" /></div>` +
+                `<input type="text" data-proj-prop-field="id" value="${esc(f.id)}" /></div>` +
                 `<div class="field"><label>type</label>` +
-                `<select data-proj-field-field="type">${sel(f.type, ["string", "int", "float", "bool"])}</select></div></div>` +
+                `<select data-proj-prop-field="type">${sel(f.type, ["string", "int", "float", "bool"])}</select></div></div>` +
                 `<div class="field"><label>default</label>` +
-                `<input type="text" data-proj-field-field="default" value="${esc(
+                `<input type="text" data-proj-prop-field="default" value="${esc(
                     f.default === undefined ? "" : String(f.default)
                 )}" /></div>` +
-                `<button type="button" class="tb-btn-small" data-proj-field-remove="${i}">Remove</button>` +
+                (showRange
+                    ? `<div class="row2"><div class="field"><label>min</label>` +
+                      `<input type="number" data-proj-prop-field="min" value="${esc(
+                          f.min === undefined ? "" : String(f.min)
+                      )}" step="any" /></div>` +
+                      `<div class="field"><label>max</label>` +
+                      `<input type="number" data-proj-prop-field="max" value="${esc(
+                          f.max === undefined ? "" : String(f.max)
+                      )}" step="any" /></div></div>`
+                    : "") +
+                `<div class="field"><label>direction</label>` +
+                `<select data-proj-prop-field="direction">${sel(dir, ["unknown", "push", "pull"])}</select></div>` +
+                `<button type="button" class="tb-btn-small" data-proj-prop-remove="${i}">Remove</button>` +
                 `</div>`;
         });
         inner += `</div>`;
     }
     return (
-        `<div class="inspector-group-title">Data fields ` +
-        `<button type="button" class="tb-btn-small" data-proj-field-add="1" title="Add data field">+</button></div>` +
+        `<div class="inspector-group-title">Properties ` +
+        `<button type="button" class="tb-btn-small" data-proj-prop-add="1" title="Add property">+</button></div>` +
         inner
     );
+}
+
+function getPreviewPropertiesFromProject(project) {
+    if (!project) return [];
+    if (project.model?.properties !== undefined) {
+        return project.model.properties;
+    }
+    const legacy = project.dataModel?.fields;
+    return Array.isArray(legacy) ? legacy : [];
 }
 
 function esc(s) {
@@ -4879,7 +6268,7 @@ const NUMERIC_BINDING_WIDGETS = new Set(["slider", "bar", "arc", "knob"]);
 /**
  * "Named styles", "Bindings", and "Animations" inspector sections.
  * Each renders only when the project has the relevant declarations (project.styles[],
- * project.dataModel.fields[]) — otherwise the section is hidden to keep the UI light.
+ * model.properties / dataModel.fields) — otherwise hidden.
  */
 function inspectorBindingsAndStylesSection(comp) {
     let html = "";
@@ -4902,7 +6291,7 @@ function inspectorBindingsAndStylesSection(comp) {
     }
 
     if (NUMERIC_BINDING_WIDGETS.has(comp.type)) {
-        const fields = (currentProject?.dataModel?.fields ?? []).filter(
+        const fields = getPreviewProperties().filter(
             f => f && (f.type === "int" || f.type === "float")
         );
         if (fields.length > 0) {
@@ -5810,18 +7199,21 @@ function readPageInspectorPatch() {
         patch.projStyles = out;
     }
 
-    const fieldsHost = inspectorForm.querySelector(`[data-proj-fields-host="1"]`);
-    if (fieldsHost && currentProject) {
-        const rows = [.../** @type {NodeListOf<HTMLElement>} */ (fieldsHost.querySelectorAll(".proj-field-row"))];
+    const propsHost = inspectorForm.querySelector(`[data-proj-props-host="1"]`);
+    if (propsHost && currentProject) {
+        const rows = [.../** @type {NodeListOf<HTMLElement>} */ (propsHost.querySelectorAll(".proj-prop-row"))];
         const out = rows
             .map(row => {
                 const get = key =>
                     /** @type {HTMLInputElement | HTMLSelectElement | null} */ (
-                        row.querySelector(`[data-proj-field-field="${key}"]`)
+                        row.querySelector(`[data-proj-prop-field="${key}"]`)
                     );
                 const idEl = get("id");
                 const typeEl = get("type");
                 const defEl = get("default");
+                const minEl = get("min");
+                const maxEl = get("max");
+                const dirEl = get("direction");
                 const id = idEl?.value.trim();
                 const type = typeEl?.value;
                 if (!id || !type) return null;
@@ -5849,10 +7241,21 @@ function readPageInspectorPatch() {
                     }
                     if (parsed !== undefined) entry.default = parsed;
                 }
+                if ((type === "int" || type === "float") && minEl && minEl.value !== "") {
+                    const n = Number(minEl.value);
+                    if (Number.isFinite(n)) entry.min = n;
+                }
+                if ((type === "int" || type === "float") && maxEl && maxEl.value !== "") {
+                    const n = Number(maxEl.value);
+                    if (Number.isFinite(n)) entry.max = n;
+                }
+                if (dirEl && dirEl.value && dirEl.value !== "unknown") {
+                    entry.direction = dirEl.value;
+                }
                 return entry;
             })
             .filter(Boolean);
-        patch.projDataFields = out;
+        patch.projModelProperties = out;
     }
 
     return patch;
@@ -6728,14 +8131,38 @@ function pumpLvglAfterPointer(iterations) {
 
 // ── Page navigation ───────────────────────────────────────────────────────────
 
-function navigateToPageIndex(idx) {
+/**
+ * @param {number} idx
+ * @param {{ skipTabSync?: boolean }} [options]
+ */
+function navigateToPageIndex(idx, options = {}) {
     if (!currentProject) {
         return;
     }
     const max = currentProject.pages.length - 1;
     const next = Math.min(Math.max(0, idx), Math.max(0, max));
+    const page = currentProject.pages[next];
+
+    if (!options.skipTabSync && page) {
+        const existing = workspaceTabs.find(t => t.kind === "page" && t.pageId === page.id);
+        if (existing && existing.id !== activeWorkspaceTabId) {
+            activateWorkspaceTab(existing.id);
+            return;
+        }
+        const active = getActiveWorkspaceTab();
+        if (active?.kind === "flow") {
+            openPageTabByIndex(next, true);
+            return;
+        }
+        if (active?.kind === "page") {
+            active.pageId = page.id;
+            renderWorkspaceTabs();
+        }
+    }
+
     if (next === currentPageIndex) {
         renderPageList();
+        renderWorkspaceTabs();
         return;
     }
     currentPageIndex = next;
@@ -6765,6 +8192,13 @@ function navigateToPageIndex(idx) {
     renderToolbarWidgetSelect();
     renderWidgetTree();
     scheduleImageOverlaySync();
+    if (options.skipTabSync && page) {
+        const active = getActiveWorkspaceTab();
+        if (active?.kind === "page") {
+            active.pageId = page.id;
+            renderWorkspaceTabs();
+        }
+    }
 }
 
 /** Cycle-safe check: is `descendantId` inside `ancestorId`'s subtree? */
@@ -7031,7 +8465,15 @@ function renderPageList() {
         const li = document.createElement("li");
         const btn = document.createElement("button");
         btn.type = "button";
-        btn.className = "page-list-item" + (i === currentPageIndex ? " active" : "");
+        const tabOpen = workspaceTabs.some(t => t.kind === "page" && t.pageId === p.id);
+        const tabActive = i === currentPageIndex && isWorkspacePageActive();
+        btn.className =
+            "page-list-item" +
+            (tabActive ? " active" : "") +
+            (tabOpen && !tabActive ? " open" : "");
+        btn.title = tabOpen
+            ? "Open in workspace (Ctrl+click for another tab)"
+            : "Open page in workspace tab";
         btn.dataset.pageIndex = String(i);
         const name = document.createElement("span");
         name.className = "page-list-name";
@@ -7041,7 +8483,15 @@ function renderPageList() {
         idSpan.textContent = p.id;
         btn.appendChild(name);
         btn.appendChild(idSpan);
-        btn.addEventListener("click", () => navigateToPageIndex(i));
+        btn.addEventListener("click", e => {
+            if (e.ctrlKey || e.metaKey) {
+                const tab = { id: nextWorkspaceTabId(), kind: "page", pageId: p.id };
+                workspaceTabs.push(tab);
+                activateWorkspaceTab(tab.id);
+            } else {
+                openPageTabByIndex(i, true);
+            }
+        });
         li.appendChild(btn);
         pageListEl.appendChild(li);
     });
@@ -7243,12 +8693,12 @@ if (btnPlayAnimations) {
     btnPlayAnimations.addEventListener("click", () => {
         const r = playWidgetAnimationsOnCurrentPage();
         if (!r.ok && r.reason) {
-            if (status) {
-                status.textContent = r.reason;
+            if (statusEl) {
+                statusEl.textContent = r.reason;
             }
             log("warn", `play animations: ${r.reason}`);
-        } else if (status && r.started) {
-            status.textContent = `Playing ${r.started} animation(s)…`;
+        } else if (statusEl && r.started) {
+            statusEl.textContent = `Playing ${r.started} animation(s)…`;
         }
     });
 }
@@ -7443,12 +8893,7 @@ function populatePageSelect(pages) {
     });
 }
 
-// Notify host only after listeners are registered (host queues project until this).
-if (!canvas) {
-    log("error", "Preview DOM missing #lvgl-canvas — reload the window");
-}
 renderInspector();
-vscode.postMessage({ type: "ready" });
 
 // ── UI helpers ─────────────────────────────────────────────────────────────────
 function showLoading(visible) {

@@ -576,6 +576,23 @@ export function applyPageInspectorPatch(
         else if (typeof v === "boolean") (page as unknown as Record<string, unknown>).scrollY = v;
     }
 
+    if (Object.prototype.hasOwnProperty.call(patch, "flowX")) {
+        const v = patch.flowX;
+        if (v === null || v === undefined) {
+            delete page.flowX;
+        } else if (typeof v === "number" && Number.isFinite(v)) {
+            page.flowX = Math.round(v);
+        }
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "flowY")) {
+        const v = patch.flowY;
+        if (v === null || v === undefined) {
+            delete page.flowY;
+        } else if (typeof v === "number" && Number.isFinite(v)) {
+            page.flowY = Math.round(v);
+        }
+    }
+
     if (patch.projName !== undefined && typeof patch.projName === "string") {
         const t = patch.projName.trim();
         if (t) {
@@ -708,6 +725,23 @@ export function applyPageInspectorPatch(
             delete project.dataModel;
         } else if (Array.isArray(v)) {
             project.dataModel = { fields: v as NonNullable<typeof project.dataModel>["fields"] };
+        }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(patch, "projModelProperties")) {
+        const v = patch.projModelProperties;
+        project.model ??= {};
+        if (v === null || (Array.isArray(v) && v.length === 0)) {
+            delete project.model.properties;
+            if (!project.model.derived?.length && Object.keys(project.model).length === 0) {
+                delete project.model;
+            }
+        } else if (Array.isArray(v)) {
+            project.model.properties = v as NonNullable<typeof project.model>["properties"];
+            // Phase 1: model.properties replaces legacy dataModel for preview (avoid duplicate ids).
+            if (project.dataModel?.fields?.length) {
+                delete project.dataModel;
+            }
         }
     }
 

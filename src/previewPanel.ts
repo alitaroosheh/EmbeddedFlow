@@ -802,7 +802,8 @@ export class EmbfPreviewPanel {
                 time
             ).then(ok => {
                 if (ok) {
-                    this.reloadPreviewNow(sourcePageIndex, { selectedComponentId: componentId });
+                    this.markInspectorDrivenFileWrite();
+                    this.reloadPreviewNow(sourcePageIndex, { suppressLoadingSpinner: true });
                     this.sendHistoryState();
                 }
             });
@@ -828,7 +829,8 @@ export class EmbfPreviewPanel {
                 targetPageId
             ).then(ok => {
                 if (ok) {
-                    this.reloadPreviewNow(sourcePageIndex);
+                    this.markInspectorDrivenFileWrite();
+                    this.reloadPreviewNow(sourcePageIndex, { suppressLoadingSpinner: true });
                     this.sendHistoryState();
                 }
             });
@@ -855,7 +857,8 @@ export class EmbfPreviewPanel {
                 time
             ).then(ok => {
                 if (ok) {
-                    this.reloadPreviewNow(sourcePageIndex);
+                    this.markInspectorDrivenFileWrite();
+                    this.reloadPreviewNow(sourcePageIndex, { suppressLoadingSpinner: true });
                     this.sendHistoryState();
                 }
             });
@@ -867,7 +870,8 @@ export class EmbfPreviewPanel {
             }
             void removePageSwipeFlowInEmbfFile(this._filePath, sourcePageIndex, direction).then(ok => {
                 if (ok) {
-                    this.reloadPreviewNow(sourcePageIndex);
+                    this.markInspectorDrivenFileWrite();
+                    this.reloadPreviewNow(sourcePageIndex, { suppressLoadingSpinner: true });
                     this.sendHistoryState();
                 }
             });
@@ -1080,9 +1084,118 @@ export class EmbfPreviewPanel {
         #toolbar {
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 10px;
             padding: 6px 10px;
+            flex-wrap: nowrap;
+            min-height: 36px;
+        }
+        .tb-bar-primary {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            flex-shrink: 0;
+        }
+        .tb-bar-context {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex: 1;
+            min-width: 0;
             flex-wrap: wrap;
+        }
+        .tb-menu-wrap {
+            position: relative;
+        }
+        .tb-menu-trigger {
+            background: #3c3c3c;
+            color: #ccc;
+            border: 1px solid #555;
+            padding: 4px 10px;
+            font-size: 12px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .tb-menu-trigger:hover,
+        .tb-menu-trigger.open {
+            background: #4a4a4a;
+            color: #fff;
+            border-color: #007acc;
+        }
+        .tb-menu-panel {
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0;
+            z-index: 50;
+            min-width: 180px;
+            background: #252526;
+            border: 1px solid #555;
+            border-radius: 4px;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+            padding: 4px 0;
+        }
+        .tb-menu-panel[hidden] {
+            display: none !important;
+        }
+        .tb-menu-item {
+            display: block;
+            width: 100%;
+            text-align: left;
+            padding: 6px 12px;
+            border: none;
+            background: transparent;
+            color: #ccc;
+            font-size: 12px;
+            font-family: inherit;
+            cursor: pointer;
+        }
+        .tb-menu-item:hover:not(:disabled) {
+            background: #094771;
+            color: #fff;
+        }
+        .tb-menu-item:disabled {
+            opacity: 0.35;
+            cursor: default;
+        }
+        .tb-menu-check {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 5px 12px;
+            font-size: 12px;
+            color: #ccc;
+            cursor: pointer;
+            user-select: none;
+        }
+        .tb-menu-check:hover {
+            background: #333;
+        }
+        .tb-menu-check input {
+            margin: 0;
+        }
+        .tb-menu-divider {
+            height: 1px;
+            margin: 4px 8px;
+            background: #3c3c3c;
+        }
+        .tb-menu-label {
+            padding: 4px 12px 2px;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #888;
+        }
+        .tb-menu-zoom {
+            padding: 4px 12px 8px;
+        }
+        .tb-menu-zoom select {
+            width: 100%;
+            background: #3c3c3c;
+            color: #ccc;
+            border: 1px solid #555;
+            padding: 4px 6px;
+            font-size: 12px;
+            border-radius: 3px;
         }
         #toolbar select {
             background: #3c3c3c;
@@ -1101,6 +1214,7 @@ export class EmbfPreviewPanel {
             font-size: 12px;
             border-radius: 3px;
             cursor: pointer;
+            font-family: inherit;
         }
         #toolbar .tb-btn:hover:not(:disabled) {
             background: #4a4a4a;
@@ -1114,6 +1228,11 @@ export class EmbfPreviewPanel {
             margin-left: auto;
             font-size: 11px;
             color: #888;
+            flex-shrink: 0;
+            max-width: 40%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
         #main {
             flex: 1;
@@ -1351,6 +1470,10 @@ export class EmbfPreviewPanel {
             border-color: #007acc;
             color: #fff;
         }
+        .page-list-item.open:not(.active) {
+            border-color: #555;
+            background: #2a2d2e;
+        }
         .page-list-name {
             display: block;
             font-size: 12px;
@@ -1523,6 +1646,361 @@ export class EmbfPreviewPanel {
         #sidebar-panel-flow {
             display: flex;
             flex-direction: column;
+            overflow-y: hidden;
+        }
+        .flow-list {
+            flex: 1;
+            min-height: 0;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+        #workspace {
+            flex: 1;
+            min-height: 0;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            align-self: stretch;
+            width: 100%;
+        }
+        #workspace-tabs {
+            display: flex;
+            align-items: stretch;
+            gap: 0;
+            flex-shrink: 0;
+            background: #252526;
+            border-bottom: 1px solid #3c3c3c;
+            padding: 0 4px 0 8px;
+            min-height: 36px;
+        }
+        #workspace-tabs-list {
+            display: flex;
+            flex: 1;
+            min-width: 0;
+            overflow-x: auto;
+            overflow-y: hidden;
+            scrollbar-width: thin;
+        }
+        .workspace-tab-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            flex-shrink: 0;
+            max-width: 200px;
+            padding: 7px 8px 7px 12px;
+            font-size: 12px;
+            font-family: inherit;
+            background: transparent;
+            color: #999;
+            border: none;
+            border-bottom: 2px solid transparent;
+            cursor: pointer;
+            margin-bottom: -1px;
+        }
+        .workspace-tab-item:hover {
+            color: #ccc;
+            background: #2a2d2e;
+        }
+        .workspace-tab-item.active {
+            color: #fff;
+            border-bottom-color: #007acc;
+            background: #2d2d2d;
+        }
+        .workspace-tab-item.flow-tab .workspace-tab-label {
+            font-style: normal;
+        }
+        .workspace-tab-label {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            min-width: 0;
+        }
+        .workspace-tab-close {
+            flex-shrink: 0;
+            width: 18px;
+            height: 18px;
+            padding: 0;
+            border: none;
+            border-radius: 3px;
+            background: transparent;
+            color: #888;
+            font-size: 14px;
+            line-height: 1;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .workspace-tab-close:hover {
+            background: #3c3c3c;
+            color: #fff;
+        }
+        .workspace-tab-add {
+            flex-shrink: 0;
+            width: 28px;
+            height: 28px;
+            margin: 4px 0 4px 4px;
+            padding: 0;
+            border: 1px solid #555;
+            border-radius: 3px;
+            background: #3c3c3c;
+            color: #ccc;
+            font-size: 16px;
+            line-height: 1;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .workspace-tab-add:hover {
+            background: #4a4a4a;
+            color: #fff;
+            border-color: #007acc;
+        }
+        #workspace-body {
+            flex: 1;
+            min-height: 0;
+            position: relative;
+            overflow: hidden;
+        }
+        .workspace-panel {
+            display: none;
+            position: absolute;
+            inset: 0;
+            overflow: hidden;
+        }
+        .workspace-panel.active {
+            display: flex;
+        }
+        #workspace-panel-preview {
+            flex-direction: column;
+            width: 100%;
+            height: 100%;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            position: relative;
+            box-sizing: border-box;
+        }
+        #workspace-panel-flow {
+            flex-direction: column;
+            background: #1a1a1a;
+        }
+        #flow-graph-wrap {
+            flex: 1;
+            min-height: 0;
+            position: relative;
+            background: #1a1a1a;
+            overflow: hidden;
+        }
+        .flow-graph-toolbar {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            right: 10px;
+            z-index: 4;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            pointer-events: none;
+        }
+        .flow-graph-toolbar > * {
+            pointer-events: auto;
+        }
+        .flow-graph-toolbar-spacer {
+            flex: 1;
+            min-width: 8px;
+        }
+        .flow-tb-btn {
+            font-size: 12px;
+            font-family: inherit;
+            padding: 6px 12px;
+            border-radius: 4px;
+            border: 1px solid #555;
+            background: #3c3c3c;
+            color: #ddd;
+            cursor: pointer;
+        }
+        .flow-tb-btn:hover {
+            background: #4a4a4a;
+            color: #fff;
+        }
+        .flow-tb-btn.primary {
+            background: #094771;
+            border-color: #007acc;
+            color: #fff;
+        }
+        .flow-tb-btn.primary:hover {
+            background: #0d5a8c;
+        }
+        .flow-tb-btn.active {
+            box-shadow: 0 0 0 1px #007acc;
+        }
+        .flow-link-hint {
+            font-size: 11px;
+            color: #9cdcfe;
+            padding: 4px 8px;
+            background: rgba(9, 71, 113, 0.55);
+            border-radius: 4px;
+            border: 1px solid #007acc;
+        }
+        #flow-graph-canvas {
+            display: block;
+            position: absolute;
+            inset: 0;
+            cursor: default;
+        }
+        #flow-graph-wrap.linking #flow-graph-canvas {
+            cursor: crosshair;
+        }
+        .flow-page-inspector {
+            position: absolute;
+            top: 48px;
+            right: 10px;
+            bottom: 10px;
+            width: min(300px, 42%);
+            z-index: 5;
+            display: flex;
+            flex-direction: column;
+            background: #252526;
+            border: 1px solid #3c3c3c;
+            border-radius: 6px;
+            box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+            overflow: hidden;
+        }
+        .flow-page-inspector[hidden] {
+            display: none !important;
+        }
+        .flow-page-inspector-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 12px;
+            border-bottom: 1px solid #3c3c3c;
+            flex-shrink: 0;
+        }
+        .flow-page-inspector-head h3 {
+            font-size: 13px;
+            font-weight: 600;
+            color: #eee;
+            margin: 0;
+        }
+        .flow-page-inspector-close {
+            border: none;
+            background: transparent;
+            color: #aaa;
+            font-size: 18px;
+            cursor: pointer;
+            padding: 0 4px;
+            line-height: 1;
+        }
+        .flow-page-inspector-close:hover {
+            color: #fff;
+        }
+        .flow-page-inspector-hint {
+            font-size: 11px;
+            color: #888;
+            padding: 8px 12px 4px;
+            margin: 0;
+            flex-shrink: 0;
+        }
+        .flow-page-transitions {
+            list-style: none;
+            margin: 0;
+            padding: 4px 8px;
+            overflow-y: auto;
+            flex: 1;
+            min-height: 0;
+        }
+        .flow-page-transitions-empty {
+            font-size: 11px;
+            color: #777;
+            padding: 8px 4px;
+            line-height: 1.4;
+        }
+        .flow-transition-row {
+            display: flex;
+            align-items: stretch;
+            gap: 4px;
+            margin-bottom: 4px;
+        }
+        .flow-transition-row-main {
+            flex: 1;
+            min-width: 0;
+            text-align: left;
+            padding: 8px;
+            border: 1px solid transparent;
+            border-radius: 4px;
+            background: #2d2d2d;
+            color: #ccc;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .flow-transition-row-main:hover {
+            border-color: #555;
+            background: #353535;
+        }
+        .flow-transition-row-target {
+            display: block;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .flow-transition-row-meta {
+            display: block;
+            font-size: 10px;
+            color: #888;
+            margin-top: 2px;
+        }
+        .flow-transition-row-del {
+            flex-shrink: 0;
+            width: 28px;
+            border: 1px solid #555;
+            border-radius: 4px;
+            background: #3c3c3c;
+            color: #ccc;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .flow-transition-row-del:hover {
+            background: #5a2d2d;
+            border-color: #a04040;
+            color: #fff;
+        }
+        .flow-page-inspector-actions {
+            padding: 8px 10px;
+            border-top: 1px solid #3c3c3c;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .flow-transition-editor {
+            border-top: 1px solid #3c3c3c;
+            padding: 8px 10px 10px;
+            overflow-y: auto;
+            max-height: 55%;
+            flex-shrink: 0;
+        }
+        .flow-transition-editor[hidden] {
+            display: none !important;
+        }
+        .flow-transition-editor h4 {
+            font-size: 11px;
+            color: #9cdcfe;
+            margin: 0 0 8px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+        #flow-transition-form-mount .flow-add-form {
+            padding: 0;
+            border: none;
+            gap: 8px;
+        }
+        .flow-form-actions {
+            display: flex;
+            gap: 6px;
+            margin-top: 4px;
+        }
+        .flow-form-actions .flow-tb-btn {
+            flex: 1;
         }
         #sidebar-panel-components .palette-item {
             display: flex;
@@ -2023,11 +2501,13 @@ export class EmbfPreviewPanel {
             flex: 1;
             order: 2;
             display: flex;
-            align-items: center;
-            justify-content: center;
-            overflow: auto;
+            flex-direction: column;
+            align-items: stretch;
+            justify-content: flex-start;
+            overflow: hidden;
             background: #2d2d2d;
             min-width: 0;
+            position: relative;
         }
         #display-wrapper {
             position: relative;
@@ -2120,8 +2600,9 @@ export class EmbfPreviewPanel {
             font-family: monospace;
             white-space: pre-wrap;
             overflow: auto;
-            z-index: 21;
+            z-index: 25;
             pointer-events: auto;
+            box-sizing: border-box;
         }
         #loading-overlay {
             position: absolute;
@@ -2135,6 +2616,7 @@ export class EmbfPreviewPanel {
             gap: 8px;
             z-index: 20;
             pointer-events: none;
+            box-sizing: border-box;
         }
         .spinner {
             width: 16px; height: 16px;
@@ -2150,44 +2632,66 @@ export class EmbfPreviewPanel {
     <div id="toolbar-shell">
         <button type="button" id="btn-toggle-toolbar" class="dock-toggle dock-toggle-toolbar" aria-expanded="true" title="Hide toolbar">▲ Hide toolbar</button>
         <div id="toolbar">
-        <button type="button" class="tb-btn" id="btn-new-project" title="Create a new .embf project file">New Project</button>
-        <label>Page:</label>
-        <select id="page-select"></select>
-        <button type="button" class="tb-btn" id="btn-undo" disabled title="Undo (Ctrl+Z)">Undo</button>
-        <button type="button" class="tb-btn" id="btn-redo" disabled title="Redo (Ctrl+Y)">Redo</button>
-        <label title="Select and drag widgets; updates .embf position">
-            <input type="checkbox" id="design-mode" checked />
-            Design
-        </label>
-        <label title="Snap moves and resize to a pixel grid">
-            <input type="checkbox" id="design-grid" />
-            Grid
-        </label>
-        <label title="Show pixel rulers on the canvas edges">
-            <input type="checkbox" id="design-rulers" />
-            Rulers
-        </label>
-        <button type="button" class="tb-btn" id="btn-theme-toggle" title="Toggle light/dark preview theme">Theme</button>
-        <button type="button" class="tb-btn" id="btn-play-animations" title="Run widget animations[] on the current page (LVGL preview)">Play animations</button>
-        <label for="preview-zoom">Zoom:</label>
-        <button type="button" class="tb-btn" id="btn-generate-code" title="Generate C UI files for this project">Generate C Code</button>
-        <select id="preview-zoom" title="Preview scale only — device resolution stays in .embf. Auto scales to fit the visible preview area.">
-            <option value="auto" selected>Auto (fit)</option>
-            <option value="0.1">10%</option>
-            <option value="0.25">25%</option>
-            <option value="0.5">50%</option>
-            <option value="0.75">75%</option>
-            <option value="1">100%</option>
-            <option value="2">200%</option>
-            <option value="3">300%</option>
-            <option value="4">400%</option>
-        </select>
-        <label for="toolbar-widget-select">Widget:</label>
-        <select id="toolbar-widget-select" title="Select a widget on the current page"></select>
-        <label title="Frame around the display in preview only">
-            <input type="checkbox" id="preview-bezel" />
-            Bezel
-        </label>
+        <div class="tb-bar-primary">
+            <div class="tb-menu-wrap">
+                <button type="button" class="tb-menu-trigger" id="tb-menu-project-trigger" aria-haspopup="true" aria-expanded="false">Project ▾</button>
+                <div class="tb-menu-panel" id="tb-menu-project" hidden role="menu">
+                    <button type="button" class="tb-menu-item" id="btn-new-project" role="menuitem">New project…</button>
+                    <button type="button" class="tb-menu-item" id="btn-generate-code" role="menuitem">Generate C code</button>
+                </div>
+            </div>
+            <div class="tb-menu-wrap">
+                <button type="button" class="tb-menu-trigger" id="tb-menu-edit-trigger" aria-haspopup="true">Edit ▾</button>
+                <div class="tb-menu-panel" id="tb-menu-edit" hidden role="menu">
+                    <button type="button" class="tb-menu-item" id="btn-undo" disabled role="menuitem">Undo (Ctrl+Z)</button>
+                    <button type="button" class="tb-menu-item" id="btn-redo" disabled role="menuitem">Redo (Ctrl+Y)</button>
+                </div>
+            </div>
+            <div class="tb-menu-wrap">
+                <button type="button" class="tb-menu-trigger" id="tb-menu-view-trigger" aria-haspopup="true">View ▾</button>
+                <div class="tb-menu-panel" id="tb-menu-view" hidden role="menu">
+                    <label class="tb-menu-check" title="Select and drag widgets">
+                        <input type="checkbox" id="design-mode" checked />
+                        Design mode
+                    </label>
+                    <label class="tb-menu-check" title="Snap moves and resize to grid">
+                        <input type="checkbox" id="design-grid" />
+                        Grid snap
+                    </label>
+                    <label class="tb-menu-check" title="Show pixel rulers">
+                        <input type="checkbox" id="design-rulers" />
+                        Rulers
+                    </label>
+                    <label class="tb-menu-check" title="Frame around display in preview">
+                        <input type="checkbox" id="preview-bezel" />
+                        Device bezel
+                    </label>
+                    <div class="tb-menu-divider"></div>
+                    <button type="button" class="tb-menu-item" id="btn-theme-toggle" role="menuitem">Toggle theme</button>
+                    <button type="button" class="tb-menu-item" id="btn-play-animations" role="menuitem">Play animations</button>
+                    <div class="tb-menu-label">Preview zoom</div>
+                    <div class="tb-menu-zoom">
+                        <select id="preview-zoom" title="Preview scale — device resolution stays in .embf">
+                            <option value="auto" selected>Auto (fit)</option>
+                            <option value="0.1">10%</option>
+                            <option value="0.25">25%</option>
+                            <option value="0.5">50%</option>
+                            <option value="0.75">75%</option>
+                            <option value="1">100%</option>
+                            <option value="2">200%</option>
+                            <option value="3">300%</option>
+                            <option value="4">400%</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="tb-bar-context">
+            <label for="page-select">Page:</label>
+            <select id="page-select"></select>
+            <label for="toolbar-widget-select">Widget:</label>
+            <select id="toolbar-widget-select" title="Select a widget on the current page"></select>
+        </div>
         <span id="status">Waiting for project…</span>
         </div>
     </div>
@@ -2210,17 +2714,100 @@ export class EmbfPreviewPanel {
         </aside>
         <div id="canvas-container">
         <div id="insert-widget-picker" role="menu" aria-label="Insert widget" hidden></div>
-        <div id="display-wrapper" class="no-rulers">
-            <div id="ruler-corner" class="ruler-corner" aria-hidden="true"></div>
-            <canvas id="ruler-top" class="ruler ruler-top" aria-hidden="true"></canvas>
-            <canvas id="ruler-left" class="ruler ruler-left" aria-hidden="true"></canvas>
-            <canvas id="lvgl-canvas"></canvas>
-            <div id="image-preview-layer" aria-hidden="true"></div>
-            <canvas id="design-overlay"></canvas>
-            <div id="error-overlay"></div>
-            <div id="loading-overlay">
-                <div class="spinner"></div>
-                <span>Loading WASM…</span>
+        <div id="workspace">
+            <nav id="workspace-tabs" aria-label="Main workspace">
+                <div id="workspace-tabs-list" role="tablist"></div>
+                <button type="button" class="workspace-tab-add" id="btn-workspace-tab-add" title="Open another page in a new tab">+</button>
+            </nav>
+            <div id="workspace-body">
+                <div id="workspace-panel-preview" class="workspace-panel active" role="tabpanel" aria-labelledby="workspace-tab-preview">
+                    <div id="loading-overlay">
+                        <div class="spinner"></div>
+                        <span>Loading WASM…</span>
+                    </div>
+                    <div id="error-overlay"></div>
+                    <div id="display-wrapper" class="no-rulers">
+                        <div id="ruler-corner" class="ruler-corner" aria-hidden="true"></div>
+                        <canvas id="ruler-top" class="ruler ruler-top" aria-hidden="true"></canvas>
+                        <canvas id="ruler-left" class="ruler ruler-left" aria-hidden="true"></canvas>
+                        <canvas id="lvgl-canvas"></canvas>
+                        <div id="image-preview-layer" aria-hidden="true"></div>
+                        <canvas id="design-overlay"></canvas>
+                    </div>
+                </div>
+                <div id="workspace-panel-flow" class="workspace-panel" role="tabpanel" aria-labelledby="workspace-tab-flow" hidden>
+                    <div id="flow-graph-wrap">
+                        <div class="flow-graph-toolbar">
+                            <button type="button" class="flow-tb-btn primary" id="btn-flow-add-link" title="Click source page, then target page">+ Add connection</button>
+                            <span id="flow-link-hint" class="flow-link-hint" hidden>Select source page, then target page</span>
+                            <div class="flow-graph-toolbar-spacer"></div>
+                            <button type="button" class="flow-tb-btn" id="btn-flow-open-page-preview" hidden title="Open this page in a preview tab">Open page preview</button>
+                        </div>
+                        <canvas id="flow-graph-canvas" aria-label="Navigation flow graph"></canvas>
+                        <aside id="flow-page-inspector" class="flow-page-inspector" hidden aria-label="Page transitions">
+                            <header class="flow-page-inspector-head">
+                                <h3 id="flow-page-inspector-title">Page</h3>
+                                <button type="button" class="flow-page-inspector-close" id="btn-flow-inspector-close" aria-label="Close">×</button>
+                            </header>
+                            <p class="flow-page-inspector-hint">Outgoing transitions from this page</p>
+                            <ul id="flow-page-transitions" class="flow-page-transitions"></ul>
+                            <div class="flow-page-inspector-actions">
+                                <button type="button" class="flow-tb-btn" id="btn-flow-new-transition">+ Add transition</button>
+                            </div>
+                            <div id="flow-transition-editor" class="flow-transition-editor" hidden>
+                                <h4 id="flow-transition-editor-title">New transition</h4>
+                                <div id="flow-transition-form-mount">
+                                    <div class="flow-add-form" id="flow-add-form-root">
+                                        <label class="flow-field"><span class="flow-label">Type</span><select id="flow-kind" title="Component event or screen swipe">
+                                            <option value="component">Component event</option>
+                                            <option value="swipe">Screen swipe</option>
+                                        </select></label>
+                                        <label class="flow-field"><span class="flow-label">From page</span><select id="flow-from-page"></select></label>
+                                        <div id="flow-component-fields">
+                                            <label class="flow-field"><span class="flow-label">Component</span><select id="flow-component"></select></label>
+                                            <label class="flow-field"><span class="flow-label">On</span><select id="flow-trigger">
+                                                <option value="clicked">clicked</option>
+                                                <option value="long_pressed">long_pressed</option>
+                                                <option value="value_changed">value_changed</option>
+                                            </select></label>
+                                        </div>
+                                        <div id="flow-swipe-fields" hidden>
+                                            <label class="flow-field"><span class="flow-label">Swipe</span><select id="flow-swipe-direction">
+                                                <option value="left">Swipe left</option>
+                                                <option value="right">Swipe right</option>
+                                                <option value="top">Swipe up</option>
+                                                <option value="bottom">Swipe down</option>
+                                            </select></label>
+                                        </div>
+                                        <label class="flow-field"><span class="flow-label">To page</span><select id="flow-to-page"></select></label>
+                                        <label class="flow-field"><span class="flow-label">Animation</span><select id="flow-anim">
+                                            <option value="none">None</option>
+                                            <option value="move_left">Move left</option>
+                                            <option value="move_right">Move right</option>
+                                            <option value="move_top">Move top</option>
+                                            <option value="move_bottom">Move bottom</option>
+                                            <option value="over_left">Over left</option>
+                                            <option value="over_right">Over right</option>
+                                            <option value="over_top">Over top</option>
+                                            <option value="over_bottom">Over bottom</option>
+                                            <option value="fade_in">Fade in</option>
+                                            <option value="fade_out">Fade out</option>
+                                            <option value="out_left">Out left</option>
+                                            <option value="out_right">Out right</option>
+                                            <option value="out_top">Out top</option>
+                                            <option value="out_bottom">Out bottom</option>
+                                        </select></label>
+                                        <label class="flow-field"><span class="flow-label">Duration (ms)</span><input type="number" id="flow-time" min="0" step="50" value="300"></label>
+                                        <div class="flow-form-actions">
+                                            <button type="button" class="flow-tb-btn primary" id="btn-flow-add">Save</button>
+                                            <button type="button" class="flow-tb-btn" id="btn-flow-cancel-edit">Cancel</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </aside>
+                    </div>
+                </div>
             </div>
         </div>
         </div>

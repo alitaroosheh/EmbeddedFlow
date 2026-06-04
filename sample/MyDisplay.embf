@@ -17,6 +17,16 @@
   "theme": {
     "dark": false
   },
+  "model": {
+    "properties": [
+      {
+        "id": "greeting",
+        "type": "string",
+        "default": "Hello, EmbeddedFlow!",
+        "direction": "unknown"
+      }
+    ]
+  },
   "pages": [
     {
       "id": "page_main",
@@ -30,7 +40,7 @@
           "y": 10,
           "width": 600,
           "height": 30,
-          "text": "Hello, EmbeddedFlow!",
+          "text": "{{greeting}}",
           "styles": {
             "fontSize": 12,
             "textColor": "#000000"

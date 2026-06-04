@@ -52,9 +52,8 @@ export const SIDEBAR_CATEGORIES: SidebarCategory[] = [
     {
         id: "flow",
         label: "Flow",
-        title: "Page navigation between components",
-        iconSvg: ICON_FLOW,
-        widePanel: true
+        title: "Open navigation flow diagram",
+        iconSvg: ICON_FLOW
     }
 ];
 
@@ -98,52 +97,7 @@ ${componentsPanelHtml}
 </div>`;
         }
         if (c.id === "flow") {
-            return `<div id="sidebar-panel-${c.id}" class="sidebar-panel-view sidebar-panel-view-flow" data-sidebar-panel="${c.id}" role="tabpanel" hidden>
-<div class="flow-add-form">
-<label class="flow-field"><span class="flow-label">Type</span><select id="flow-kind" title="Component event or screen swipe">
-<option value="component">Component event</option>
-<option value="swipe">Swipe</option>
-</select></label>
-<label class="flow-field"><span class="flow-label">From page</span><select id="flow-from-page"></select></label>
-<div id="flow-component-fields">
-<label class="flow-field"><span class="flow-label">Component</span><select id="flow-component"></select></label>
-<label class="flow-field"><span class="flow-label">On</span><select id="flow-trigger">
-<option value="clicked">clicked</option>
-<option value="long_pressed">long_pressed</option>
-<option value="value_changed">value_changed</option>
-</select></label>
-</div>
-<div id="flow-swipe-fields" hidden>
-<label class="flow-field"><span class="flow-label">Swipe</span><select id="flow-swipe-direction" title="Finger swipe direction on the page screen">
-<option value="left">Swipe left</option>
-<option value="right">Swipe right</option>
-<option value="top">Swipe up</option>
-<option value="bottom">Swipe down</option>
-</select></label>
-</div>
-<label class="flow-field"><span class="flow-label">To page</span><select id="flow-to-page"></select></label>
-<label class="flow-field"><span class="flow-label">Animation</span><select id="flow-anim" title="LVGL on device; preview plays a matching slide/fade">
-<option value="none">None (instant)</option>
-<option value="move_left">Move left</option>
-<option value="move_right">Move right</option>
-<option value="move_top">Move top</option>
-<option value="move_bottom">Move bottom</option>
-<option value="over_left">Over left</option>
-<option value="over_right">Over right</option>
-<option value="over_top">Over top</option>
-<option value="over_bottom">Over bottom</option>
-<option value="fade_in">Fade in</option>
-<option value="fade_out">Fade out</option>
-<option value="out_left">Out left</option>
-<option value="out_right">Out right</option>
-<option value="out_top">Out top</option>
-<option value="out_bottom">Out bottom</option>
-</select></label>
-<label class="flow-field"><span class="flow-label">Duration (ms)</span><input type="number" id="flow-time" min="0" step="50" value="300" title="Animation duration in milliseconds"></label>
-<button type="button" class="tb-btn-small" id="btn-flow-add">+ Add flow</button>
-</div>
-<ul id="flow-list" class="flow-list" aria-label="Page navigation flows"></ul>
-</div>`;
+            return `<div id="sidebar-panel-${c.id}" class="sidebar-panel-view sidebar-panel-view-flow" data-sidebar-panel="${c.id}" role="tabpanel" hidden aria-hidden="true"></div>`;
         }
         return `<div id="sidebar-panel-${c.id}" class="sidebar-panel-view" data-sidebar-panel="${c.id}" role="tabpanel" hidden></div>`;
     }).join("\n");

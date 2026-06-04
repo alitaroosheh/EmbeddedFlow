@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { normalizeScreenLoadAnim } from "./codeGen/screenLoadAnim";
+import { validateModelPropertyDeep } from "./embfModel";
 import type { EmbfProject, LvglVersion } from "./types/embf";
 
 const COLOR_FORMATS = new Set<string>(["RGB565", "RGB888", "ARGB8888", "L8", "AL88"]);
@@ -232,8 +233,9 @@ function validateEmbf(data: unknown): EmbfProject {
     }
     componentContext.styleIds = styleIds;
 
-    const dataModel = obj["dataModel"];
     const fieldIds = new Set<string>();
+
+    const dataModel = obj["dataModel"];
     if (dataModel !== undefined) {
         if (typeof dataModel !== "object" || dataModel === null || Array.isArray(dataModel)) {
             throw new EmbfParseError("'dataModel' must be an object when present");
@@ -247,11 +249,43 @@ function validateEmbf(data: unknown): EmbfProject {
             validateDataFieldDeep(entry, p);
             const id = (entry as Record<string, unknown>)["id"] as string;
             if (fieldIds.has(id)) {
-                throw new EmbfParseError(`${p}.id "${id}" duplicates an earlier field`);
+                throw new EmbfParseError(`${p}.id "${id}" duplicates an earlier property id`);
             }
             fieldIds.add(id);
         });
     }
+
+    const model = obj["model"];
+    if (model !== undefined) {
+        if (typeof model !== "object" || model === null || Array.isArray(model)) {
+            throw new EmbfParseError("'model' must be an object when present");
+        }
+        const m = model as Record<string, unknown>;
+        const props = m["properties"];
+        if (props !== undefined) {
+            if (!Array.isArray(props)) {
+                throw new EmbfParseError("model.properties must be an array");
+            }
+            (props as unknown[]).forEach((entry, i) => {
+                const p = `model.properties[${i}]`;
+                try {
+                    validateModelPropertyDeep(entry, p);
+                } catch (e) {
+                    throw new EmbfParseError(e instanceof Error ? e.message : String(e));
+                }
+                const id = (entry as Record<string, unknown>)["id"] as string;
+                if (fieldIds.has(id)) {
+                    throw new EmbfParseError(`${p}.id "${id}" duplicates an earlier property id`);
+                }
+                fieldIds.add(id);
+            });
+        }
+        const derived = m["derived"];
+        if (derived !== undefined && !Array.isArray(derived)) {
+            throw new EmbfParseError("model.derived must be an array when present");
+        }
+    }
+
     componentContext.fieldIds = fieldIds;
 
     validatePagesDeep(obj["pages"] as unknown[]);
@@ -835,7 +869,7 @@ function validateOptionalBindings(o: Record<string, unknown>, path: string): voi
         }
         if (fields.size === 0) {
             throw new EmbfParseError(
-                `${path}.bindings.${prop} references "${value}" but project.dataModel.fields[] is empty`
+                `${path}.bindings.${prop} references "${value}" but model.properties / dataModel.fields is empty`
             );
         }
         if (!fields.has(value)) {
@@ -863,7 +897,7 @@ function validateBindingTemplates(value: string, path: string): void {
         const fid = m[1];
         if (ids.size === 0) {
             throw new EmbfParseError(
-                `${path} references binding "{{${fid}}}" but project.dataModel.fields[] is empty`
+                `${path} references binding "{{${fid}}}" but model.properties / dataModel.fields is empty`
             );
         }
         if (!ids.has(fid)) {
@@ -1016,6 +1050,11 @@ function validatePagesDeep(pages: unknown[]): void {
         for (const k of ["scrollX", "scrollY"] as const) {
             if (p[k] !== undefined && typeof p[k] !== "boolean") {
                 throw new EmbfParseError(`${path}.${k} must be a boolean when set`);
+            }
+        }
+        for (const k of ["flowX", "flowY"] as const) {
+            if (p[k] !== undefined && typeof p[k] !== "number") {
+                throw new EmbfParseError(`${path}.${k} must be a number when set`);
             }
         }
         if (!Array.isArray(p["components"])) {

@@ -24,8 +24,13 @@ export interface EmbfProject {
     images?: ImageDef[];
     /** Reusable named styles emitted as `lv_style_t ui_style_<id>` in `ui_styles.c`. */
     styles?: StyleDef[];
-    /** Application data fields exposed to bindings (`{{field}}` in widget props). */
+    /**
+     * Legacy application fields — Phase 1+ codegen (`ui_bindings.c`) uses this when present.
+     * Prefer `model.properties` for new projects (preview-only in Phase 1).
+     */
     dataModel?: DataModel;
+    /** Application model: properties (Phase 1 IR metadata), derived state (Phase 3). */
+    model?: ModelSection;
     pages: Page[];
     /** User-defined reusable groups (container/panel subtrees). */
     componentLibrary?: ComponentLibraryEntry[];
@@ -51,6 +56,31 @@ export interface DataField {
     type: DataFieldType;
     /** Default value used both for preview substitution and `ui_bindings_init()`. */
     default?: string | number | boolean;
+}
+
+export type PropertyDirection = "push" | "pull" | "unknown";
+
+/** Phase 1 property metadata — preview mocks; no codegen until symbol binding (Phase 2). */
+export interface ModelProperty {
+    id: string;
+    type: DataFieldType;
+    default?: string | number | boolean;
+    min?: number;
+    max?: number;
+    /** Hint for Phase 2 codegen: push (setter) vs pull (extern + apply). */
+    direction?: PropertyDirection;
+}
+
+export interface ModelSection {
+    properties?: ModelProperty[];
+    /** Phase 3 — derived boolean expressions. */
+    derived?: ModelDerived[];
+}
+
+export interface ModelDerived {
+    id: string;
+    expression: string;
+    cached?: boolean;
 }
 
 export interface ProjectMeta {
@@ -129,6 +159,9 @@ export interface Page {
     components: Component[];
     /** Page-level swipe handlers (LVGL `LV_EVENT_GESTURE` on the screen). */
     swipes?: PageSwipeFlow[];
+    /** Navigation flow diagram position (canvas pixels). Omitted = auto grid layout. */
+    flowX?: number;
+    flowY?: number;
 }
 
 // ─── Components ──────────────────────────────────────────────────────────────

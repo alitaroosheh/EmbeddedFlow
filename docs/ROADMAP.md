@@ -39,6 +39,7 @@
 | Properties in inspector | Add/edit/delete properties, set mock defaults |
 | Preview mocks from properties | Preview substitutes defaults into bound widgets |
 | `.embf` schema: new sections | Add `model`, `state`, `actions`, `protocol` as stub top-level keys |
+| **String resources (i18n)** | `i18n/strings.res` + table editor; X-Macro codegen (`ui_strings_*.h/.def/.c`); `ui_get_string()` |
 
 ---
 

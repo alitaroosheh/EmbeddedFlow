@@ -37,6 +37,11 @@
         "firmwarePath": {
           "type": "string",
           "description": "Path to firmware project root containing compile_commands.json. Used by EmbeddedFlow to spawn a dedicated clangd instance for symbol discovery (Phase 2+). Relative to the .embf file or absolute."
+        },
+        "stringsPath": {
+          "type": "string",
+          "pattern": ".*\\.res$",
+          "description": "Path to i18n string resource file (default: i18n/strings.res). Must use .res extension. Edited via table UI in extension; widgets reference keys. See docs/REQUIREMENTS.md § Internationalization."
         }
       }
     },

@@ -37,6 +37,150 @@ Navigation graph generates **only static LVGL calls** in Phase 1. No router, no 
 - [ ] **PR3** Inspector: add/edit/delete properties
 - [ ] **PR4** Preview substitutes property defaults into bound widgets
 
+### Internationalization (string resources)
+
+Translatable UI text must not be hardcoded in `.embf` widgets. Strings live in a **separate `.res` resource file**; `.embf` references keys only. Codegen resolves keys at compile time (pure C, no runtime resource loader on device).
+
+**File layout (target):**
+
+```
+my_app.embf
+i18n/
+  strings.res           ← default path; extension must be .res
+```
+
+**`.res` file format (on disk):** structured document (JSON-compatible body inside the `.res` file) with `defaultLocale` and per-locale key→value maps. The extension parses/saves `.res` only — not `.json` for application strings.
+
+**Example `i18n/strings.res`:**
+
+```json
+{
+  "defaultLocale": "en",
+  "locales": {
+    "en": {
+      "temp_label": "Temperature",
+      "settings_title": "Settings"
+    },
+    "fa": {
+      "temp_label": "دما",
+      "settings_title": "تنظیمات"
+    }
+  }
+}
+```
+
+**Widget IR reference (target):** label `text` uses a resource key, not a literal:
+
+```json
+{ "text": { "ref": "temp_label" } }
+```
+
+(or equivalent `@temp_label` syntax — exact form TBD at implementation)
+
+**String resource table editor (in extension):** users edit translations in a **spreadsheet-style table**, not raw file text by default.
+
+| Key | en | fa | … |
+|-----|----|----|---|
+| `temp_label` | Temperature | دما | … |
+| `settings_title` | Settings | تنظیمات | … |
+
+- Rows = string keys (add/remove row)
+- Columns = locale ids (add/remove column; one column marked default)
+- Cells = editable translation text; changes persist to `.res` on save
+- Optional “open as text” for power users
+
+- [ ] **I18n1** Project declares `project.stringsPath` (default `i18n/strings.res` next to `.embf`); path must use **`.res`** extension
+- [ ] **I18n2** `.res` schema: `defaultLocale`, `locales.<localeId>.<key>` → string value; parse/validate on load
+- [ ] **I18n3** **String resource table editor** in VS Code: open linked `.res`, show keys × locales grid, inline edit
+- [ ] **I18n4** Table actions: add/remove key row, add/remove locale column, set default locale
+- [ ] **I18n5** Save table edits back to `.res` (atomic write; preserve unknown keys/locales not shown)
+- [ ] **I18n6** Widget text (labels, buttons, etc.) can reference a string resource key instead of a literal
+- [ ] **I18n7** Validation: missing keys reported at design time; fallback to `defaultLocale` then key id
+- [ ] **I18n8** Preview: locale selector in designer; WASM preview shows selected locale strings from `.res`
+- [ ] **I18n9** Codegen: emit string resources using **X-Macros** (single source list, no hand-maintained parallel enums/tables)
+- [ ] **I18n10** Codegen: `lv_label_set_text` / `set_text` use `ui_get_string(UI_STR_<key>)`, not raw literals, when widget references a resource key
+- [ ] **I18n11** Codegen (multi-locale): one X-Macro list per locale (or build-time locale define); `ui_get_string(id)` indexes the active locale table
+- [ ] **I18n12** `set_text` actions accept resource keys, resolved through the same X-Macro string API
+
+**Generated C layout (X-Macro — mandatory pattern):**
+
+From `strings.res`, codegen emits:
+
+| File | Purpose |
+|------|---------|
+| `ui_strings_ids.h` | Key list only: `#define UI_STRING_KEYS` with `X(UI_STR_<KEY>)` — shared by all locales |
+| `ui_strings_<locale>.def` | Per locale: `#define UI_STRING_LIST` with `X(UI_STR_<KEY>, "translated text")` |
+| `ui_strings.h` | `ui_string_id_t` enum (from keys X-Macro) + `const char *ui_get_string(ui_string_id_t id);` |
+| `ui_strings.c` | String table + `ui_get_string()` built by including the active locale `.def` twice (enum already in `.h`) |
+
+**Example generated `ui_strings_ids.h`:**
+
+```c
+#define UI_STRING_KEYS \
+    X(UI_STR_TEMP_LABEL) \
+    X(UI_STR_SETTINGS_TITLE)
+```
+
+**Example generated `ui_strings_en.def`:**
+
+```c
+#define UI_STRING_LIST \
+    X(UI_STR_TEMP_LABEL, "Temperature") \
+    X(UI_STR_SETTINGS_TITLE, "Settings")
+```
+
+**Example generated `ui_strings.h`:**
+
+```c
+typedef enum {
+#define X(id) id,
+    UI_STRING_KEYS
+#undef X
+    UI_STR_COUNT
+} ui_string_id_t;
+
+const char *ui_get_string(ui_string_id_t id);
+```
+
+**Example generated `ui_strings.c` (build locale = `en`):**
+
+```c
+#include "ui_strings.h"
+#include "ui_strings_en.def"
+
+static const char *const ui_strings_table[UI_STR_COUNT] = {
+#define X(id, text) text,
+    UI_STRING_LIST
+#undef X
+};
+
+const char *ui_get_string(ui_string_id_t id)
+{
+    if ((unsigned)id >= (unsigned)UI_STR_COUNT) {
+        return "";
+    }
+    return ui_strings_table[id];
+}
+```
+
+**Widget / action codegen example:**
+
+```c
+lv_label_set_text(ui_lbl_temp, ui_get_string(UI_STR_TEMP_LABEL));
+```
+
+**Multi-locale firmware:** ship `ui_strings_en.def`, `ui_strings_fa.def`, … and either (a) compile `ui_strings.c` once per locale with `-DUI_LOCALE=en`, or (b) generate `ui_strings_<locale>.c` each including its `.def`. Active locale selected at build time or via a single `ui_set_locale()` that swaps table pointer — still **no** `.res` parser on device.
+
+**Constraints:**
+
+- String resources are **not** merged into `.embf` by default (translators edit `.res` via table or file)
+- On device: **no** runtime loading of `.res` — only static `const char *` tables from X-Macros
+- **No** duplicate manual maintenance of enum values vs table indices — keys list and locale lists must stay in sync via X-Macro only
+- LVGL remains the only generated-code dependency
+- Application string files use **`.res` only** (not `.json`) for this feature
+
+**Extension UI (designer chrome):** optional later — `package.nls.json` for the VS Code extension’s own UI language; separate from application `.res` files.
+
 ---
 
 ## Phase 2 — Symbol Discovery + Binding

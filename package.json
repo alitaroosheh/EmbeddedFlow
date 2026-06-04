@@ -1,7 +1,7 @@
 {
   "name": "embf-lvgl",
   "publisher": "erminity",
-  "displayName": "embeddedflow (an LVGL Design tool)",
+  "displayName": "embeddedflow (Beyond an LVGL Design Tool)",
   "description": "Design LVGL UIs in .embf projects with a live WASM preview (see README screenshot), named styles, bindings, animations, and C codegen for LVGL 8/9.",
   "version": "1.2.0",
   "license": "GPL-3.0-or-later",

@@ -112,13 +112,15 @@ jobs:
             echo "::error::Invalid tag format: $TAG (expected vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-prerelease)"
             exit 1
           fi
-          npm version "$VERSION" --no-git-tag-version --allow-same-version
-          if echo "$VERSION" | grep -q '-'; then
+          # Marketplace accepts only x.y.z (no -beta suffix in package.json version).
+          MARKET_VERSION=$(echo "$VERSION" | sed -E 's/^([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
+          npm version "$MARKET_VERSION" --no-git-tag-version --allow-same-version
+          if [ "$VERSION" != "$MARKET_VERSION" ]; then
             echo "PRE_RELEASE=true" >> "$GITHUB_ENV"
-            echo "Packaging version $VERSION (pre-release=true)"
+            echo "Packaging version $MARKET_VERSION (tag $TAG, pre-release=true)"
           else
             echo "PRE_RELEASE=false" >> "$GITHUB_ENV"
-            echo "Packaging version $VERSION (pre-release=false)"
+            echo "Packaging version $MARKET_VERSION (pre-release=false)"
           fi
 
       - name: Install dependencies

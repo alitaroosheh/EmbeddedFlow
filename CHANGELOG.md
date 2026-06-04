@@ -1,6 +1,10 @@
 # Changelog
 
-## 1.2.0-beta.1
+## 1.2.0 (pre-release)
+
+Published to the Marketplace **pre-release** channel as version **1.2.0** (tags may use `v1.2.0-beta.*`; the VSIX version is always `x.y.z`).
+
+**Beta highlights:**
 
 - **Navigation flow diagram** — full workspace tab with a page graph: drag nodes to arrange layout, click a page to edit its transitions, **+ Add connection** to link two pages, double-click to open a page preview.
 - **Flow layout persistence** — optional `flowX` / `flowY` on each page in `.embf` saves node positions on the flow canvas.

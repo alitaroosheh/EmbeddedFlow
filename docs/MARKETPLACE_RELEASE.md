@@ -1,6 +1,9 @@
 # Marketplace release (GitHub Actions)
 
-The **publish** job in [`.github/workflows/release.yml`](../.github/workflows/release.yml) runs when you push a semver tag (`v1.0.0`, etc.) on the **`release`** branch.
+The **publish** job runs when you push a semver tag on the **`release`** branch:
+
+- **Stable:** `v1.0.0` → Marketplace version `1.0.0`
+- **Pre-release:** `v1.2.0-beta.1` (or any `v*.*.*-*` tag) → version **`1.2.0`** in `package.json` + `vsce publish --pre-release` (Marketplace does not allow `-beta` in the version string)
 
 ## Required: `VSCE_PAT` repository secret
 
@@ -44,10 +47,9 @@ git push --force origin v1.0.0
 ```bash
 git checkout release
 git merge main
-# Ensure package.json version matches the tag (e.g. 1.0.0)
-git tag v1.0.0
+# Stable: git tag v1.2.0 && git push origin v1.2.0
+# Pre-release: git tag v1.2.0-beta.2 && git push origin v1.2.0-beta.2
 git push origin release
-git push origin v1.0.0
 ```
 
 - Push to **`release`** → **validate** only (build, test, VSIX artifact).

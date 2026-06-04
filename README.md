@@ -10,9 +10,9 @@ Design touch UIs for embedded devices without leaving your editor. **embeddedflo
 
 ---
 
-## What's new in v1.2.0-beta.1
+## What's new in v1.2.0 (pre-release)
 
-**Pre-release** — install **Switch to Pre-Release Version** on the Marketplace, or use the latest `.vsix`.
+**Pre-release** — Marketplace version **1.2.0** on the pre-release channel. Install via **Switch to Pre-Release Version**, or use the latest `.vsix` (`embf-lvgl-1.2.0.vsix`).
 
 - **Navigation flow diagram** — open **Navigation flow** in the workspace: page boxes, connection lines, drag to arrange, click a page for its transition list, **+ Add connection** to wire two pages.
 - **Bidirectional links** — mutual navigation between two pages renders as a single double-headed connector.

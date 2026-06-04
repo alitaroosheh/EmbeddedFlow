@@ -1,15 +1,15 @@
 # Publish EmbeddedFlow to the VS Code Marketplace.
 #
 # Triggers
-#   • Tag push v<major>.<minor>.<patch>  (e.g. v0.1.0) — full release + Marketplace publish
-#   • Push to branch `release`            — CI only (compile, test, package VSIX artifact)
+#   • Tag push v<semver>  (e.g. v1.0.0, v1.2.0-beta.1) — Marketplace publish
+#   • Push to branch `release` — CI only (compile, test, package VSIX artifact)
 #
 # Create a release (typical flow):
 #   git checkout release
 #   git merge main
-#   git tag v0.1.0
+#   git tag v1.2.0-beta.1
 #   git push origin release
-#   git push origin v0.1.0
+#   git push origin v1.2.0-beta.1
 #
 # Repository secret (required for publish job):
 #   VSCE_PAT — Personal Access Token with Marketplace "Manage" scope
@@ -22,8 +22,8 @@ on:
     branches:
       - release
     tags:
-      # Semver tags with leading "v" (common for VS Code extensions)
       - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
 
 concurrency:
   group: release-${{ github.ref }}
@@ -108,12 +108,18 @@ jobs:
         run: |
           TAG="${GITHUB_REF_NAME}"
           VERSION="${TAG#v}"
-          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "::error::Invalid tag format: $TAG (expected vMAJOR.MINOR.PATCH)"
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::Invalid tag format: $TAG (expected vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-prerelease)"
             exit 1
           fi
           npm version "$VERSION" --no-git-tag-version --allow-same-version
-          echo "Packaging version $VERSION"
+          if echo "$VERSION" | grep -q '-'; then
+            echo "PRE_RELEASE=true" >> "$GITHUB_ENV"
+            echo "Packaging version $VERSION (pre-release=true)"
+          else
+            echo "PRE_RELEASE=false" >> "$GITHUB_ENV"
+            echo "Packaging version $VERSION (pre-release=false)"
+          fi
 
       - name: Install dependencies
         run: npm ci
@@ -127,7 +133,12 @@ jobs:
       - name: Publish to VS Code Marketplace
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: npx --yes @vscode/vsce@latest publish --no-dependencies -p "$VSCE_PAT"
+        run: |
+          if [ "$PRE_RELEASE" = "true" ]; then
+            npx --yes @vscode/vsce@latest publish --pre-release --no-dependencies -p "$VSCE_PAT"
+          else
+            npx --yes @vscode/vsce@latest publish --no-dependencies -p "$VSCE_PAT"
+          fi
 
       - name: Package VSIX for GitHub Release
         run: npx --yes @vscode/vsce@latest package --no-dependencies
@@ -138,3 +149,4 @@ jobs:
           generate_release_notes: true
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
+          prerelease: ${{ env.PRE_RELEASE == 'true' }}

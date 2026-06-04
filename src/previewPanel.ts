@@ -802,7 +802,8 @@ export class EmbfPreviewPanel {
                 time
             ).then(ok => {
                 if (ok) {
-                    this.reloadPreviewNow(sourcePageIndex, { selectedComponentId: componentId });
+                    this.markInspectorDrivenFileWrite();
+                    this.reloadPreviewNow(sourcePageIndex, { suppressLoadingSpinner: true });
                     this.sendHistoryState();
                 }
             });
@@ -828,7 +829,8 @@ export class EmbfPreviewPanel {
                 targetPageId
             ).then(ok => {
                 if (ok) {
-                    this.reloadPreviewNow(sourcePageIndex);
+                    this.markInspectorDrivenFileWrite();
+                    this.reloadPreviewNow(sourcePageIndex, { suppressLoadingSpinner: true });
                     this.sendHistoryState();
                 }
             });
@@ -855,7 +857,8 @@ export class EmbfPreviewPanel {
                 time
             ).then(ok => {
                 if (ok) {
-                    this.reloadPreviewNow(sourcePageIndex);
+                    this.markInspectorDrivenFileWrite();
+                    this.reloadPreviewNow(sourcePageIndex, { suppressLoadingSpinner: true });
                     this.sendHistoryState();
                 }
             });
@@ -867,7 +870,8 @@ export class EmbfPreviewPanel {
             }
             void removePageSwipeFlowInEmbfFile(this._filePath, sourcePageIndex, direction).then(ok => {
                 if (ok) {
-                    this.reloadPreviewNow(sourcePageIndex);
+                    this.markInspectorDrivenFileWrite();
+                    this.reloadPreviewNow(sourcePageIndex, { suppressLoadingSpinner: true });
                     this.sendHistoryState();
                 }
             });
@@ -1649,19 +1653,6 @@ export class EmbfPreviewPanel {
             min-height: 0;
             overflow-y: auto;
             overflow-x: hidden;
-        }
-        .flow-sidebar-hint {
-            font-size: 11px;
-            color: #888;
-            line-height: 1.45;
-            margin: 8px 10px 8px;
-        }
-        .flow-sidebar-hint strong {
-            color: #ccc;
-        }
-        #sidebar-panel-flow .tb-btn-small {
-            margin: 0 10px 10px;
-            width: calc(100% - 20px);
         }
         #workspace {
             flex: 1;

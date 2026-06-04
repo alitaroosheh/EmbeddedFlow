@@ -1052,6 +1052,11 @@ function validatePagesDeep(pages: unknown[]): void {
                 throw new EmbfParseError(`${path}.${k} must be a boolean when set`);
             }
         }
+        for (const k of ["flowX", "flowY"] as const) {
+            if (p[k] !== undefined && typeof p[k] !== "number") {
+                throw new EmbfParseError(`${path}.${k} must be a number when set`);
+            }
+        }
         if (!Array.isArray(p["components"])) {
             throw new EmbfParseError(`${path}.components must be an array`);
         }

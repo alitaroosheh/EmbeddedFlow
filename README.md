@@ -188,12 +188,6 @@ Configure in `.embf`:
 
 ---
 
-## Publishing to the Marketplace
-
-CI publish needs a GitHub Actions secret **`VSCE_PAT`** (Marketplace **Manage** scope for publisher **`erminity`**). Setup steps: [docs/MARKETPLACE_RELEASE.md](./docs/MARKETPLACE_RELEASE.md).
-
----
-
 ## Feedback & source
 
 - **Issues & feature requests:** [GitHub Issues](https://github.com/alitaroosheh/EmbeddedFlow/issues)

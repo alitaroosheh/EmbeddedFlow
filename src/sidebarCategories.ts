@@ -52,9 +52,8 @@ export const SIDEBAR_CATEGORIES: SidebarCategory[] = [
     {
         id: "flow",
         label: "Flow",
-        title: "Page navigation between components",
-        iconSvg: ICON_FLOW,
-        widePanel: true
+        title: "Open navigation flow diagram",
+        iconSvg: ICON_FLOW
     }
 ];
 
@@ -98,10 +97,7 @@ ${componentsPanelHtml}
 </div>`;
         }
         if (c.id === "flow") {
-            return `<div id="sidebar-panel-${c.id}" class="sidebar-panel-view sidebar-panel-view-flow" data-sidebar-panel="${c.id}" role="tabpanel" hidden>
-<p class="flow-sidebar-hint">Open the <strong>Navigation flow</strong> diagram: click a page to edit its transitions, or use <strong>+ Add connection</strong> to link two pages (Visio-style).</p>
-<button type="button" class="tb-btn-small" id="btn-open-flow-workspace" title="Open navigation flow in a workspace tab">Open flow diagram</button>
-</div>`;
+            return `<div id="sidebar-panel-${c.id}" class="sidebar-panel-view sidebar-panel-view-flow" data-sidebar-panel="${c.id}" role="tabpanel" hidden aria-hidden="true"></div>`;
         }
         return `<div id="sidebar-panel-${c.id}" class="sidebar-panel-view" data-sidebar-panel="${c.id}" role="tabpanel" hidden></div>`;
     }).join("\n");

@@ -17,7 +17,3 @@ Planning documents for pre-release strategy. These define **what EmbeddedFlow is
 Detailed feature specs and checklists live in [`../wiki/`](../wiki/README.md) (visual editor, codegen, WASM, etc.).
 
 Advanced binding PRD: [wiki/19-code-binding-and-data-model.md](../wiki/19-code-binding-and-data-model.md).
-
-## Release ops
-
-[MARKETPLACE_RELEASE.md](./MARKETPLACE_RELEASE.md) — VSIX publish checklist.

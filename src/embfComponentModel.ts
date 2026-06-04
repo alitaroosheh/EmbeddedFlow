@@ -576,6 +576,23 @@ export function applyPageInspectorPatch(
         else if (typeof v === "boolean") (page as unknown as Record<string, unknown>).scrollY = v;
     }
 
+    if (Object.prototype.hasOwnProperty.call(patch, "flowX")) {
+        const v = patch.flowX;
+        if (v === null || v === undefined) {
+            delete page.flowX;
+        } else if (typeof v === "number" && Number.isFinite(v)) {
+            page.flowX = Math.round(v);
+        }
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "flowY")) {
+        const v = patch.flowY;
+        if (v === null || v === undefined) {
+            delete page.flowY;
+        } else if (typeof v === "number" && Number.isFinite(v)) {
+            page.flowY = Math.round(v);
+        }
+    }
+
     if (patch.projName !== undefined && typeof patch.projName === "string") {
         const t = patch.projName.trim();
         if (t) {

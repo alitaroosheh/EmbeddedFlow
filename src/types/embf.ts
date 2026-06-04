@@ -159,6 +159,9 @@ export interface Page {
     components: Component[];
     /** Page-level swipe handlers (LVGL `LV_EVENT_GESTURE` on the screen). */
     swipes?: PageSwipeFlow[];
+    /** Navigation flow diagram position (canvas pixels). Omitted = auto grid layout. */
+    flowX?: number;
+    flowY?: number;
 }
 
 // ─── Components ──────────────────────────────────────────────────────────────

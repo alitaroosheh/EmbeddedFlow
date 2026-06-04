@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.0-beta.1
+
+- **Navigation flow diagram** — full workspace tab with a page graph: drag nodes to arrange layout, click a page to edit its transitions, **+ Add connection** to link two pages, double-click to open a page preview.
+- **Flow layout persistence** — optional `flowX` / `flowY` on each page in `.embf` saves node positions on the flow canvas.
+- **Bidirectional connections** — when two pages navigate to each other, the diagram shows one shared connector with arrows at both ends (instead of two overlapping lines).
+- **Flow editing UX** — adding a transition keeps you on the flow tab and source page so you can configure several transitions in a row; flow rail opens the diagram directly (no redundant sidebar panel).
+- **Workspace tabs** — closable tabs for page previews and **Navigation flow**; **+** opens another page in a new tab.
+- **Preview** — toolbar grouped into Project / Edit / View menus; auto-fit zoom measures the workspace pane reliably; loading overlay and early WASM init fixes for hidden preview tabs.
+
 ## 1.1.1
 
 - **License:** project relicensed from MIT to **GPL-3.0-or-later**.

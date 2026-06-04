@@ -10,6 +10,15 @@ Design touch UIs for embedded devices without leaving your editor. **embeddedflo
 
 ---
 
+## What's new in v1.2.0-beta.1
+
+**Pre-release** — install **Switch to Pre-Release Version** on the Marketplace, or use the latest `.vsix`.
+
+- **Navigation flow diagram** — open **Navigation flow** in the workspace: page boxes, connection lines, drag to arrange, click a page for its transition list, **+ Add connection** to wire two pages.
+- **Bidirectional links** — mutual navigation between two pages renders as a single double-headed connector.
+- **Workspace tabs** — closable tabs per page plus a dedicated flow tab; stay on the flow diagram while adding multiple transitions.
+- **Toolbar** — Project / Edit / View dropdown menus; preview auto-fit and loading improvements.
+
 ## What's new in v1.1.x
 
 **v1.1.x** improves preview fit-to-window zoom, settings/navigation in the station sample, reliable `LV_SCR_LOAD_ANIM_*` codegen, and VSIX packaging so **EmbeddedFlow: Open Preview** registers correctly.
@@ -68,6 +77,7 @@ Open **embeddedflow: Open UI Preview** on any `.embf` file. The preview runs LVG
 
 **Preview toolbar**
 
+- **Workspace tabs** — closable tabs for each page preview and **Navigation flow**
 - Page selector and page list sidebar (add, rename, remove pages)
 - **Design** toggle
 - **Zoom** — auto-fit or fixed scale (10%–400%)
@@ -107,8 +117,10 @@ Add widgets from the sidebar: label, button, slider, switch, bar, arc, **knob**,
 
 ### Flows & navigation
 
-Define behavior declaratively in the project JSON and edit from the **Flow** sidebar:
+Define behavior declaratively in the project JSON and edit from the **Navigation flow** workspace tab (or the **Flow** icon in the left rail):
 
+- **Flow diagram** — pages as draggable nodes; connection lines show widget clicks and swipe transitions; bidirectional pairs use one double-headed connector
+- **Page inspector (flow)** — select a node to list, add, edit, or remove transitions for that page
 - **Widget events** — e.g. button click → navigate to another page, set theme, or other actions
 - **Page navigation** — target page, animation (slide, fade, etc.), duration
 - **Swipe gestures** — swipe left/right/top/bottom to open a page with the same transition options

@@ -9,6 +9,7 @@ import type {
     StyleProps,
     TextDirection
 } from "./types/embf";
+import { isStringsResPath } from "./i18n/stringsResPath";
 import { SUPPORTED_VERSIONS } from "./embfParser";
 import { allocateNewComponentId } from "./embfWidgetFactory";
 
@@ -622,6 +623,18 @@ export function applyPageInspectorPatch(
             delete project.project.outputPath;
         } else if (typeof op === "string" && op.trim()) {
             project.project.outputPath = op.trim();
+        }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(patch, "projStringsPath")) {
+        const sp = patch.projStringsPath;
+        if (sp === null || sp === "") {
+            delete project.project.stringsPath;
+        } else if (typeof sp === "string") {
+            const trimmed = sp.trim();
+            if (trimmed && isStringsResPath(trimmed)) {
+                project.project.stringsPath = trimmed;
+            }
         }
     }
 

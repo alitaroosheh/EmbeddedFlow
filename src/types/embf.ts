@@ -98,6 +98,13 @@ export interface ProjectMeta {
      * @default "lvgl/lvgl.h"
      */
     lvglInclude?: LvglIncludePath;
+    /**
+     * Path to application string resources (`.res` only).
+     * Relative to the `.embf` file; default `i18n/strings.res` when omitted.
+     */
+    stringsPath?: string;
+    /** Firmware project root for clangd symbol discovery (Phase 2+). */
+    firmwarePath?: string;
 }
 
 export interface DisplayConfig {

@@ -128,6 +128,21 @@ function validateEmbf(data: unknown): EmbfProject {
             throw new EmbfParseError('project.lvglInclude must be "lvgl.h" or "lvgl/lvgl.h" when set');
         }
     }
+    if (projectObj["stringsPath"] !== undefined) {
+        const sp = projectObj["stringsPath"];
+        if (typeof sp !== "string" || !sp.trim()) {
+            throw new EmbfParseError("project.stringsPath must be a non-empty string when set");
+        }
+        if (!/\.res$/i.test(sp.trim())) {
+            throw new EmbfParseError("project.stringsPath must use the .res extension");
+        }
+    }
+    if (projectObj["firmwarePath"] !== undefined) {
+        const fp = projectObj["firmwarePath"];
+        if (typeof fp !== "string" || !fp.trim()) {
+            throw new EmbfParseError("project.firmwarePath must be a non-empty string when set");
+        }
+    }
 
     const display = obj["display"];
     if (typeof display !== "object" || display === null) {

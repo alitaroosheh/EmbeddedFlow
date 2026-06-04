@@ -5364,6 +5364,15 @@ function renderPageInspectorHtml(page, project) {
         `Resolved: <code>${esc(codegenOutputResolved || "(workspace default or ui_output next to .embf)")}</code><br/>` +
         `Relative to the .embf file, or absolute. On first Generate C Code you will be asked if empty.` +
         `</p></div>` +
+        `<div class="inspector-group-title">String resources</div>` +
+        fieldText(
+            "proj_stringsPath",
+            "Strings file (.res)",
+            (project.project && project.project.stringsPath) || "i18n/strings.res"
+        ) +
+        `<div class="field"><p style="font-size:11px;color:#888;margin:0 0 8px;line-height:1.35;">` +
+        `Path to translation table (must end in <code>.res</code>). Default: <code>i18n/strings.res</code> next to the .embf file.` +
+        `</p></div>` +
         `<div class="inspector-group-title">Display</div>` +
         `<div class="row2">` +
         fieldNum("disp_width", "Width", project.display.width) +
@@ -7110,6 +7119,16 @@ function readPageInspectorPatch() {
     const outPath = inspectorForm.elements.namedItem("proj_outputPath");
     if (outPath instanceof HTMLInputElement) {
         patch.projOutputPath = outPath.value.trim() === "" ? null : outPath.value.trim();
+    }
+
+    const stringsPath = inspectorForm.elements.namedItem("proj_stringsPath");
+    if (stringsPath instanceof HTMLInputElement) {
+        const t = stringsPath.value.trim();
+        if (t === "" || t === "i18n/strings.res") {
+            patch.projStringsPath = null;
+        } else if (/\.res$/i.test(t)) {
+            patch.projStringsPath = t;
+        }
     }
 
     const lvInc = inspectorForm.elements.namedItem("proj_lvglInclude");

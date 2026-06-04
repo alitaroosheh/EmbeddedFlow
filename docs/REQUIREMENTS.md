@@ -89,8 +89,8 @@ i18n/
 - Cells = editable translation text; changes persist to `.res` on save
 - Optional “open as text” for power users
 
-- [ ] **I18n1** Project declares `project.stringsPath` (default `i18n/strings.res` next to `.embf`); path must use **`.res`** extension
-- [ ] **I18n2** `.res` schema: `defaultLocale`, `locales.<localeId>.<key>` → string value; parse/validate on load
+- [x] **I18n1** Project declares `project.stringsPath` (default `i18n/strings.res` next to `.embf`); path must use **`.res`** extension
+- [x] **I18n2** `.res` schema: `defaultLocale`, `locales.<localeId>.<key>` → string value; parse/validate on load
 - [ ] **I18n3** **String resource table editor** in VS Code: open linked `.res`, show keys × locales grid, inline edit
 - [ ] **I18n4** Table actions: add/remove key row, add/remove locale column, set default locale
 - [ ] **I18n5** Save table edits back to `.res` (atomic write; preserve unknown keys/locales not shown)

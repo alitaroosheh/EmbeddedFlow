@@ -32,10 +32,10 @@ Navigation graph generates **only static LVGL calls** in Phase 1. No router, no 
 
 ### Property System *(IR metadata only in Phase 1)*
 
-- [ ] **PR1** `model.properties[]` in `.embf`: id, type, default, min, max, direction hint
-- [ ] **PR2** Properties used for preview mocks only — zero codegen in Phase 1
-- [ ] **PR3** Inspector: add/edit/delete properties
-- [ ] **PR4** Preview substitutes property defaults into bound widgets
+- [x] **PR1** `model.properties[]` in `.embf`: id, type, default, min, max, direction hint
+- [x] **PR2** Properties used for preview mocks only — zero codegen in Phase 1
+- [x] **PR3** Inspector: add/edit/delete properties
+- [x] **PR4** Preview substitutes property defaults into bound widgets
 
 ### Internationalization (string resources)
 

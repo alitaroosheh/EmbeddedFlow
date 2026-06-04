@@ -711,6 +711,23 @@ export function applyPageInspectorPatch(
         }
     }
 
+    if (Object.prototype.hasOwnProperty.call(patch, "projModelProperties")) {
+        const v = patch.projModelProperties;
+        project.model ??= {};
+        if (v === null || (Array.isArray(v) && v.length === 0)) {
+            delete project.model.properties;
+            if (!project.model.derived?.length && Object.keys(project.model).length === 0) {
+                delete project.model;
+            }
+        } else if (Array.isArray(v)) {
+            project.model.properties = v as NonNullable<typeof project.model>["properties"];
+            // Phase 1: model.properties replaces legacy dataModel for preview (avoid duplicate ids).
+            if (project.dataModel?.fields?.length) {
+                delete project.dataModel;
+            }
+        }
+    }
+
     return true;
 }
 

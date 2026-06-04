@@ -114,4 +114,17 @@ describe("applyPageInspectorPatch — project styles and data fields", () => {
         applyPageInspectorPatch(p, 0, { projDataFields: [] });
         expect(p.dataModel).toBeUndefined();
     });
+
+    it("creates model.properties from projModelProperties patch", () => {
+        const p: EmbfProject = minimalProject();
+        applyPageInspectorPatch(p, 0, {
+            projModelProperties: [
+                { id: "temp_c", type: "float", default: 24, min: 0, max: 100, direction: "push" }
+            ]
+        });
+        expect(p.model?.properties?.length).toBe(1);
+        expect(p.model?.properties?.[0].direction).toBe("push");
+        applyPageInspectorPatch(p, 0, { projModelProperties: [] });
+        expect(p.model?.properties).toBeUndefined();
+    });
 });

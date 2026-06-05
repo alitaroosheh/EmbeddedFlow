@@ -14,6 +14,90 @@
 #include <string.h>
 #include <emscripten.h>
 
+#if LV_FONT_MONTSERRAT_12
+extern const lv_font_t embf_font_latin1_12;
+#endif
+#if LV_FONT_MONTSERRAT_14
+extern const lv_font_t embf_font_latin1_14;
+#endif
+#if LV_FONT_MONTSERRAT_16
+extern const lv_font_t embf_font_latin1_16;
+#endif
+#if LV_FONT_MONTSERRAT_18
+extern const lv_font_t embf_font_latin1_18;
+#endif
+#if LV_FONT_MONTSERRAT_20
+extern const lv_font_t embf_font_latin1_20;
+#endif
+#if LV_FONT_MONTSERRAT_24
+extern const lv_font_t embf_font_latin1_24;
+#endif
+#if LV_FONT_MONTSERRAT_32
+extern const lv_font_t embf_font_latin1_32;
+#endif
+#if LV_FONT_MONTSERRAT_48
+extern const lv_font_t embf_font_latin1_48;
+#endif
+
+static lv_font_t g_font_ms_12;
+static lv_font_t g_font_ms_14;
+static lv_font_t g_font_ms_16;
+static lv_font_t g_font_ms_18;
+static lv_font_t g_font_ms_20;
+static lv_font_t g_font_ms_24;
+static lv_font_t g_font_ms_32;
+static lv_font_t g_font_ms_48;
+static bool g_preview_fonts_ready;
+
+/** Copy Montserrat into writable structs and wire Latin-1 fallbacks (const ROM fonts cannot be patched in WASM). */
+static void embf_install_latin_fallbacks(void)
+{
+    if (g_preview_fonts_ready) {
+        return;
+    }
+#define EMBF_WIRE(FROM, TO, LATIN) \
+    do { \
+        (TO) = *(FROM); \
+        (TO).fallback = (LATIN); \
+    } while (0)
+#if LV_FONT_MONTSERRAT_12
+    EMBF_WIRE(&lv_font_montserrat_12, g_font_ms_12, &embf_font_latin1_12);
+#endif
+#if LV_FONT_MONTSERRAT_14
+    EMBF_WIRE(&lv_font_montserrat_14, g_font_ms_14, &embf_font_latin1_14);
+#endif
+#if LV_FONT_MONTSERRAT_16
+    EMBF_WIRE(&lv_font_montserrat_16, g_font_ms_16, &embf_font_latin1_16);
+#endif
+#if LV_FONT_MONTSERRAT_18
+    EMBF_WIRE(&lv_font_montserrat_18, g_font_ms_18, &embf_font_latin1_18);
+#endif
+#if LV_FONT_MONTSERRAT_20
+    EMBF_WIRE(&lv_font_montserrat_20, g_font_ms_20, &embf_font_latin1_20);
+#endif
+#if LV_FONT_MONTSERRAT_24
+    EMBF_WIRE(&lv_font_montserrat_24, g_font_ms_24, &embf_font_latin1_24);
+#endif
+#if LV_FONT_MONTSERRAT_32
+    EMBF_WIRE(&lv_font_montserrat_32, g_font_ms_32, &embf_font_latin1_32);
+#endif
+#if LV_FONT_MONTSERRAT_48
+    EMBF_WIRE(&lv_font_montserrat_48, g_font_ms_48, &embf_font_latin1_48);
+#endif
+#undef EMBF_WIRE
+    g_preview_fonts_ready = true;
+}
+
+static const lv_font_t *embf_preview_default_font(void)
+{
+    embf_install_latin_fallbacks();
+#if LV_FONT_MONTSERRAT_14
+    return &g_font_ms_14;
+#else
+    return LV_FONT_DEFAULT;
+#endif
+}
+
 /* ── Display buffer ─────────────────────────────────────────────────────── */
 
 static int g_width  = 0;
@@ -147,6 +231,7 @@ void embf_init(int width, int height, int dark_theme,
 
     /* Init LVGL */
     lv_init();
+    embf_install_latin_fallbacks();
     lv_tick_set_cb(tick_get_cb);
 
     /* Create display */
@@ -176,7 +261,7 @@ void embf_init(int width, int height, int dark_theme,
 
     /* Apply theme */
     lv_theme_t *theme = lv_theme_default_init(
-        g_display, primary, secondary, dark_theme ? true : false, LV_FONT_DEFAULT);
+        g_display, primary, secondary, dark_theme ? true : false, embf_preview_default_font());
     lv_display_set_theme(g_display, theme);
 
 #if LV_USE_SYSMON
@@ -318,9 +403,20 @@ lv_obj_t *embf_create_button(lv_obj_t *parent, int x, int y, int w, int h)
 EMSCRIPTEN_KEEPALIVE
 void embf_button_set_label(lv_obj_t *btn, const char *text)
 {
-    lv_obj_t *lbl = lv_label_create(btn);
+    lv_obj_t *lbl = NULL;
+    const uint32_t n = lv_obj_get_child_cnt(btn);
+    for(uint32_t i = 0; i < n; i++) {
+        lv_obj_t *ch = lv_obj_get_child(btn, i);
+        if(lv_obj_check_type(ch, &lv_label_class)) {
+            lbl = ch;
+            break;
+        }
+    }
+    if(!lbl) {
+        lbl = lv_label_create(btn);
+        lv_obj_center(lbl);
+    }
     lv_label_set_text(lbl, text);
-    lv_obj_center(lbl);
 }
 
 EMSCRIPTEN_KEEPALIVE
@@ -595,14 +691,15 @@ void embf_obj_set_style_pad_all(lv_obj_t *obj, int pad)
  * Enabled sizes (lv_conf.h): 12 14 16 18 20 24 32 48            */
 static const lv_font_t *font_by_size(int size)
 {
-    if (size <=  12) return &lv_font_montserrat_12;
-    if (size <=  15) return &lv_font_montserrat_14;
-    if (size <=  17) return &lv_font_montserrat_16;
-    if (size <=  19) return &lv_font_montserrat_18;
-    if (size <=  22) return &lv_font_montserrat_20;
-    if (size <=  28) return &lv_font_montserrat_24;
-    if (size <=  40) return &lv_font_montserrat_32;
-    return &lv_font_montserrat_48;
+    embf_install_latin_fallbacks();
+    if (size <=  12) return &g_font_ms_12;
+    if (size <=  15) return &g_font_ms_14;
+    if (size <=  17) return &g_font_ms_16;
+    if (size <=  19) return &g_font_ms_18;
+    if (size <=  22) return &g_font_ms_20;
+    if (size <=  28) return &g_font_ms_24;
+    if (size <=  40) return &g_font_ms_32;
+    return &g_font_ms_48;
 }
 
 EMSCRIPTEN_KEEPALIVE
@@ -665,7 +762,7 @@ void embf_set_theme(int dark_theme, uint32_t primary_argb, uint32_t secondary_ar
     lv_color_t secondary = secondary_argb ? unpack_color(secondary_argb) : lv_palette_main(LV_PALETTE_CYAN);
 
     lv_theme_t *theme = lv_theme_default_init(
-        g_display, primary, secondary, dark_theme ? true : false, LV_FONT_DEFAULT);
+        g_display, primary, secondary, dark_theme ? true : false, embf_preview_default_font());
     lv_display_set_theme(g_display, theme);
 
     /* Propagate the style change to every existing object */

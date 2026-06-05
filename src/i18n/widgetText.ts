@@ -135,6 +135,19 @@ export function collectStringRefsInProject(project: EmbfProject): Array<{ key: s
                     out.push({ key: ref, path: `${base}.text` });
                 }
             }
+            for (const evt of c.events ?? []) {
+                evt.actions.forEach((action, ai) => {
+                    if (action.type === "set_text") {
+                        const ref = getWidgetTextRef(action.text);
+                        if (ref) {
+                            out.push({
+                                key: ref,
+                                path: `${base}.events[].actions[${ai}].text`
+                            });
+                        }
+                    }
+                });
+            }
         });
     }
     return out;

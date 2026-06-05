@@ -96,11 +96,11 @@ i18n/
 - [x] **I18n5** Save table edits back to `.res` (atomic write; preserve unknown keys/locales not shown)
 - [x] **I18n6** Widget text (labels, buttons, etc.) can reference a string resource key instead of a literal
 - [x] **I18n7** Validation: missing keys reported at design time; fallback to `defaultLocale` then key id
-- [ ] **I18n8** Preview: locale selector in designer; WASM preview shows selected locale strings from `.res`
-- [ ] **I18n9** Codegen: emit string resources using **X-Macros** (single source list, no hand-maintained parallel enums/tables)
-- [ ] **I18n10** Codegen: `lv_label_set_text` / `set_text` use `ui_get_string(UI_STR_<key>)`, not raw literals, when widget references a resource key
-- [ ] **I18n11** Codegen (multi-locale): one X-Macro list per locale (or build-time locale define); `ui_get_string(id)` indexes the active locale table
-- [ ] **I18n12** `set_text` actions accept resource keys, resolved through the same X-Macro string API
+- [x] **I18n8** Preview: locale selector in designer; WASM preview shows selected locale strings from `.res`
+- [x] **I18n9** Codegen: emit string resources using **X-Macros** (single source list, no hand-maintained parallel enums/tables)
+- [x] **I18n10** Codegen: `lv_label_set_text` / `set_text` use `ui_get_string(UI_STR_<key>)`, not raw literals, when widget references a resource key
+- [x] **I18n11** Codegen (multi-locale): one X-Macro list per locale (or build-time locale define); `ui_get_string(id)` indexes the active locale table
+- [x] **I18n12** `set_text` actions accept resource keys, resolved through the same X-Macro string API
 
 **Generated C layout (X-Macro — mandatory pattern):**
 
@@ -180,6 +180,65 @@ lv_label_set_text(ui_lbl_temp, ui_get_string(UI_STR_TEMP_LABEL));
 - Application string files use **`.res` only** (not `.json`) for this feature
 
 **Extension UI (designer chrome):** optional later — `package.nls.json` for the VS Code extension’s own UI language; separate from application `.res` files.
+
+### Right-to-left (RTL) languages — Arabic, Persian (Farsi), Hebrew
+
+LTR locales (e.g. English, German) are supported today. RTL locales require **bidirectional text**, **RTL-aware layout**, and **fonts with Arabic/Persian/Hebrew glyphs**. These are separate from translation keys: a locale like `fa` can exist in `strings.res`, but preview and codegen must also apply direction and fonts.
+
+**Relationship to existing IR:**
+
+- `display.direction` (`ltr` | `rtl`) already exists on the project display block — today it is stored in `.embf` but **not** applied in preview or codegen.
+- Target: **locale-driven direction** overrides or complements display default when the active locale is RTL (e.g. `fa`, `ar`, `he`).
+
+**Example `strings.res` with locale metadata (target):**
+
+```json
+{
+  "defaultLocale": "en",
+  "locales": {
+    "en": { "settings_title": "Settings" },
+    "fa": { "settings_title": "تنظیمات" }
+  },
+  "localeMeta": {
+    "en": { "direction": "ltr" },
+    "fa": { "direction": "rtl" }
+  }
+}
+```
+
+If `localeMeta` is omitted, infer `rtl` for known RTL locale ids (`ar`, `fa`, `he`, `ur`, …) or fall back to `display.direction`.
+
+**Preview / WASM (target):**
+
+- Enable LVGL `LV_USE_BIDI` in the WASM runtime build.
+- Apply `LV_BASE_DIR_RTL` (or `LV_BASE_DIR_AUTO` with bidi detection) on screen root and inherited widgets when active locale / project direction is RTL.
+- Ship or generate **RTL-capable fonts** for preview (Arabic script covers Persian/Farsi UI text; optional Hebrew font for `he`).
+- Locale switch + direction change must invalidate cached page screens (same as LTR locale refresh).
+
+**Codegen (target):**
+
+- Emit `lv_obj_set_style_base_dir(..., LV_BASE_DIR_RTL, …)` (or LTR) on page roots from resolved locale/display direction.
+- Document required `lv_conf.h` settings on device: `LV_USE_BIDI 1`, UTF-8, and project-supplied Arabic/Persian font via `lv_font_conv` (existing **Convert Font** command).
+- `ui_set_locale()` (or equivalent) updates active string table **and** reapplies localized widget text; RTL refresh uses the same tree walk as LTR.
+
+**Requirements:**
+
+- [ ] **RTL1** `.res` schema: optional `localeMeta.<localeId>.direction` (`ltr` | `rtl`); validate on load; table editor column/header shows direction badge for RTL locales
+- [ ] **RTL2** Resolve **active text direction**: active preview locale → `localeMeta` → inferred RTL locale id → `display.direction` → default `ltr`
+- [ ] **RTL3** Preview WASM: enable `LV_USE_BIDI`; apply `base_dir` on screen load and after `set_locale` / locale picker change
+- [ ] **RTL4** Preview WASM: bundled or project-linked **Arabic-script font** (covers `ar`, `fa`, `ur`) with Montserrat/Latin fallback for English; document Hebrew font as optional follow-up
+- [ ] **RTL5** Preview: RTL layout mirroring — labels, buttons, sliders, bars, switches, checkboxes, dropdowns behave correctly under `LV_BASE_DIR_RTL` (LVGL semantics, not manual x-flip in IR)
+- [ ] **RTL6** Codegen: emit page-level `lv_obj_set_style_base_dir` from resolved direction; include comment block listing required `lv_conf.h` bidi/font settings
+- [ ] **RTL7** Codegen: `ui_refresh_localized_text()` / `ui_set_locale()` path works for RTL locales (glyphs + bidi order after locale switch on device)
+- [ ] **RTL8** Validation: warn when an RTL locale is active but widget/project font lacks glyphs for translated strings (design-time Problems panel)
+- [ ] **RTL9** Sample project: add `fa` (or `ar`) locale to `sample/strings.res` and at least one RTL demo string on a sample page; document preview reload + font requirements in wiki
+
+**Constraints:**
+
+- RTL is **not** a separate string format — same `{ "ref": "key" }` widgets and X-Macro codegen as LTR i18n
+- No runtime `.res` parser on device; direction is compile-time default plus optional runtime `ui_set_locale()` table swap (same as I18n11)
+- Mixed LTR/RTL in one label (e.g. English product name inside Arabic sentence) relies on LVGL bidi — no custom bidi engine in EmbeddedFlow
+- Physical display mirroring (hardware scan order) remains out of scope; this section covers **text direction and LVGL layout** only
 
 ---
 

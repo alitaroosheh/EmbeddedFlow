@@ -538,8 +538,12 @@ function validateEventActionShape(action: Record<string, unknown>, ap: string): 
             break;
         case "set_text":
             needTarget("set_text");
-            if (typeof action["text"] !== "string") {
-                throw new EmbfParseError(`${ap}: set_text requires string "text"`);
+            if (action["text"] === undefined) {
+                throw new EmbfParseError(`${ap}: set_text requires "text"`);
+            }
+            validateWidgetTextField(action["text"], `${ap}.text`);
+            if (typeof action["text"] === "string") {
+                validateBindingTemplates(action["text"], `${ap}.text`);
             }
             break;
         case "set_value":
@@ -565,6 +569,16 @@ function validateEventActionShape(action: Record<string, unknown>, ap: string): 
                 throw new EmbfParseError(`${ap}: set_theme "dark" must be a boolean when set`);
             }
             break;
+        case "set_locale": {
+            const loc = action["locale"];
+            if (typeof loc !== "string" || !loc.trim()) {
+                throw new EmbfParseError(`${ap}: set_locale requires non-empty string "locale"`);
+            }
+            if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(loc.trim())) {
+                throw new EmbfParseError(`${ap}: set_locale locale "${loc}" is not a valid locale id`);
+            }
+            break;
+        }
         default:
             throw new EmbfParseError(`${ap}: unknown action type "${ty}"`);
     }

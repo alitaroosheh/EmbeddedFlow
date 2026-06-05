@@ -1,0 +1,53 @@
+{
+  "defaultLocale": "en",
+  "locales": {
+    "en": {
+      "string_app_title": "Weather Station",
+      "string_night": "Night",
+      "string_temperature": "TEMPERATURE",
+      "string_humidity": "HUMIDITY",
+      "string_temp_range": "Range: 18..28",
+      "string_cool": "Cool",
+      "string_mild": "Mild",
+      "string_hot": "Hot",
+      "string_reset": "Reset",
+      "string_play_anims": "Play anims (toolbar)",
+      "string_comfort": "Comfort",
+      "string_dry": "Dry",
+      "string_humid": "Humid",
+      "string_footer_hint": "Open Settings to change language and theme.",
+      "string_settings": "Settings",
+      "string_settings_title": "Station Settings",
+      "string_settings_sub": "Language and display",
+      "string_back": "Back",
+      "string_language": "Language",
+      "string_language_hint": "Choose interface language",
+      "string_english": "English",
+      "string_german": "Deutsch"
+    },
+    "de": {
+      "string_app_title": "Wetterstation",
+      "string_night": "Nacht",
+      "string_temperature": "TEMPERATUR",
+      "string_humidity": "LUFTFEUCHTE",
+      "string_temp_range": "Bereich: 18..28",
+      "string_cool": "Kalt",
+      "string_mild": "Mild",
+      "string_hot": "Heiß",
+      "string_reset": "Reset",
+      "string_play_anims": "Animationen (Toolbar)",
+      "string_comfort": "Angenehm",
+      "string_dry": "Trocken",
+      "string_humid": "Feucht",
+      "string_footer_hint": "Einstellungen für Sprache und Design öffnen.",
+      "string_settings": "Einstellungen",
+      "string_settings_title": "Station Einstellungen",
+      "string_settings_sub": "Sprache und Anzeige",
+      "string_back": "Zurück",
+      "string_language": "Sprache",
+      "string_language_hint": "Oberflächensprache wählen",
+      "string_english": "English",
+      "string_german": "Deutsch"
+    }
+  }
+}

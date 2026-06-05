@@ -449,7 +449,22 @@
               "minLength": 1,
               "description": "Component ID of the label"
             },
-            "text": { "type": "string" }
+            "text": {
+              "oneOf": [
+                { "type": "string" },
+                {
+                  "type": "object",
+                  "required": ["ref"],
+                  "properties": {
+                    "ref": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              ]
+            }
           }
         },
         {
@@ -503,6 +518,18 @@
             "dark": {
               "type": "boolean",
               "description": "Force light/dark. Omit on value_changed from a switch/checkbox to use that widget's checked state (preview only)."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "locale"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "set_locale" },
+            "locale": {
+              "type": "string",
+              "description": "Locale id from strings.res (e.g. en, de). Switches active language and refreshes localized widget text."
             }
           }
         }

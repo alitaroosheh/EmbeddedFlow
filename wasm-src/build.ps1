@@ -89,6 +89,8 @@ $rspLines = @(
     "-o `"$OutJs`"",
     "`"$RuntimeC`""
 )
+$latinFontFiles = Get-ChildItem -Path $ScriptDir -Filter "embf_font_latin1_*.c" | Select-Object -ExpandProperty FullName
+$rspLines += $latinFontFiles | ForEach-Object { "`"$_`"" }
 $rspLines += $lvglCFiles | ForEach-Object { "`"$_`"" }
 $rspLines | Set-Content -Path $RspFile -Encoding UTF8
 

@@ -171,6 +171,8 @@ export interface WebviewLoadPayload {
     } | null;
     stringsResRelPath?: string;
     stringsResError?: string;
+    /** Locale ids available in the linked `.res` (for preview picker). */
+    stringsResLocaleIds?: string[];
 }
 
 export interface SendProjectOptions {
@@ -373,6 +375,7 @@ export class EmbfPreviewPanel {
                     locales: stringsDoc.locales,
                     keys: listAllStringKeys(stringsDoc)
                 };
+                payload.stringsResLocaleIds = Object.keys(stringsDoc.locales).sort();
             } else {
                 payload.stringsRes = null;
             }
@@ -1240,6 +1243,18 @@ export class EmbfPreviewPanel {
             border-radius: 3px;
         }
         #toolbar label { font-size: 12px; color: #999; }
+        #toolbar .tb-toolbar-check {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            margin-right: 2px;
+            cursor: pointer;
+            user-select: none;
+            white-space: nowrap;
+        }
+        #toolbar .tb-toolbar-check:hover {
+            color: #ccc;
+        }
         #toolbar .tb-btn {
             background: #3c3c3c;
             color: #ccc;
@@ -2684,10 +2699,6 @@ export class EmbfPreviewPanel {
             <div class="tb-menu-wrap">
                 <button type="button" class="tb-menu-trigger" id="tb-menu-view-trigger" aria-haspopup="true">View ▾</button>
                 <div class="tb-menu-panel" id="tb-menu-view" hidden role="menu">
-                    <label class="tb-menu-check" title="Select and drag widgets">
-                        <input type="checkbox" id="design-mode" checked />
-                        Design mode
-                    </label>
                     <label class="tb-menu-check" title="Snap moves and resize to grid">
                         <input type="checkbox" id="design-grid" />
                         Grid snap
@@ -2721,8 +2732,14 @@ export class EmbfPreviewPanel {
             </div>
         </div>
         <div class="tb-bar-context">
+            <label class="tb-toolbar-check" title="Select and drag widgets; off = run LVGL interactions">
+                <input type="checkbox" id="design-mode" checked />
+                Design mode
+            </label>
             <label for="page-select">Page:</label>
             <select id="page-select"></select>
+            <label for="preview-locale">Locale:</label>
+            <select id="preview-locale" title="Preview string locale from strings.res" disabled></select>
             <label for="toolbar-widget-select">Widget:</label>
             <select id="toolbar-widget-select" title="Select a widget on the current page"></select>
         </div>

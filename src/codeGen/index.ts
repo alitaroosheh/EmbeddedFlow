@@ -13,6 +13,11 @@ import {
 import { generateFontsHeader, generateFontsSource } from "./fontsGen";
 import { generateStylesHeader, generateStylesSource } from "./stylesGen";
 import { generateBindingsHeader, generateBindingsSource } from "./bindingsGen";
+import {
+    generateStringsCodegen,
+    loadStringsResForCodegen,
+    localeToDefBasename
+} from "./stringsGen";
 import { convertProjectImages } from "../resources";
 
 export { resolveCodegenOutputDir } from "./outputDir";
@@ -49,8 +54,24 @@ export function generateCode(
     // Auto-convert project.images[] → ui_img_*.c in the output folder (same as ui.h)
     const imageResult = convertProjectImages(project, embfPath, dir);
     const lvglV9 = isLvglV9(project);
+    const stringsRes = loadStringsResForCodegen(project, embfPath);
+    const stringsBundle = generateStringsCodegen(project, stringsRes);
+    const stringsApi = stringsBundle !== null;
 
     files.set(path.join(dir, "ui_display.h"), generateDisplayHeader(project));
+
+    if (stringsBundle) {
+        files.set(path.join(dir, "ui_strings_ids.h"), stringsBundle.idsHeader);
+        files.set(path.join(dir, "ui_strings.h"), stringsBundle.header);
+        files.set(path.join(dir, "ui_strings.c"), stringsBundle.source);
+        files.set(path.join(dir, "ui_strings_refresh.c"), stringsBundle.refreshSource);
+        for (const [localeId, defContent] of stringsBundle.localeDefs) {
+            files.set(
+                path.join(dir, `ui_strings_${localeToDefBasename(localeId)}.def`),
+                defContent
+            );
+        }
+    }
 
     // Per-page files
     for (const page of project.pages) {
@@ -60,7 +81,7 @@ export function generateCode(
         );
         files.set(
             path.join(dir, `ui_${page.id}.c`),
-            generatePageSource(project, page)
+            generatePageSource(project, page, { stringsApi })
         );
     }
 
@@ -96,10 +117,11 @@ export function generateCode(
             imageSymbols: imageSymbols.length > 0 ? imageSymbols : undefined,
             includeFonts: fontsHeader !== null,
             includeStyles: stylesHeader !== null,
-            includeBindings: bindingsHeader !== null
+            includeBindings: bindingsHeader !== null,
+            includeStrings: stringsApi
         })
     );
-    files.set(path.join(dir, "ui.c"), generateRootSource(project));
+    files.set(path.join(dir, "ui.c"), generateRootSource(project, { includeStrings: stringsApi }));
     files.set(path.join(dir, "lv_conf.h"), generateLvConf(project));
 
     for (const [relPath, content] of imageResult.files) {

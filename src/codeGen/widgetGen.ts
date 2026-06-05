@@ -9,22 +9,14 @@ import { toIdentifier, widgetVar } from "./naming";
 import { emitStyleCalls } from "./styleGen";
 import { styleVarName } from "./stylesGen";
 import { emitAnimationCalls } from "./animationGen";
-
-/** Literal for generated C until X-Macro string API (I18n10). Resource refs emit the key id. */
-function cLiteralFromWidgetText(value: WidgetTextValue): string {
-    if (typeof value === "string") {
-        if (/\{\{/.test(value)) {
-            return "";
-        }
-        return escapeC(value);
-    }
-    return escapeC(value.ref);
-}
+import { emitWidgetTextExpr } from "./stringsGen";
 
 /** Optional shared context for widget emission (project-level resolvers). */
 export interface WidgetEmitContext {
     fonts?: FontDef[];
     styles?: StyleDef[];
+    /** When true, `{ ref: "key" }` widget text emits `ui_get_string(UI_STR_*)`. */
+    stringsApi?: boolean;
 }
 
 /**
@@ -51,8 +43,8 @@ export function emitComponent(
     const v = widgetVar(pageId, comp.id);
 
     switch (comp.type) {
-        case "label":      lines.push(...emitLabel(v, comp as LabelComponent, parentExpr, lvglV9)); break;
-        case "button":     lines.push(...emitButton(v, comp as ButtonComponent, parentExpr, pageId, lvglV9)); break;
+        case "label":      lines.push(...emitLabel(v, comp as LabelComponent, parentExpr, lvglV9, ctx)); break;
+        case "button":     lines.push(...emitButton(v, comp as ButtonComponent, parentExpr, pageId, lvglV9, ctx)); break;
         case "image":      lines.push(...emitImage(v, comp as ImageComponent, parentExpr, lvglV9)); break;
         case "slider":     lines.push(...emitSlider(v, comp as SliderComponent, parentExpr, lvglV9)); break;
         case "switch":     lines.push(...emitSwitch(v, comp as SwitchComponent, parentExpr, lvglV9)); break;
@@ -60,7 +52,7 @@ export function emitComponent(
         case "spinner":    lines.push(...emitSpinner(v, comp as SpinnerComponent, parentExpr, lvglV9)); break;
         case "arc":        lines.push(...emitArc(v, comp as ArcComponent, parentExpr, lvglV9)); break;
         case "knob":       lines.push(...emitKnob(v, comp as KnobComponent, parentExpr, lvglV9)); break;
-        case "checkbox":   lines.push(...emitCheckbox(v, comp as CheckboxComponent, parentExpr, lvglV9)); break;
+        case "checkbox":   lines.push(...emitCheckbox(v, comp as CheckboxComponent, parentExpr, lvglV9, ctx)); break;
         case "dropdown":   lines.push(...emitDropdown(v, comp as DropdownComponent, parentExpr, lvglV9)); break;
         case "roller":     lines.push(...emitRoller(v, comp as RollerComponent, parentExpr, lvglV9)); break;
         case "textarea":   lines.push(...emitTextarea(v, comp as TextareaComponent, parentExpr, lvglV9)); break;
@@ -136,7 +128,13 @@ function posSize(v: string, comp: Component): string[] {
 
 // ── Label ──────────────────────────────────────────────────────────────────────
 
-function emitLabel(v: string, c: LabelComponent, parent: string, v9: boolean): string[] {
+function emitLabel(
+    v: string,
+    c: LabelComponent,
+    parent: string,
+    v9: boolean,
+    ctx?: WidgetEmitContext
+): string[] {
     const lines = [
         `    lv_obj_t *${v} = lv_label_create(${parent});`
     ];
@@ -152,18 +150,24 @@ function emitLabel(v: string, c: LabelComponent, parent: string, v9: boolean): s
     }
 
     /* Literal {{field}} templates are resolved in ui_bindings_apply() — do not bake them into ROM. */
-    const textLit = cLiteralFromWidgetText(c.text);
     if (typeof c.text === "string" && /\{\{/.test(c.text)) {
         lines.push(`    lv_label_set_text(${v}, "");`);
     } else {
-        lines.push(`    lv_label_set_text(${v}, "${textLit}");`);
+        lines.push(`    lv_label_set_text(${v}, ${emitWidgetTextExpr(c.text, !!ctx?.stringsApi)});`);
     }
     return lines;
 }
 
 // ── Button ─────────────────────────────────────────────────────────────────────
 
-function emitButton(v: string, c: ButtonComponent, parent: string, pageId: string, v9: boolean): string[] {
+function emitButton(
+    v: string,
+    c: ButtonComponent,
+    parent: string,
+    pageId: string,
+    v9: boolean,
+    ctx?: WidgetEmitContext
+): string[] {
     const createFn = v9 ? "lv_button_create" : "lv_btn_create";
     const lines = [
         `    lv_obj_t *${v} = ${createFn}(${parent});`
@@ -172,7 +176,7 @@ function emitButton(v: string, c: ButtonComponent, parent: string, pageId: strin
         const lblVar = `${v}_lbl`;
         lines.push(
             `    lv_obj_t *${lblVar} = lv_label_create(${v});`,
-            `    lv_label_set_text(${lblVar}, "${cLiteralFromWidgetText(c.label)}");`,
+            `    lv_label_set_text(${lblVar}, ${emitWidgetTextExpr(c.label, !!ctx?.stringsApi)});`,
             `    lv_obj_center(${lblVar});`
         );
     }
@@ -298,12 +302,18 @@ function hexToColor(hex: string): string {
 
 // ── Checkbox ───────────────────────────────────────────────────────────────────
 
-function emitCheckbox(v: string, c: CheckboxComponent, parent: string, _v9: boolean): string[] {
+function emitCheckbox(
+    v: string,
+    c: CheckboxComponent,
+    parent: string,
+    _v9: boolean,
+    ctx?: WidgetEmitContext
+): string[] {
     const lines = [
         `    lv_obj_t *${v} = lv_checkbox_create(${parent});`
     ];
     if (c.text) {
-        lines.push(`    lv_checkbox_set_text(${v}, "${cLiteralFromWidgetText(c.text)}");`);
+        lines.push(`    lv_checkbox_set_text(${v}, ${emitWidgetTextExpr(c.text, !!ctx?.stringsApi)});`);
     }
     if (c.checked) {
         lines.push(`    lv_obj_add_state(${v}, LV_STATE_CHECKED);`);

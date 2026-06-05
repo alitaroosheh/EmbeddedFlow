@@ -70,10 +70,15 @@ export function generatePageHeader(project: EmbfProject, page: Page): string {
 // Per-page source: ui_<page_id>.c
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function generatePageSource(project: EmbfProject, page: Page): string {
+export function generatePageSource(
+    project: EmbfProject,
+    page: Page,
+    opts?: { stringsApi?: boolean }
+): string {
     const scrVar = screenVar(page.id);
     const initFn = screenInitFn(page.id);
     const v9     = isLvglV9(project);
+    const stringsApi = opts?.stringsApi === true;
 
     // Global variable declarations for this page
     const allWidgets = flatWidgets(page);
@@ -81,7 +86,7 @@ export function generatePageSource(project: EmbfProject, page: Page): string {
         `lv_obj_t *${widgetVar(page.id, w.id)} = NULL;`
     );
 
-    const widgetCtx = { fonts: project.fonts, styles: project.styles };
+    const widgetCtx = { fonts: project.fonts, styles: project.styles, stringsApi };
     const bodyLines: string[] = [];
     for (const comp of page.components) {
         bodyLines.push(...emitComponent(page.id, comp, scrVar, v9, widgetCtx));
@@ -117,7 +122,7 @@ export function generatePageSource(project: EmbfProject, page: Page): string {
     }
 
     // Event callbacks and page swipe handlers
-    const events = collectPageEvents(project, page);
+    const events = collectPageEvents(project, page, stringsApi);
     const swipes = collectPageSwipes(project, page);
     const decls = [...events.decls, ...swipes.decls];
     const impls = [...events.impls, ...swipes.impls];
@@ -195,6 +200,8 @@ export interface GenerateRootHeaderOptions {
     includeStyles?: boolean;
     /** When true, `ui.h` will `#include "ui_bindings.h"` so callers get setters/getters. */
     includeBindings?: boolean;
+    /** When true, `ui.h` will `#include "ui_strings.h"` for `ui_get_string()`. */
+    includeStrings?: boolean;
 }
 
 export function generateRootHeader(
@@ -211,6 +218,7 @@ export function generateRootHeader(
     const fontsInclude    = opts?.includeFonts    ? [`#include "ui_fonts.h"`]    : [];
     const stylesInclude   = opts?.includeStyles   ? [`#include "ui_styles.h"`]   : [];
     const bindingsInclude = opts?.includeBindings ? [`#include "ui_bindings.h"`] : [];
+    const stringsInclude  = opts?.includeStrings  ? [`#include "ui_strings.h"`]  : [];
 
     return [
         AUTOGEN_BANNER,
@@ -226,6 +234,7 @@ export function generateRootHeader(
         ...fontsInclude,
         ...stylesInclude,
         ...bindingsInclude,
+        ...stringsInclude,
         ``,
         ...imageLines,
         ...includes,
@@ -245,7 +254,7 @@ export function generateRootHeader(
     ].join("\n");
 }
 
-export function generateRootSource(project: EmbfProject): string {
+export function generateRootSource(project: EmbfProject, opts?: { includeStrings?: boolean }): string {
     const v9          = isLvglV9(project);
     const dark        = project.theme?.dark ? "true" : "false";
     const primaryHex  = project.theme?.primaryColor  ? hexToRaw(project.theme.primaryColor)  : "2196F3";
@@ -284,6 +293,10 @@ export function generateRootSource(project: EmbfProject): string {
             `    lv_disp_set_theme(lv_disp_get_default(), theme);`
           ];
 
+    const stringsInit =
+        opts?.includeStrings === true
+            ? [`    /* String resources (strings.res) — default locale + runtime ui_set_locale() */`, `    ui_strings_init();`, ``]
+            : [];
     const stylesInit = (project.styles?.length ?? 0) > 0
         ? [`    /* Initialise named lv_style_t objects (ui_styles.c) */`, `    ui_styles_init();`, ``]
         : [];
@@ -306,6 +319,7 @@ export function generateRootSource(project: EmbfProject): string {
         `{`,
         ...themeInit,
         ``,
+        ...stringsInit,
         ...stylesInit,
         `    /* Create all screens */`,
         ...initCalls,

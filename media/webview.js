@@ -82,6 +82,9 @@ const previewZoomSelect = /** @type {HTMLSelectElement | null} */ (
 const toolbarWidgetSelect = /** @type {HTMLSelectElement | null} */ (
     document.getElementById("toolbar-widget-select")
 );
+const previewLocaleSelect = /** @type {HTMLSelectElement | null} */ (
+    document.getElementById("preview-locale")
+);
 const designGridCheck = /** @type {HTMLInputElement | null} */ (document.getElementById("design-grid"));
 const designRulersCheck = /** @type {HTMLInputElement | null} */ (document.getElementById("design-rulers"));
 const rulerTop = /** @type {HTMLCanvasElement | null} */ (document.getElementById("ruler-top"));
@@ -205,6 +208,8 @@ let currentStringsRes = null;
 let stringResourceKeys = [];
 /** @type {string} */
 let stringsResLoadError = "";
+/** Preview locale override (empty = use strings.res defaultLocale). */
+let previewLocale = "";
 
 /**
  * Closable workspace tabs (page previews + optional navigation flow).
@@ -538,6 +543,11 @@ async function handleLoad(payload, generation = loadGeneration) {
         stringResourceKeys = [];
     }
     stringsResLoadError = typeof payload.stringsResError === "string" ? payload.stringsResError : "";
+    populatePreviewLocaleSelect(
+        payload.stringsResLocaleIds ??
+            (currentStringsRes ? Object.keys(currentStringsRes.locales).sort() : []),
+        currentStringsRes?.defaultLocale ?? ""
+    );
     codegenOutputResolved =
         typeof payload.codegenOutputResolved === "string" ? payload.codegenOutputResolved : "";
     displayRound = !!(currentProject?.display && currentProject.display.round === true);
@@ -1679,6 +1689,13 @@ function resolveWidgetTextDisplay(value) {
             const table = currentStringsRes.locales[loc];
             return table && Object.prototype.hasOwnProperty.call(table, key) ? table[key] : undefined;
         };
+        const activeLoc = previewLocale || currentStringsRes.defaultLocale;
+        if (activeLoc) {
+            const fromActive = tryLoc(activeLoc);
+            if (fromActive !== undefined) {
+                return applyBindingTemplates(fromActive);
+            }
+        }
         const fromDefault = tryLoc(currentStringsRes.defaultLocale);
         if (fromDefault !== undefined) {
             return applyBindingTemplates(fromDefault);
@@ -1692,6 +1709,38 @@ function resolveWidgetTextDisplay(value) {
         return key;
     }
     return String(value);
+}
+
+/** Re-apply localized copy after preview locale change (all pages; clears cached screens). */
+function refreshPreviewLocaleText() {
+    if (!currentProject || !WasmModule || !wasmReady) {
+        return;
+    }
+    clearPageScreenCache();
+    applyPageSwitch(currentProject, currentPageIndex);
+}
+
+function populatePreviewLocaleSelect(localeIds, defaultLocale) {
+    if (!previewLocaleSelect) {
+        return;
+    }
+    const ids = Array.isArray(localeIds) ? localeIds.filter(Boolean) : [];
+    if (!ids.length) {
+        previewLocaleSelect.innerHTML = "";
+        previewLocaleSelect.disabled = true;
+        previewLocale = "";
+        return;
+    }
+    previewLocaleSelect.disabled = false;
+    if (!previewLocale || !ids.includes(previewLocale)) {
+        previewLocale = defaultLocale && ids.includes(defaultLocale) ? defaultLocale : ids[0];
+    }
+    previewLocaleSelect.innerHTML = ids
+        .map(
+            loc =>
+                `<option value="${esc(loc)}"${loc === previewLocale ? " selected" : ""}>${esc(loc)}</option>`
+        )
+        .join("");
 }
 
 /** Mirror firmware `ui_bindings_apply()` for the live preview after button actions. */
@@ -2071,14 +2120,20 @@ function dispatchAction(action, eventValue, currentPage) {
                 targetComp?.type === "label" && typeof targetComp.text === "string"
                     ? singleBindingFieldInLabel(targetComp.text)
                     : null;
-            if (bindField) {
+            if (bindField && typeof action.text === "string") {
                 setDataModelField(bindField, action.text);
                 refreshPreviewBindings(page);
                 break;
             }
             const ptr = idToObjPtr.get(action.target);
             if (!ptr) return;
-            const strPtr = wasm.stringToNewUTF8(action.text);
+            const displayText =
+                isWidgetTextRef(action.text)
+                    ? resolveWidgetTextDisplay(action.text)
+                    : typeof action.text === "string"
+                      ? action.text
+                      : "";
+            const strPtr = wasm.stringToNewUTF8(displayText);
             if (targetComp?.type === "button") {
                 wasm._embf_button_set_label?.(ptr, strPtr);
             } else {
@@ -2157,6 +2212,18 @@ function dispatchAction(action, eventValue, currentPage) {
                 previewDarkOverride = !!eventValue;
             }
             applyEmbfThemeFromProject(currentProject);
+            break;
+        }
+        case "set_locale": {
+            const loc = typeof action.locale === "string" ? action.locale.trim() : "";
+            if (!loc) {
+                return;
+            }
+            previewLocale = loc;
+            if (previewLocaleSelect) {
+                previewLocaleSelect.value = loc;
+            }
+            refreshPreviewLocaleText();
             break;
         }
     }
@@ -8992,6 +9059,13 @@ if (toolbarWidgetSelect) {
             return;
         }
         setSelection(compId);
+    });
+}
+
+if (previewLocaleSelect) {
+    previewLocaleSelect.addEventListener("change", () => {
+        previewLocale = previewLocaleSelect.value;
+        refreshPreviewLocaleText();
     });
 }
 

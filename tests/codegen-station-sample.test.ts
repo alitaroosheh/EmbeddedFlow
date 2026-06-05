@@ -36,7 +36,8 @@ describe("temperature station sample codegen", () => {
         expect(pageC).toContain('lv_label_set_text(ui_page_station_lbl_temp_value, "24")');
         expect(pageC).toContain('lv_label_set_text(ui_page_station_lbl_hum_value, "56")');
         expect(pageC).toContain('lv_label_set_text(ui_page_station_lbl_clock, "08:41")');
-        expect(pageC).toContain('lv_label_set_text(ui_page_station_lbl_hum_status, "Comfort")');
+        expect(pageC).toContain("ui_get_string(UI_STR_STRING_COMFORT)");
+        expect(pageC).toContain("ui_get_string(UI_STR_STRING_APP_TITLE)");
         expect(pageC).toContain("lv_arc_set_value(ui_page_station_arc_temp_gauge, 24)");
         expect(pageC).toContain("lv_bar_set_value(ui_page_station_bar_hum, 56");
 

@@ -3,12 +3,23 @@ import type {
     SwitchComponent, BarComponent, SpinnerComponent, ArcComponent, KnobComponent,
     CheckboxComponent, DropdownComponent, RollerComponent, TextareaComponent,
     LineComponent, ContainerComponent, PanelComponent, ImageComponent,
-    FontDef, StyleDef
+    FontDef, StyleDef, WidgetTextValue
 } from "../types/embf";
 import { toIdentifier, widgetVar } from "./naming";
 import { emitStyleCalls } from "./styleGen";
 import { styleVarName } from "./stylesGen";
 import { emitAnimationCalls } from "./animationGen";
+
+/** Literal for generated C until X-Macro string API (I18n10). Resource refs emit the key id. */
+function cLiteralFromWidgetText(value: WidgetTextValue): string {
+    if (typeof value === "string") {
+        if (/\{\{/.test(value)) {
+            return "";
+        }
+        return escapeC(value);
+    }
+    return escapeC(value.ref);
+}
 
 /** Optional shared context for widget emission (project-level resolvers). */
 export interface WidgetEmitContext {
@@ -141,10 +152,11 @@ function emitLabel(v: string, c: LabelComponent, parent: string, v9: boolean): s
     }
 
     /* Literal {{field}} templates are resolved in ui_bindings_apply() — do not bake them into ROM. */
-    if (/\{\{/.test(c.text)) {
+    const textLit = cLiteralFromWidgetText(c.text);
+    if (typeof c.text === "string" && /\{\{/.test(c.text)) {
         lines.push(`    lv_label_set_text(${v}, "");`);
     } else {
-        lines.push(`    lv_label_set_text(${v}, "${escapeC(c.text)}");`);
+        lines.push(`    lv_label_set_text(${v}, "${textLit}");`);
     }
     return lines;
 }
@@ -160,7 +172,7 @@ function emitButton(v: string, c: ButtonComponent, parent: string, pageId: strin
         const lblVar = `${v}_lbl`;
         lines.push(
             `    lv_obj_t *${lblVar} = lv_label_create(${v});`,
-            `    lv_label_set_text(${lblVar}, "${escapeC(c.label)}");`,
+            `    lv_label_set_text(${lblVar}, "${cLiteralFromWidgetText(c.label)}");`,
             `    lv_obj_center(${lblVar});`
         );
     }
@@ -291,7 +303,7 @@ function emitCheckbox(v: string, c: CheckboxComponent, parent: string, _v9: bool
         `    lv_obj_t *${v} = lv_checkbox_create(${parent});`
     ];
     if (c.text) {
-        lines.push(`    lv_checkbox_set_text(${v}, "${escapeC(c.text)}");`);
+        lines.push(`    lv_checkbox_set_text(${v}, "${cLiteralFromWidgetText(c.text)}");`);
     }
     if (c.checked) {
         lines.push(`    lv_obj_add_state(${v}, LV_STATE_CHECKED);`);

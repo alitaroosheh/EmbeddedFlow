@@ -199,6 +199,12 @@ let previewLayoutObserver = null;
 let previewLayoutResizeRaf = 0;
 /** @type {import("../src/types/embf").EmbfProject | null} */
 let currentProject = null;
+/** @type {{ defaultLocale: string, locales: Record<string, Record<string, string>>, keys?: string[] } | null} */
+let currentStringsRes = null;
+/** @type {string[]} */
+let stringResourceKeys = [];
+/** @type {string} */
+let stringsResLoadError = "";
 
 /**
  * Closable workspace tabs (page previews + optional navigation flow).
@@ -524,6 +530,14 @@ async function handleLoad(payload, generation = loadGeneration) {
         return;
     }
     currentProject = payload.project;
+    if (payload.stringsRes && typeof payload.stringsRes === "object") {
+        currentStringsRes = payload.stringsRes;
+        stringResourceKeys = Array.isArray(payload.stringsRes.keys) ? payload.stringsRes.keys.slice() : [];
+    } else {
+        currentStringsRes = null;
+        stringResourceKeys = [];
+    }
+    stringsResLoadError = typeof payload.stringsResError === "string" ? payload.stringsResError : "";
     codegenOutputResolved =
         typeof payload.codegenOutputResolved === "string" ? payload.codegenOutputResolved : "";
     displayRound = !!(currentProject?.display && currentProject.display.round === true);
@@ -1627,6 +1641,59 @@ function setDataModelField(fieldId, value) {
     return false;
 }
 
+function isWidgetTextRef(value) {
+    return (
+        value !== null &&
+        typeof value === "object" &&
+        !Array.isArray(value) &&
+        typeof value.ref === "string"
+    );
+}
+
+function widgetTextMode(value) {
+    return isWidgetTextRef(value) ? "resource" : "literal";
+}
+
+function widgetTextLiteral(value) {
+    return typeof value === "string" ? value : "";
+}
+
+function widgetTextRefKey(value) {
+    return isWidgetTextRef(value) ? value.ref : "";
+}
+
+/** Resolve label/button/checkbox copy for preview (defaultLocale → any locale → key id). */
+function resolveWidgetTextDisplay(value) {
+    if (value === undefined || value === null) {
+        return "";
+    }
+    if (typeof value === "string") {
+        return applyBindingTemplates(value);
+    }
+    if (isWidgetTextRef(value)) {
+        const key = value.ref;
+        if (!currentStringsRes) {
+            return key;
+        }
+        const tryLoc = loc => {
+            const table = currentStringsRes.locales[loc];
+            return table && Object.prototype.hasOwnProperty.call(table, key) ? table[key] : undefined;
+        };
+        const fromDefault = tryLoc(currentStringsRes.defaultLocale);
+        if (fromDefault !== undefined) {
+            return applyBindingTemplates(fromDefault);
+        }
+        for (const loc of Object.keys(currentStringsRes.locales)) {
+            const v = tryLoc(loc);
+            if (v !== undefined) {
+                return applyBindingTemplates(v);
+            }
+        }
+        return key;
+    }
+    return String(value);
+}
+
 /** Mirror firmware `ui_bindings_apply()` for the live preview after button actions. */
 function refreshPreviewBindings(page) {
     if (!page || !WasmModule || !getPreviewProperties().length) {
@@ -1642,8 +1709,16 @@ function refreshPreviewBindings(page) {
                     const strPtr = wasm.stringToNewUTF8(applyBindingTemplates(c.text));
                     wasm._embf_label_set_text(ptr, strPtr);
                     wasm._free(strPtr);
+                } else if (c.type === "label" && isWidgetTextRef(c.text)) {
+                    const strPtr = wasm.stringToNewUTF8(resolveWidgetTextDisplay(c.text));
+                    wasm._embf_label_set_text(ptr, strPtr);
+                    wasm._free(strPtr);
                 } else if (c.type === "button" && typeof c.label === "string" && c.label.indexOf("{{") !== -1) {
                     const strPtr = wasm.stringToNewUTF8(applyBindingTemplates(c.label));
+                    wasm._embf_button_set_label?.(ptr, strPtr);
+                    wasm._free(strPtr);
+                } else if (c.type === "button" && isWidgetTextRef(c.label)) {
+                    const strPtr = wasm.stringToNewUTF8(resolveWidgetTextDisplay(c.label));
                     wasm._embf_button_set_label?.(ptr, strPtr);
                     wasm._free(strPtr);
                 } else if (c.type === "slider") {
@@ -1673,15 +1748,15 @@ function buildComponentEmbf(wasm, comp, parent) {
     switch (comp.type) {
         case "label": {
             obj = wasm._embf_create_label(parent, comp.x, comp.y, comp.width, comp.height);
-            const ptr = wasm.stringToNewUTF8(applyBindingTemplates(comp.text ?? ""));
+            const ptr = wasm.stringToNewUTF8(resolveWidgetTextDisplay(comp.text));
             wasm._embf_label_set_text(obj, ptr);
             wasm._free(ptr);
             break;
         }
         case "button": {
             obj = wasm._embf_create_button(parent, comp.x, comp.y, comp.width, comp.height);
-            if (comp.label) {
-                const ptr = wasm.stringToNewUTF8(applyBindingTemplates(comp.label));
+            if (comp.label !== undefined && comp.label !== null && comp.label !== "") {
+                const ptr = wasm.stringToNewUTF8(resolveWidgetTextDisplay(comp.label));
                 wasm._embf_button_set_label(obj, ptr);
                 wasm._free(ptr);
             }
@@ -1724,8 +1799,8 @@ function buildComponentEmbf(wasm, comp, parent) {
         }
         case "checkbox": {
             obj = wasm._embf_create_checkbox(parent, comp.x, comp.y, comp.width, comp.height);
-            if (comp.text) {
-                const ptr = wasm.stringToNewUTF8(applyBindingTemplates(comp.text));
+            if (comp.text !== undefined && comp.text !== null && comp.text !== "") {
+                const ptr = wasm.stringToNewUTF8(resolveWidgetTextDisplay(comp.text));
                 wasm._embf_checkbox_set_text(obj, ptr);
                 wasm._free(ptr);
             }
@@ -5009,7 +5084,46 @@ function wirePageInspectorActions() {
             });
         });
     }
+    const stringsBtn = document.getElementById("btn-open-strings-res");
+    if (stringsBtn && !stringsBtn.dataset.wired) {
+        stringsBtn.dataset.wired = "1";
+        stringsBtn.addEventListener("click", e => {
+            e.preventDefault();
+            vscode.postMessage({ type: "openStringResources" });
+        });
+    }
     wireProjectStylesAndFieldsActions();
+    wireWidgetTextModeToggles();
+}
+
+/** Toggle literal vs resource inputs in widget text inspector fields. */
+function wireWidgetTextModeToggles() {
+    if (!inspectorForm) {
+        return;
+    }
+    inspectorForm.querySelectorAll("select[name$='Mode']").forEach(sel => {
+        if (!(sel instanceof HTMLSelectElement) || sel.dataset.wired) {
+            return;
+        }
+        if (!/^textMode$|^labelMode$/.test(sel.name)) {
+            return;
+        }
+        sel.dataset.wired = "1";
+        const base = sel.name.replace(/Mode$/, "");
+        const sync = () => {
+            const literal = inspectorForm.querySelector(`input[name="${base}"]`);
+            const ref = inspectorForm.querySelector(`select[name="${base}Ref"]`);
+            const isResource = sel.value === "resource";
+            if (literal instanceof HTMLInputElement) {
+                literal.hidden = isResource;
+            }
+            if (ref instanceof HTMLSelectElement) {
+                ref.hidden = !isResource;
+            }
+        };
+        sel.addEventListener("change", sync);
+        sync();
+    });
 }
 
 /** Add/Remove buttons for the project-level styles + data-fields panels in the page inspector. */
@@ -5368,10 +5482,14 @@ function renderPageInspectorHtml(page, project) {
         fieldText(
             "proj_stringsPath",
             "Strings file (.res)",
-            (project.project && project.project.stringsPath) || "i18n/strings.res"
+            (project.project && project.project.stringsPath) || "strings.res"
         ) +
+        `<button type="button" class="tb-btn-small" id="btn-open-strings-res">Edit string table…</button>` +
         `<div class="field"><p style="font-size:11px;color:#888;margin:0 0 8px;line-height:1.35;">` +
-        `Path to translation table (must end in <code>.res</code>). Default: <code>i18n/strings.res</code> next to the .embf file.` +
+        `Path to translation table (must end in <code>.res</code>). Default: <code>strings.res</code> next to the .embf file.` +
+        (stringsResLoadError
+            ? `<br/><span style="color:var(--vscode-errorForeground);">${esc(stringsResLoadError)}</span>`
+            : "") +
         `</p></div>` +
         `<div class="inspector-group-title">Display</div>` +
         `<div class="row2">` +
@@ -5932,6 +6050,80 @@ function mixText(name, label, val) {
     return fieldText(name, label, val ?? "");
 }
 
+function mixWidgetText(name, label, val) {
+    if (isInspMixed(val)) {
+        return (
+            `<div class="field widget-text-field" data-inspector-mixed="1"><label>${esc(label)}</label>` +
+            `<select name="${esc(name)}Mode" disabled><option>(mixed)</option></select>` +
+            `<input type="text" name="${esc(name)}" value="" placeholder="(mixed)" disabled /></div>`
+        );
+    }
+    return widgetTextFieldHtml(name, label, val);
+}
+
+function widgetTextFieldHtml(name, label, val) {
+    const mode = widgetTextMode(val);
+    const literal = widgetTextLiteral(val);
+    const refKey = widgetTextRefKey(val);
+    const keys = stringResourceKeys.length ? stringResourceKeys : refKey ? [refKey] : [];
+    const keyOptions =
+        `<option value="">— select key —</option>` +
+        keys
+            .map(k => `<option value="${esc(k)}"${k === refKey ? " selected" : ""}>${esc(k)}</option>`)
+            .join("") +
+        (refKey && !keys.includes(refKey)
+            ? `<option value="${esc(refKey)}" selected>${esc(refKey)} (missing)</option>`
+            : "");
+    const missingHint =
+        mode === "resource" && refKey && currentStringsRes && !keys.includes(refKey)
+            ? `<p class="inspector-field-hint" style="color:var(--vscode-errorForeground);margin:4px 0 0;">Key "${esc(refKey)}" is not defined in strings.res</p>`
+            : "";
+    return (
+        `<div class="field widget-text-field"><label>${esc(label)}</label>` +
+        `<div class="row2">` +
+        `<select name="${esc(name)}Mode">` +
+        `<option value="literal"${mode === "literal" ? " selected" : ""}>Literal</option>` +
+        `<option value="resource"${mode === "resource" ? " selected" : ""}>String resource</option>` +
+        `</select>` +
+        `<select name="${esc(name)}Ref"${mode === "resource" ? "" : " hidden"}>${keyOptions}</select>` +
+        `</div>` +
+        `<input type="text" name="${esc(name)}" value="${esc(literal)}"${mode === "literal" ? "" : " hidden"} placeholder="Text" />` +
+        missingHint +
+        `</div>`
+    );
+}
+
+function readWidgetTextPatch(fieldName) {
+    if (!inspectorForm) {
+        return undefined;
+    }
+    const modeEl = inspectorForm.elements.namedItem(`${fieldName}Mode`);
+    if (modeEl instanceof HTMLSelectElement && modeEl.closest("[data-inspector-mixed]")) {
+        return undefined;
+    }
+    if (modeEl instanceof HTMLSelectElement && modeEl.value === "resource") {
+        const refEl = inspectorForm.elements.namedItem(`${fieldName}Ref`);
+        const key =
+            refEl instanceof HTMLSelectElement
+                ? refEl.value.trim()
+                : refEl instanceof HTMLInputElement
+                  ? refEl.value.trim()
+                  : "";
+        if (!key) {
+            return null;
+        }
+        return { ref: key };
+    }
+    const textEl = inspectorForm.elements.namedItem(fieldName);
+    if (textEl instanceof HTMLInputElement && textEl.closest("[data-inspector-mixed]") && textEl.value.trim() === "") {
+        return undefined;
+    }
+    if (textEl instanceof HTMLInputElement) {
+        return textEl.value;
+    }
+    return undefined;
+}
+
 function mixTextarea(name, label, val) {
     if (isInspMixed(val)) {
         return (
@@ -6035,7 +6227,7 @@ function widgetTypeSpecificFieldsHtml(type, m) {
     let html = "";
     switch (type) {
         case "label":
-            html += mixText("text", "Text", /** @type {unknown} */ (m.text));
+            html += mixWidgetText("text", "Text", /** @type {unknown} */ (m.text));
             html += mixSelect("longMode", "Long mode", [
                 { value: "", label: "(default)" },
                 { value: "wrap", label: "wrap" },
@@ -6045,7 +6237,7 @@ function widgetTypeSpecificFieldsHtml(type, m) {
             ], /** @type {unknown} */ (m.longMode) ?? "");
             break;
         case "button":
-            html += mixText("label", "Label text", /** @type {unknown} */ (m.label));
+            html += mixWidgetText("label", "Label text", /** @type {unknown} */ (m.label));
             break;
         case "image":
             html += mixText("src", "Asset id", /** @type {unknown} */ (m.src));
@@ -6115,7 +6307,7 @@ function widgetTypeSpecificFieldsHtml(type, m) {
             html += mixCheck("checked", "Checked", /** @type {unknown} */ (m.checked));
             break;
         case "checkbox":
-            html += mixText("text", "Label text", /** @type {unknown} */ (m.text));
+            html += mixWidgetText("text", "Label text", /** @type {unknown} */ (m.text));
             html += mixCheck("checked", "Checked", /** @type {unknown} */ (m.checked));
             break;
         case "dropdown":
@@ -6606,6 +6798,7 @@ function renderInspector() {
                 : renderMultiInspectorHtml(ids));
         inspectorSyncing = false;
         refreshMixedCheckboxes(inspectorForm);
+        wireWidgetTextModeToggles();
 
         if (inspectorFocusSnap) {
             requestAnimationFrame(() => {
@@ -6678,6 +6871,7 @@ function renderInspector() {
     refreshMixedCheckboxes(inspectorForm);
     wireImageInspectorActions();
     wireBindingsInspectorActions(comp);
+    wireWidgetTextModeToggles();
 
     if (inspectorFocusSnap) {
         requestAnimationFrame(() => {
@@ -6930,6 +7124,11 @@ function readInspectorPatch() {
         if (!(taTextEl.closest("[data-inspector-mixed]") && taTextEl.value.trim() === "")) {
             patch.text = taTextEl.value;
         }
+    } else if (selectedType === "label" || selectedType === "checkbox") {
+        const wt = readWidgetTextPatch("text");
+        if (wt !== undefined) {
+            patch.text = wt;
+        }
     } else {
         const textEl = inspectorForm.elements.namedItem("text");
         if (
@@ -6950,12 +7149,19 @@ function readInspectorPatch() {
         patch.placeholder = phEl.value;
     }
 
-    const labelEl = inspectorForm.elements.namedItem("label");
-    if (
-        labelEl instanceof HTMLInputElement &&
-        !(labelEl.closest("[data-inspector-mixed]") && labelEl.value.trim() === "")
-    ) {
-        patch.label = labelEl.value;
+    if (selectedType === "button") {
+        const wl = readWidgetTextPatch("label");
+        if (wl !== undefined) {
+            patch.label = wl;
+        }
+    } else {
+        const labelEl = inspectorForm.elements.namedItem("label");
+        if (
+            labelEl instanceof HTMLInputElement &&
+            !(labelEl.closest("[data-inspector-mixed]") && labelEl.value.trim() === "")
+        ) {
+            patch.label = labelEl.value;
+        }
     }
 
     const srcEl = inspectorForm.elements.namedItem("src");
@@ -7124,7 +7330,7 @@ function readPageInspectorPatch() {
     const stringsPath = inspectorForm.elements.namedItem("proj_stringsPath");
     if (stringsPath instanceof HTMLInputElement) {
         const t = stringsPath.value.trim();
-        if (t === "" || t === "i18n/strings.res") {
+        if (t === "" || t === "strings.res") {
             patch.projStringsPath = null;
         } else if (/\.res$/i.test(t)) {
             patch.projStringsPath = t;

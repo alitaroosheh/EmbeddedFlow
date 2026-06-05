@@ -2,7 +2,7 @@ import * as path from "path";
 import type { EmbfProject } from "../types/embf";
 
 /** Default relative path from the `.embf` file to application string resources. */
-export const DEFAULT_STRINGS_RES_REL_PATH = "i18n/strings.res";
+export const DEFAULT_STRINGS_RES_REL_PATH = "strings.res";
 
 /** True when `p` ends with `.res` (case-insensitive). */
 export function isStringsResPath(p: string): boolean {

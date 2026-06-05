@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { normalizeScreenLoadAnim } from "./codeGen/screenLoadAnim";
 import { validateModelPropertyDeep } from "./embfModel";
+import { validateWidgetTextField } from "./i18n/widgetText";
 import type { EmbfProject, LvglVersion } from "./types/embf";
 
 const COLOR_FORMATS = new Set<string>(["RGB565", "RGB888", "ARGB8888", "L8", "AL88"]);
@@ -604,10 +605,13 @@ function validateComponentDeep(comp: unknown, path: string): void {
     const t = o["type"] as string;
     switch (t) {
         case "label": {
-            if (typeof o["text"] !== "string") {
-                throw new EmbfParseError(`${path}.text must be a string`);
+            if (o["text"] === undefined) {
+                throw new EmbfParseError(`${path}.text is required`);
             }
-            validateBindingTemplates(o["text"] as string, `${path}.text`);
+            validateWidgetTextField(o["text"], `${path}.text`);
+            if (typeof o["text"] === "string") {
+                validateBindingTemplates(o["text"], `${path}.text`);
+            }
             if (o["longMode"] !== undefined) {
                 const lm = o["longMode"];
                 if (lm !== "wrap" && lm !== "dot" && lm !== "scroll" && lm !== "clip") {
@@ -617,8 +621,11 @@ function validateComponentDeep(comp: unknown, path: string): void {
             break;
         }
         case "button":
-            if (o["label"] !== undefined && typeof o["label"] !== "string") {
-                throw new EmbfParseError(`${path}.label must be a string when set`);
+            if (o["label"] !== undefined) {
+                validateWidgetTextField(o["label"], `${path}.label`);
+                if (typeof o["label"] === "string") {
+                    validateBindingTemplates(o["label"], `${path}.label`);
+                }
             }
             break;
         case "image":
@@ -673,8 +680,11 @@ function validateComponentDeep(comp: unknown, path: string): void {
             if (typeof o["checked"] !== "boolean") {
                 throw new EmbfParseError(`${path}.checked must be a boolean`);
             }
-            if (t === "checkbox" && o["text"] !== undefined && typeof o["text"] !== "string") {
-                throw new EmbfParseError(`${path}.text must be a string when set`);
+            if (t === "checkbox" && o["text"] !== undefined) {
+                validateWidgetTextField(o["text"], `${path}.text`);
+                if (typeof o["text"] === "string") {
+                    validateBindingTemplates(o["text"], `${path}.text`);
+                }
             }
             break;
         case "dropdown":

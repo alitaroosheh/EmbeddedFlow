@@ -89,13 +89,13 @@ i18n/
 - Cells = editable translation text; changes persist to `.res` on save
 - Optional “open as text” for power users
 
-- [x] **I18n1** Project declares `project.stringsPath` (default `i18n/strings.res` next to `.embf`); path must use **`.res`** extension
+- [x] **I18n1** Project declares `project.stringsPath` (default `strings.res` next to `.embf`); path must use **`.res`** extension
 - [x] **I18n2** `.res` schema: `defaultLocale`, `locales.<localeId>.<key>` → string value; parse/validate on load
-- [ ] **I18n3** **String resource table editor** in VS Code: open linked `.res`, show keys × locales grid, inline edit
-- [ ] **I18n4** Table actions: add/remove key row, add/remove locale column, set default locale
-- [ ] **I18n5** Save table edits back to `.res` (atomic write; preserve unknown keys/locales not shown)
-- [ ] **I18n6** Widget text (labels, buttons, etc.) can reference a string resource key instead of a literal
-- [ ] **I18n7** Validation: missing keys reported at design time; fallback to `defaultLocale` then key id
+- [x] **I18n3** **String resource table editor** in VS Code: open linked `.res`, show keys × locales grid, inline edit
+- [x] **I18n4** Table actions: add/remove key row, add/remove locale column, set default locale
+- [x] **I18n5** Save table edits back to `.res` (atomic write; preserve unknown keys/locales not shown)
+- [x] **I18n6** Widget text (labels, buttons, etc.) can reference a string resource key instead of a literal
+- [x] **I18n7** Validation: missing keys reported at design time; fallback to `defaultLocale` then key id
 - [ ] **I18n8** Preview: locale selector in designer; WASM preview shows selected locale strings from `.res`
 - [ ] **I18n9** Codegen: emit string resources using **X-Macros** (single source list, no hand-maintained parallel enums/tables)
 - [ ] **I18n10** Codegen: `lv_label_set_text` / `set_text` use `ui_get_string(UI_STR_<key>)`, not raw literals, when widget references a resource key

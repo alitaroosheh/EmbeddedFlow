@@ -6,6 +6,14 @@ export type TextDirection = "ltr" | "rtl";
 /** How generated C code includes LVGL (platform include paths differ). */
 export type LvglIncludePath = "lvgl.h" | "lvgl/lvgl.h";
 
+/** Widget copy that references a row in the linked `.res` file. */
+export interface StringResourceRef {
+    ref: string;
+}
+
+/** Literal string or `{ "ref": "key" }` string resource reference. */
+export type WidgetTextValue = string | StringResourceRef;
+
 /** Reusable grouped widget saved in the project (insert copies onto a page). */
 export interface ComponentLibraryEntry {
     id: string;
@@ -100,7 +108,7 @@ export interface ProjectMeta {
     lvglInclude?: LvglIncludePath;
     /**
      * Path to application string resources (`.res` only).
-     * Relative to the `.embf` file; default `i18n/strings.res` when omitted.
+     * Relative to the `.embf` file; default `strings.res` when omitted.
      */
     stringsPath?: string;
     /** Firmware project root for clangd symbol discovery (Phase 2+). */
@@ -368,13 +376,13 @@ export interface StyleProps {
 
 export interface LabelComponent extends BaseComponent {
     type: "label";
-    text: string;
+    text: WidgetTextValue;
     longMode?: "wrap" | "dot" | "scroll" | "clip";
 }
 
 export interface ButtonComponent extends BaseComponent {
     type: "button";
-    label?: string;
+    label?: WidgetTextValue;
 }
 
 export interface ImageComponent extends BaseComponent {
@@ -439,7 +447,7 @@ export interface KnobComponent extends BaseComponent {
 
 export interface CheckboxComponent extends BaseComponent {
     type: "checkbox";
-    text?: string;
+    text?: WidgetTextValue;
     checked: boolean;
 }
 

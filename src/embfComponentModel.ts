@@ -10,6 +10,7 @@ import type {
     TextDirection
 } from "./types/embf";
 import { isStringsResPath } from "./i18n/stringsResPath";
+import { patchWidgetTextField } from "./i18n/widgetText";
 import { SUPPORTED_VERSIONS } from "./embfParser";
 import { allocateNewComponentId } from "./embfWidgetFactory";
 
@@ -416,7 +417,7 @@ export function applyComponentPatch(comp: Component, patch: Record<string, unkno
 
     switch (comp.type) {
         case "label":
-            if ("text" in patch) setStr(r, "text", patch.text);
+            if ("text" in patch) patchWidgetTextField(r, "text", patch.text);
             if ("longMode" in patch) {
                 const lm = patch.longMode;
                 if (typeof lm === "string" && lm.trim() === "") {
@@ -427,7 +428,7 @@ export function applyComponentPatch(comp: Component, patch: Record<string, unkno
             }
             break;
         case "button":
-            if ("label" in patch) setStr(r, "label", patch.label);
+            if ("label" in patch) patchWidgetTextField(r, "label", patch.label);
             break;
         case "image":
             if ("src" in patch) setStr(r, "src", patch.src);
@@ -462,7 +463,7 @@ export function applyComponentPatch(comp: Component, patch: Record<string, unkno
         case "switch":
         case "checkbox":
             if ("checked" in patch) setBool(r, "checked", patch.checked);
-            if (comp.type === "checkbox" && "text" in patch) setStr(r, "text", patch.text);
+            if (comp.type === "checkbox" && "text" in patch) patchWidgetTextField(r, "text", patch.text);
             break;
         case "dropdown":
         case "roller":

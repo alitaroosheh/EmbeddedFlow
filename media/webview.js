@@ -202,7 +202,7 @@ let previewLayoutObserver = null;
 let previewLayoutResizeRaf = 0;
 /** @type {import("../src/types/embf").EmbfProject | null} */
 let currentProject = null;
-/** @type {{ defaultLocale: string, locales: Record<string, Record<string, string>>, keys?: string[] } | null} */
+/** @type {{ defaultLocale: string, locales: Record<string, Record<string, string>>, keys?: string[], localeMeta?: Record<string, { direction?: string }> } | null} */
 let currentStringsRes = null;
 /** @type {string[]} */
 let stringResourceKeys = [];
@@ -210,6 +210,12 @@ let stringResourceKeys = [];
 let stringsResLoadError = "";
 /** Preview locale override (empty = use strings.res defaultLocale). */
 let previewLocale = "";
+/** Avoid stacking locale refresh work on the main thread (prevents UI freeze). */
+let previewLocaleRefreshScheduled = false;
+/** Navigation stack for nav_push / nav_pop preview (N5). */
+const previewNavStack = [];
+/** Keep grid descriptor WASM buffers alive per container id. */
+const gridDscStore = new Map();
 
 /**
  * Closable workspace tabs (page previews + optional navigation flow).
@@ -254,6 +260,7 @@ function screenLoadAnimToLv(anim) {
 function clearPageScreenCache() {
     /* Drop JS handles only — never lv_obj_delete() the active screen (crashes LVGL/WASM). */
     pageScreenCache.clear();
+    gridDscStore.clear();
 }
 
 function invalidatePageScreen(pageId) {
@@ -542,6 +549,7 @@ async function handleLoad(payload, generation = loadGeneration) {
         currentStringsRes = null;
         stringResourceKeys = [];
     }
+    previewNavStack.length = 0;
     stringsResLoadError = typeof payload.stringsResError === "string" ? payload.stringsResError : "";
     populatePreviewLocaleSelect(
         payload.stringsResLocaleIds ??
@@ -1416,6 +1424,8 @@ function ensurePageScreenBuilt(project, pageIndex) {
 
     const screenObj = wasm._embf_create_screen();
 
+    applyPreviewBaseDir(wasm, screenObj);
+
     if (page.backgroundColor) {
         wasm._embf_obj_set_style_bg_color(screenObj, parseColor(page.backgroundColor));
     }
@@ -1711,13 +1721,109 @@ function resolveWidgetTextDisplay(value) {
     return String(value);
 }
 
-/** Re-apply localized copy after preview locale change (all pages; clears cached screens). */
+/** Re-apply localized copy after preview locale change (updates cached screens in place). */
 function refreshPreviewLocaleText() {
     if (!currentProject || !WasmModule || !wasmReady) {
         return;
     }
-    clearPageScreenCache();
-    applyPageSwitch(currentProject, currentPageIndex);
+    if (previewLocaleRefreshScheduled) {
+        return;
+    }
+    previewLocaleRefreshScheduled = true;
+    requestAnimationFrame(() => {
+        previewLocaleRefreshScheduled = false;
+        refreshPreviewLocaleTextNow();
+    });
+}
+
+/** Apply string-resource text + base_dir on one cached screen without rebuilding LVGL objects. */
+function refreshPageLocalizedStrings(wasm, page, idMap) {
+    if (!page || !idMap) {
+        return;
+    }
+
+    function walk(comps) {
+        for (const c of comps ?? []) {
+            const ptr = idMap.get(c.id);
+            if (ptr) {
+                if (c.type === "label") {
+                    if (typeof c.text === "string" && c.text.indexOf("{{") !== -1) {
+                        const strPtr = wasm.stringToNewUTF8(applyBindingTemplates(c.text));
+                        wasm._embf_label_set_text(ptr, strPtr);
+                        wasm._free(strPtr);
+                    } else if (isWidgetTextRef(c.text)) {
+                        const strPtr = wasm.stringToNewUTF8(resolveWidgetTextDisplay(c.text));
+                        wasm._embf_label_set_text(ptr, strPtr);
+                        wasm._free(strPtr);
+                    }
+                } else if (c.type === "button") {
+                    if (typeof c.label === "string" && c.label.indexOf("{{") !== -1) {
+                        const strPtr = wasm.stringToNewUTF8(applyBindingTemplates(c.label));
+                        wasm._embf_button_set_label?.(ptr, strPtr);
+                        wasm._free(strPtr);
+                    } else if (isWidgetTextRef(c.label)) {
+                        const strPtr = wasm.stringToNewUTF8(resolveWidgetTextDisplay(c.label));
+                        wasm._embf_button_set_label?.(ptr, strPtr);
+                        wasm._free(strPtr);
+                    }
+                } else if (c.type === "checkbox") {
+                    if (typeof c.text === "string" && c.text.indexOf("{{") !== -1) {
+                        const strPtr = wasm.stringToNewUTF8(applyBindingTemplates(c.text));
+                        wasm._embf_checkbox_set_text?.(ptr, strPtr);
+                        wasm._free(strPtr);
+                    } else if (isWidgetTextRef(c.text)) {
+                        const strPtr = wasm.stringToNewUTF8(resolveWidgetTextDisplay(c.text));
+                        wasm._embf_checkbox_set_text?.(ptr, strPtr);
+                        wasm._free(strPtr);
+                    }
+                }
+            }
+            if (c.children?.length) {
+                walk(c.children);
+            }
+        }
+    }
+    walk(page.components);
+}
+
+function refreshPreviewLocaleTextNow() {
+    const wasm = WasmModule;
+    const project = currentProject;
+    if (!wasm || !project || !wasmReady) {
+        return;
+    }
+
+    for (const [pageId, entry] of pageScreenCache) {
+        const page = project.pages.find(p => p.id === pageId);
+        if (!page) {
+            continue;
+        }
+        applyPreviewBaseDir(wasm, entry.screenPtr);
+        refreshPageLocalizedStrings(wasm, page, entry.idToObjPtr);
+    }
+
+    const page = project.pages[currentPageIndex];
+    if (!page) {
+        return;
+    }
+
+    let entry = pageScreenCache.get(page.id);
+    if (!entry) {
+        applyPageSwitch(project, currentPageIndex);
+        entry = pageScreenCache.get(page.id);
+    }
+    if (!entry) {
+        return;
+    }
+
+    objPtrToId = entry.objPtrToId;
+    idToObjPtr = entry.idToObjPtr;
+    applyPreviewBaseDir(wasm, entry.screenPtr);
+    refreshPageLocalizedStrings(wasm, page, entry.idToObjPtr);
+    wasm._embf_load_screen(entry.screenPtr);
+    refreshPreviewBindings(page);
+    pumpPreviewRedraw(2);
+    drawDesignOverlay();
 }
 
 function populatePreviewLocaleSelect(localeIds, defaultLocale) {
@@ -1787,6 +1893,162 @@ function refreshPreviewBindings(page) {
         }
     }
     walk(page.components);
+}
+
+const RTL_LOCALE_IDS = new Set(["ar", "fa", "he", "ur", "ps", "ku", "dv"]);
+
+function isRtlLocaleIdPreview(localeId) {
+    const base = String(localeId ?? "").split(/[-_]/)[0]?.toLowerCase() ?? "";
+    return RTL_LOCALE_IDS.has(base);
+}
+
+/** RTL2: active locale → localeMeta → inferred RTL id → display.direction → ltr */
+function resolvePreviewTextDirection() {
+    const loc = (previewLocale || currentStringsRes?.defaultLocale || "").trim();
+    if (loc && currentStringsRes?.localeMeta?.[loc]?.direction) {
+        return currentStringsRes.localeMeta[loc].direction === "rtl" ? "rtl" : "ltr";
+    }
+    if (loc && isRtlLocaleIdPreview(loc)) {
+        return "rtl";
+    }
+    const disp = currentProject?.display?.direction;
+    if (disp === "rtl" || disp === "ltr") {
+        return disp;
+    }
+    return "ltr";
+}
+
+const EMBF_FLEX_FLOW = { row: 0, column: 1, row_wrap: 4, column_wrap: 5 };
+const EMBF_FLEX_ALIGN = {
+    start: 0,
+    end: 1,
+    center: 2,
+    space_evenly: 3,
+    space_around: 4,
+    space_between: 5
+};
+const EMBF_GRID_CELL_ALIGN = { start: 0, center: 1, end: 2, stretch: 3 };
+
+function gridTrackToWasm(wasm, track) {
+    if (track === "content" && typeof wasm._embf_grid_content === "function") {
+        return wasm._embf_grid_content();
+    }
+    if (typeof track === "number" && Number.isFinite(track)) {
+        return Math.round(track);
+    }
+    const m = /^(\d+(?:\.\d+)?)fr$/i.exec(String(track ?? "").trim());
+    if (m && typeof wasm._embf_grid_fr === "function") {
+        return wasm._embf_grid_fr(Math.max(1, Math.round(Number(m[1]))));
+    }
+    const px = Number.parseInt(String(track), 10);
+    if (Number.isFinite(px)) {
+        return px;
+    }
+    return typeof wasm._embf_grid_fr === "function" ? wasm._embf_grid_fr(1) : 1;
+}
+
+function buildGridDscBuffer(wasm, tracks) {
+    const vals = (tracks ?? ["1fr"]).map(t => gridTrackToWasm(wasm, t));
+    if (typeof wasm._embf_grid_template_last === "function") {
+        vals.push(wasm._embf_grid_template_last());
+    }
+    const buf = wasm._malloc(vals.length * 4);
+    vals.forEach((v, i) => {
+        wasm.HEAP32[(buf >> 2) + i] = v;
+    });
+    return { buf };
+}
+
+function applyContainerLayoutEmbf(wasm, obj, comp) {
+    if (!obj || comp.type !== "container") {
+        return;
+    }
+    if (comp.layout === "flex" && typeof wasm._embf_container_set_flex === "function") {
+        const flow = EMBF_FLEX_FLOW[comp.flexFlow ?? "row"] ?? 0;
+        const main = EMBF_FLEX_ALIGN[comp.flexAlign ?? "start"] ?? 0;
+        const cross = EMBF_FLEX_ALIGN[comp.flexCrossAlign ?? "start"] ?? 0;
+        const track = EMBF_FLEX_ALIGN[comp.flexTrackCrossAlign ?? "start"] ?? 0;
+        wasm._embf_container_set_flex(obj, flow, main, cross, track);
+    } else if (comp.layout === "grid" && typeof wasm._embf_container_set_grid === "function") {
+        const col = buildGridDscBuffer(wasm, comp.gridColumnDescriptors ?? ["1fr"]);
+        const row = buildGridDscBuffer(wasm, comp.gridRowDescriptors ?? ["1fr"]);
+        gridDscStore.set(comp.id, [col.buf, row.buf]);
+        wasm._embf_container_set_grid(
+            obj,
+            col.buf,
+            row.buf,
+            Math.round(comp.gridColumnGap ?? 0),
+            Math.round(comp.gridRowGap ?? 0),
+            EMBF_FLEX_ALIGN[comp.gridAlign ?? "start"] ?? 0,
+            EMBF_FLEX_ALIGN[comp.gridVAlign ?? "start"] ?? 0
+        );
+    }
+}
+
+function applyChildLayoutEmbf(wasm, obj, comp) {
+    if (!obj) {
+        return;
+    }
+    if (comp.flexGrow !== undefined && comp.flexGrow > 0 && typeof wasm._embf_obj_set_flex_grow === "function") {
+        wasm._embf_obj_set_flex_grow(obj, Math.round(comp.flexGrow));
+    }
+    if (
+        typeof wasm._embf_obj_set_grid_cell === "function" &&
+        (comp.gridCol !== undefined ||
+            comp.gridRow !== undefined ||
+            comp.gridColSpan !== undefined ||
+            comp.gridRowSpan !== undefined)
+    ) {
+        wasm._embf_obj_set_grid_cell(
+            obj,
+            EMBF_GRID_CELL_ALIGN[comp.gridCellXAlign ?? "stretch"] ?? 3,
+            comp.gridCol ?? 0,
+            comp.gridColSpan ?? 1,
+            EMBF_GRID_CELL_ALIGN[comp.gridCellYAlign ?? "stretch"] ?? 3,
+            comp.gridRow ?? 0,
+            comp.gridRowSpan ?? 1
+        );
+    }
+}
+
+function applyPreviewBaseDir(wasm, screenObj) {
+    if (!screenObj || typeof wasm._embf_obj_set_base_dir !== "function") {
+        return;
+    }
+    wasm._embf_obj_set_base_dir(screenObj, resolvePreviewTextDirection() === "rtl" ? 1 : 0);
+}
+
+function previewNavigateToPage(targetIdx, navOpts, stackMode) {
+    const page = currentProject?.pages?.[currentPageIndex];
+    const target = currentProject?.pages?.[targetIdx];
+    if (!page || !target) {
+        return;
+    }
+    if (stackMode === "push" && previewNavStack.length < 16) {
+        previewNavStack.push(page.id);
+    } else if (stackMode === "reset") {
+        previewNavStack.length = 0;
+    }
+    currentPageIndex = targetIdx;
+    selectedComponentOrder = [];
+    inspectorShowingPage = false;
+    dragState = null;
+    pendingDrag = null;
+    marqueeState = null;
+    pageSelectProgrammatic = true;
+    try {
+        if (pageSelect) {
+            pageSelect.value = String(targetIdx);
+        }
+        switchToPage(currentProject, targetIdx, navOpts ?? { anim: "none" });
+        drawDesignOverlay();
+        renderInspector();
+        renderPageList();
+        renderToolbarWidgetSelect();
+        renderFlowPanel();
+    } finally {
+        pageSelectProgrammatic = false;
+    }
 }
 
 function buildComponentEmbf(wasm, comp, parent) {
@@ -1916,6 +2178,9 @@ function buildComponentEmbf(wasm, comp, parent) {
         case "container":
         case "panel": {
             obj = wasm._embf_create_container(parent, comp.x, comp.y, comp.width, comp.height);
+            if (comp.type === "container") {
+                applyContainerLayoutEmbf(wasm, obj, comp);
+            }
             for (const child of comp.children ?? []) {
                 buildComponentEmbf(wasm, child, obj);
             }
@@ -1942,6 +2207,7 @@ function buildComponentEmbf(wasm, comp, parent) {
     }
 
     applyStylesEmbf(wasm, obj, comp.styles ?? {});
+    applyChildLayoutEmbf(wasm, obj, comp);
 }
 
 function applyStylesEmbf(wasm, obj, styles) {
@@ -2086,31 +2352,79 @@ function dispatchAction(action, eventValue, currentPage) {
                 log("warn", `navigate: page "${action.target}" not found`);
                 return;
             }
-            currentPageIndex = targetIdx;
-            selectedComponentOrder = [];
-            inspectorShowingPage = false;
-            dragState = null;
-            pendingDrag = null;
-            marqueeState = null;
-            pageSelectProgrammatic = true;
-            try {
-                if (pageSelect) {
-                    pageSelect.value = String(targetIdx);
-                }
-                switchToPage(currentProject, targetIdx, {
-                    anim: action.anim,
-                    time: action.time,
-                    delay: action.delay,
-                    autoDel: action.autoDel
-                });
-                drawDesignOverlay();
-                renderInspector();
-                renderPageList();
-                renderToolbarWidgetSelect();
-                renderFlowPanel();
-            } finally {
-                pageSelectProgrammatic = false;
+            previewNavigateToPage(targetIdx, {
+                anim: action.anim,
+                time: action.time,
+                delay: action.delay,
+                autoDel: action.autoDel
+            });
+            break;
+        }
+        case "nav_push": {
+            if (isWorkspaceFlowActive()) {
+                break;
             }
+            const targetIdx = currentProject.pages.findIndex(p => p.id === action.route);
+            if (targetIdx < 0) {
+                log("warn", `nav_push: page "${action.route}" not found`);
+                return;
+            }
+            previewNavigateToPage(
+                targetIdx,
+                { anim: action.anim, time: action.time, delay: action.delay, autoDel: action.autoDel },
+                "push"
+            );
+            break;
+        }
+        case "nav_pop": {
+            if (isWorkspaceFlowActive() || previewNavStack.length === 0) {
+                break;
+            }
+            const prevId = previewNavStack.pop();
+            const targetIdx = currentProject.pages.findIndex(p => p.id === prevId);
+            if (targetIdx < 0) {
+                log("warn", `nav_pop: page "${prevId}" not found`);
+                return;
+            }
+            previewNavigateToPage(targetIdx, {
+                anim: action.anim,
+                time: action.time,
+                delay: action.delay,
+                autoDel: action.autoDel
+            });
+            break;
+        }
+        case "nav_replace": {
+            if (isWorkspaceFlowActive()) {
+                break;
+            }
+            const targetIdx = currentProject.pages.findIndex(p => p.id === action.route);
+            if (targetIdx < 0) {
+                log("warn", `nav_replace: page "${action.route}" not found`);
+                return;
+            }
+            previewNavigateToPage(targetIdx, {
+                anim: action.anim,
+                time: action.time,
+                delay: action.delay,
+                autoDel: action.autoDel
+            });
+            break;
+        }
+        case "nav_reset": {
+            if (isWorkspaceFlowActive()) {
+                break;
+            }
+            const targetIdx = currentProject.pages.findIndex(p => p.id === action.route);
+            if (targetIdx < 0) {
+                log("warn", `nav_reset: page "${action.route}" not found`);
+                return;
+            }
+            previewNavigateToPage(
+                targetIdx,
+                { anim: action.anim, time: action.time, delay: action.delay, autoDel: action.autoDel },
+                "reset"
+            );
             break;
         }
         case "set_text": {

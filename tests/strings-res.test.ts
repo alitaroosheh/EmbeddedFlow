@@ -86,6 +86,30 @@ describe("strings.res parse (I18n2)", () => {
         };
         expect(() => parseStringsResSource(JSON.stringify(bad))).toThrow(StringsResParseError);
     });
+
+    it("parses localeMeta direction (RTL1)", () => {
+        const doc = parseStringsResSource(
+            JSON.stringify({
+                defaultLocale: "en",
+                localeMeta: { fa: { direction: "rtl" }, en: { direction: "ltr" } },
+                locales: { en: { k: "Hi" }, fa: { k: "سلام" } }
+            })
+        );
+        expect(doc.localeMeta?.fa?.direction).toBe("rtl");
+        expect(doc.localeMeta?.en?.direction).toBe("ltr");
+    });
+
+    it("rejects invalid localeMeta direction", () => {
+        expect(() =>
+            parseStringsResSource(
+                JSON.stringify({
+                    defaultLocale: "en",
+                    localeMeta: { fa: { direction: "vertical" } },
+                    locales: { en: {}, fa: {} }
+                })
+            )
+        ).toThrow(StringsResParseError);
+    });
 });
 
 describe("widget text refs (I18n6/I18n7)", () => {

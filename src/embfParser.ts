@@ -615,6 +615,7 @@ function validateComponentDeep(comp: unknown, path: string): void {
     validateOptionalAnimations(o, path);
     validateOptionalBindings(o, path);
     validateOptionalScroll(o, path);
+    validateOptionalLayoutChild(o, path);
 
     const t = o["type"] as string;
     switch (t) {
@@ -786,11 +787,87 @@ function validateComponentDeep(comp: unknown, path: string): void {
                         );
                     }
                 }
+                validateContainerLayoutFields(o, path);
             }
             break;
         }
         default:
             break;
+    }
+}
+
+const FLEX_ALIGN_VALUES = new Set<string>([
+    "start",
+    "end",
+    "center",
+    "space_evenly",
+    "space_around",
+    "space_between"
+]);
+
+const GRID_CELL_ALIGN_VALUES = new Set<string>(["start", "end", "center", "stretch"]);
+
+function validateOptionalLayoutChild(o: Record<string, unknown>, path: string): void {
+    if (o["flexGrow"] !== undefined) {
+        if (!isFiniteNumber(o["flexGrow"]) || o["flexGrow"] < 0) {
+            throw new EmbfParseError(`${path}.flexGrow must be a non-negative number`);
+        }
+    }
+    for (const k of ["gridCol", "gridRow", "gridColSpan", "gridRowSpan"] as const) {
+        if (o[k] !== undefined) {
+            if (!isFiniteNumber(o[k]) || (o[k] as number) < 0) {
+                throw new EmbfParseError(`${path}.${k} must be a non-negative integer`);
+            }
+        }
+    }
+    for (const k of ["gridCellXAlign", "gridCellYAlign"] as const) {
+        if (o[k] !== undefined) {
+            const v = o[k];
+            if (typeof v !== "string" || !GRID_CELL_ALIGN_VALUES.has(v)) {
+                throw new EmbfParseError(`${path}.${k} must be start, end, center, or stretch`);
+            }
+        }
+    }
+}
+
+function validateGridTrackList(raw: unknown, path: string): void {
+    if (!Array.isArray(raw)) {
+        throw new EmbfParseError(`${path} must be an array`);
+    }
+    for (let i = 0; i < raw.length; i++) {
+        const t = raw[i];
+        if (t === "content") {
+            continue;
+        }
+        if (typeof t === "number" && isFiniteNumber(t)) {
+            continue;
+        }
+        if (typeof t === "string" && /^(\d+(?:\.\d+)?)fr$/i.test(t.trim())) {
+            continue;
+        }
+        throw new EmbfParseError(`${path}[${i}] must be a pixel number, "content", or "Nfr"`);
+    }
+}
+
+function validateContainerLayoutFields(o: Record<string, unknown>, path: string): void {
+    for (const k of ["flexAlign", "flexCrossAlign", "flexTrackCrossAlign", "gridAlign", "gridVAlign"] as const) {
+        if (o[k] !== undefined) {
+            const v = o[k];
+            if (typeof v !== "string" || !FLEX_ALIGN_VALUES.has(v)) {
+                throw new EmbfParseError(`${path}.${k} must be a flex/grid align value`);
+            }
+        }
+    }
+    if (o["gridColumnDescriptors"] !== undefined) {
+        validateGridTrackList(o["gridColumnDescriptors"], `${path}.gridColumnDescriptors`);
+    }
+    if (o["gridRowDescriptors"] !== undefined) {
+        validateGridTrackList(o["gridRowDescriptors"], `${path}.gridRowDescriptors`);
+    }
+    for (const k of ["gridColumnGap", "gridRowGap"] as const) {
+        if (o[k] !== undefined && (!isFiniteNumber(o[k]) || (o[k] as number) < 0)) {
+            throw new EmbfParseError(`${path}.${k} must be a non-negative number`);
+        }
     }
 }
 

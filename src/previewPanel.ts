@@ -168,6 +168,7 @@ export interface WebviewLoadPayload {
         defaultLocale: string;
         locales: Record<string, Record<string, string>>;
         keys: string[];
+        localeMeta?: Record<string, { direction?: "ltr" | "rtl" }>;
     } | null;
     stringsResRelPath?: string;
     stringsResError?: string;
@@ -373,7 +374,8 @@ export class EmbfPreviewPanel {
                 payload.stringsRes = {
                     defaultLocale: stringsDoc.defaultLocale,
                     locales: stringsDoc.locales,
-                    keys: listAllStringKeys(stringsDoc)
+                    keys: listAllStringKeys(stringsDoc),
+                    localeMeta: stringsDoc.localeMeta
                 };
                 payload.stringsResLocaleIds = Object.keys(stringsDoc.locales).sort();
             } else {

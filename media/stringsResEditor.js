@@ -11,6 +11,23 @@ let dirty = false;
 
 const KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const LOCALE_PATTERN = /^[A-Za-z][A-Za-z0-9_-]*$/;
+const RTL_LOCALE_IDS = new Set(["ar", "fa", "he", "ur", "ps", "ku", "dv"]);
+
+/** @param {string} loc @param {import("../src/i18n/stringsResParser").StringsResFile | null} doc */
+function localeDirectionBadge(loc, doc) {
+    const meta = doc?.localeMeta?.[loc]?.direction;
+    if (meta === "rtl") {
+        return `<span class="locale-dir-badge rtl" title="Right-to-left">RTL</span>`;
+    }
+    if (meta === "ltr") {
+        return `<span class="locale-dir-badge ltr" title="Left-to-right">LTR</span>`;
+    }
+    const base = loc.split(/[-_]/)[0]?.toLowerCase() ?? loc;
+    if (RTL_LOCALE_IDS.has(base)) {
+        return `<span class="locale-dir-badge rtl inferred" title="Inferred RTL locale">RTL</span>`;
+    }
+    return "";
+}
 
 const grid = document.getElementById("grid");
 const thead = grid.querySelector("thead");
@@ -102,6 +119,7 @@ function render() {
                 return (
                     `<th class="locale-col${isDefault ? " default-locale" : ""}${isSelected ? " selected-locale" : ""}" data-locale="${esc(loc)}">` +
                     `<input type="text" data-locale-input="1" value="${esc(loc)}" class="${locInvalid.trim()}" title="Locale id (e.g. en, fa, pt-BR)" />` +
+                    localeDirectionBadge(loc, doc) +
                     `</th>`
                 );
             })

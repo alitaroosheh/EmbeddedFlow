@@ -1129,6 +1129,36 @@
                   ]
                 },
                 {
+                  "id": "btn_lang_fa",
+                  "type": "button",
+                  "x": 496,
+                  "y": 92,
+                  "width": 220,
+                  "height": 44,
+                  "label": {
+                    "ref": "string_persian"
+                  },
+                  "styles": {
+                    "textColor": "#e5e7eb",
+                    "bgColor": "#0f172a",
+                    "indicatorColor": "#a78bfa",
+                    "borderColor": "#1f2a44",
+                    "borderWidth": 2,
+                    "borderRadius": 12
+                  },
+                  "events": [
+                    {
+                      "trigger": "clicked",
+                      "actions": [
+                        {
+                          "type": "set_locale",
+                          "locale": "fa"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
                   "id": "ln_settings_divider",
                   "type": "line",
                   "x": 24,

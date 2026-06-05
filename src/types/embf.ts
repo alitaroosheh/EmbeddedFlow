@@ -330,6 +330,16 @@ export interface BaseComponent {
     scrollX?: boolean;
     /** Enable/disable vertical scrolling on this widget (LVGL scroll dir). */
     scrollY?: boolean;
+    /** Flex child: grow factor when parent `layout` is flex (0 = fixed). */
+    flexGrow?: number;
+    /** Grid child: column index (0-based). */
+    gridCol?: number;
+    /** Grid child: row index (0-based). */
+    gridRow?: number;
+    gridColSpan?: number;
+    gridRowSpan?: number;
+    gridCellXAlign?: "start" | "end" | "center" | "stretch";
+    gridCellYAlign?: "start" | "end" | "center" | "stretch";
 }
 
 /** Property of a widget that can be animated. Maps to a `lv_obj_set_*` setter in codegen. */
@@ -479,10 +489,30 @@ export interface LineComponent extends BaseComponent {
     rounded?: boolean;
 }
 
+export type FlexAlign =
+    | "start"
+    | "end"
+    | "center"
+    | "space_evenly"
+    | "space_around"
+    | "space_between";
+
+/** Grid track: pixel number, `"content"`, or `"Nfr"` fraction. */
+export type GridTrackSize = number | "content" | string;
+
 export interface ContainerComponent extends BaseComponent {
     type: "container";
     layout?: "none" | "flex" | "grid";
     flexFlow?: "row" | "column" | "row_wrap" | "column_wrap";
+    flexAlign?: FlexAlign;
+    flexCrossAlign?: FlexAlign;
+    flexTrackCrossAlign?: FlexAlign;
+    gridColumnDescriptors?: GridTrackSize[];
+    gridRowDescriptors?: GridTrackSize[];
+    gridColumnGap?: number;
+    gridRowGap?: number;
+    gridAlign?: FlexAlign;
+    gridVAlign?: FlexAlign;
     children: Component[];
 }
 

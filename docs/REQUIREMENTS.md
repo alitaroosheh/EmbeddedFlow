@@ -18,7 +18,7 @@ Requirements grouped by phase and pillar. Check the box when a requirement is fu
 - [x] **V2** Live WASM preview, design/run modes
 - [x] **V3** Styles, themes, animations, groups
 - [x] **V4** Navigation Graph overlay on page designer — same IR, edges = navigation transitions
-- [ ] **V5** Flex/grid layout authoring with codegen
+- [x] **V5** Flex/grid layout authoring with codegen
 
 ### Navigation Graph
 
@@ -26,7 +26,7 @@ Requirements grouped by phase and pillar. Check the box when a requirement is fu
 - [x] **N2** Page swipe flows
 - [x] **N3** Visual overlay on designer: nodes = pages, edges = transitions with animation + trigger metadata
 - [x] **N4** Navigation edges stored in IR — compiler generates `ui_navigate_to_*()` static functions
-- [ ] **N5** Navigation stack (push/pop/back) *(Phase 3)*
+- [x] **N5** Navigation stack (push/pop/back)
 
 Navigation graph generates **only static LVGL calls** in Phase 1. No router, no stack.
 
@@ -223,15 +223,15 @@ If `localeMeta` is omitted, infer `rtl` for known RTL locale ids (`ar`, `fa`, `h
 
 **Requirements:**
 
-- [ ] **RTL1** `.res` schema: optional `localeMeta.<localeId>.direction` (`ltr` | `rtl`); validate on load; table editor column/header shows direction badge for RTL locales
-- [ ] **RTL2** Resolve **active text direction**: active preview locale → `localeMeta` → inferred RTL locale id → `display.direction` → default `ltr`
-- [ ] **RTL3** Preview WASM: enable `LV_USE_BIDI`; apply `base_dir` on screen load and after `set_locale` / locale picker change
-- [ ] **RTL4** Preview WASM: bundled or project-linked **Arabic-script font** (covers `ar`, `fa`, `ur`) with Montserrat/Latin fallback for English; document Hebrew font as optional follow-up
-- [ ] **RTL5** Preview: RTL layout mirroring — labels, buttons, sliders, bars, switches, checkboxes, dropdowns behave correctly under `LV_BASE_DIR_RTL` (LVGL semantics, not manual x-flip in IR)
-- [ ] **RTL6** Codegen: emit page-level `lv_obj_set_style_base_dir` from resolved direction; include comment block listing required `lv_conf.h` bidi/font settings
-- [ ] **RTL7** Codegen: `ui_refresh_localized_text()` / `ui_set_locale()` path works for RTL locales (glyphs + bidi order after locale switch on device)
-- [ ] **RTL8** Validation: warn when an RTL locale is active but widget/project font lacks glyphs for translated strings (design-time Problems panel)
-- [ ] **RTL9** Sample project: add `fa` (or `ar`) locale to `sample/strings.res` and at least one RTL demo string on a sample page; document preview reload + font requirements in wiki
+- [x] **RTL1** `.res` schema: optional `localeMeta.<localeId>.direction` (`ltr` | `rtl`); validate on load; table editor column/header shows direction badge for RTL locales
+- [x] **RTL2** Resolve **active text direction**: active preview locale → `localeMeta` → inferred RTL locale id → `display.direction` → default `ltr`
+- [x] **RTL3** Preview WASM: enable `LV_USE_BIDI`; apply `base_dir` on screen load and after `set_locale` / locale picker change
+- [x] **RTL4** Preview WASM: bundled or project-linked **Arabic-script font** (covers `ar`, `fa`, `ur`) with Montserrat/Latin fallback for English; document Hebrew font as optional follow-up
+- [x] **RTL5** Preview: RTL layout mirroring — labels, buttons, sliders, bars, switches, checkboxes, dropdowns behave correctly under `LV_BASE_DIR_RTL` (LVGL semantics, not manual x-flip in IR)
+- [x] **RTL6** Codegen: emit page-level `lv_obj_set_style_base_dir` from resolved direction; include comment block listing required `lv_conf.h` bidi/font settings
+- [x] **RTL7** Codegen: `ui_refresh_localized_text()` / `ui_set_locale()` path works for RTL locales (glyphs + bidi order after locale switch on device)
+- [x] **RTL8** Validation: warn when an RTL locale is active but widget/project font lacks glyphs for translated strings (design-time Problems panel)
+- [x] **RTL9** Sample project: add `fa` (or `ar`) locale to `sample/strings.res` and at least one RTL demo string on a sample page; document preview reload + font requirements in wiki
 
 **Constraints:**
 

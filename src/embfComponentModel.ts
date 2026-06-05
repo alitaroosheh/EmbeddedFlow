@@ -346,6 +346,34 @@ function setRollerMode(comp: Record<string, unknown>, value: unknown): void {
     }
 }
 
+function patchContainerFlexGrid(comp: ContainerComponent, patch: Record<string, unknown>): void {
+    const alignKeys = [
+        "flexAlign",
+        "flexCrossAlign",
+        "flexTrackCrossAlign",
+        "gridAlign",
+        "gridVAlign"
+    ] as const;
+    for (const k of alignKeys) {
+        if (k in patch && typeof patch[k] === "string") {
+            const v = (patch[k] as string).trim();
+            if (v === "") {
+                delete comp[k];
+            } else if (/^(start|end|center|space_evenly|space_around|space_between)$/.test(v)) {
+                comp[k] = v as NonNullable<ContainerComponent["flexAlign"]>;
+            }
+        }
+    }
+    if ("gridColumnGap" in patch) setFiniteInt(comp as unknown as Record<string, unknown>, "gridColumnGap", patch.gridColumnGap);
+    if ("gridRowGap" in patch) setFiniteInt(comp as unknown as Record<string, unknown>, "gridRowGap", patch.gridRowGap);
+    if ("gridColumnDescriptors" in patch && Array.isArray(patch.gridColumnDescriptors)) {
+        comp.gridColumnDescriptors = patch.gridColumnDescriptors as ContainerComponent["gridColumnDescriptors"];
+    }
+    if ("gridRowDescriptors" in patch && Array.isArray(patch.gridRowDescriptors)) {
+        comp.gridRowDescriptors = patch.gridRowDescriptors as ContainerComponent["gridRowDescriptors"];
+    }
+}
+
 /**
  * Apply editable inspector fields onto a component (does not validate the full project).
  */
@@ -414,6 +442,17 @@ export function applyComponentPatch(comp: Component, patch: Record<string, unkno
 
     if ("scrollX" in patch) setBool(r, "scrollX", patch.scrollX);
     if ("scrollY" in patch) setBool(r, "scrollY", patch.scrollY);
+    if ("flexGrow" in patch) setFiniteInt(r, "flexGrow", patch.flexGrow);
+    for (const k of ["gridCol", "gridRow", "gridColSpan", "gridRowSpan"] as const) {
+        if (k in patch) setFiniteInt(r, k, patch[k]);
+    }
+    for (const k of ["gridCellXAlign", "gridCellYAlign"] as const) {
+        if (k in patch && typeof patch[k] === "string") {
+            const v = (patch[k] as string).trim();
+            if (v === "") delete r[k];
+            else if (/^(start|end|center|stretch)$/.test(v)) r[k] = v;
+        }
+    }
 
     switch (comp.type) {
         case "label":
@@ -515,6 +554,7 @@ export function applyComponentPatch(comp: Component, patch: Record<string, unkno
                         (comp as ContainerComponent).flexFlow = ff as NonNullable<ContainerComponent["flexFlow"]>;
                 }
             }
+            patchContainerFlexGrid(comp as ContainerComponent, patch);
             break;
         default:
             break;

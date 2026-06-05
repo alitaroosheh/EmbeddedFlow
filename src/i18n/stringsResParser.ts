@@ -4,6 +4,8 @@ import { StringsResParseError } from "./stringsResErrors";
 export interface StringsResFile {
     defaultLocale: string;
     locales: Record<string, Record<string, string>>;
+    /** Optional per-locale text direction (RTL1). */
+    localeMeta?: Record<string, { direction?: "ltr" | "rtl" }>;
 }
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -77,7 +79,29 @@ export function parseStringsResSource(text: string, fileLabel = ".res"): Strings
         locales[localeId] = table;
     }
 
-    return { defaultLocale: defaultLocale.trim(), locales };
+    let localeMeta: StringsResFile["localeMeta"];
+    const metaRaw = root["localeMeta"];
+    if (metaRaw !== undefined) {
+        if (!isPlainObject(metaRaw)) {
+            throw new StringsResParseError(`${fileLabel}: localeMeta must be an object`);
+        }
+        localeMeta = {};
+        for (const [localeId, entry] of Object.entries(metaRaw)) {
+            validateLocaleId(localeId, `${fileLabel}.localeMeta.${localeId}`);
+            if (!isPlainObject(entry)) {
+                throw new StringsResParseError(`${fileLabel}.localeMeta.${localeId} must be an object`);
+            }
+            const dir = entry["direction"];
+            if (dir !== undefined && dir !== "ltr" && dir !== "rtl") {
+                throw new StringsResParseError(
+                    `${fileLabel}.localeMeta.${localeId}.direction must be "ltr" or "rtl"`
+                );
+            }
+            localeMeta[localeId] = { direction: dir as "ltr" | "rtl" | undefined };
+        }
+    }
+
+    return { defaultLocale: defaultLocale.trim(), locales, localeMeta };
 }
 
 /** Read a `.res` file from disk. */

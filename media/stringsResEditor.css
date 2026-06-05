@@ -139,3 +139,30 @@ td.key-col input.invalid,
 th input[data-locale-input].invalid {
     border-color: var(--vscode-inputValidation-errorBorder);
 }
+
+.locale-dir-badge {
+    display: inline-block;
+    margin-left: 4px;
+    padding: 0 4px;
+    font-size: 10px;
+    line-height: 14px;
+    border-radius: 3px;
+    vertical-align: middle;
+    font-weight: 600;
+}
+
+.locale-dir-badge.rtl {
+    background: var(--vscode-badge-background);
+    color: var(--vscode-badge-foreground);
+}
+
+.locale-dir-badge.ltr {
+    background: var(--vscode-editorWidget-background);
+    color: var(--vscode-descriptionForeground);
+    border: 1px solid var(--vscode-panel-border);
+}
+
+.locale-dir-badge.inferred {
+    opacity: 0.85;
+    font-style: italic;
+}

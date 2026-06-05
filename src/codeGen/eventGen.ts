@@ -16,6 +16,7 @@ import { screenLoadAnimCConstant } from "./screenLoadAnim";
 import { dataSetterName } from "./bindingsGen";
 import { emitWidgetTextExpr } from "./stringsGen";
 import { getWidgetTextRef } from "../i18n/widgetText";
+import { emitNavStackAction } from "./navStackGen";
 
 const BINDING_RE = /\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g;
 
@@ -251,32 +252,14 @@ function emitAction(
     switch (action.type) {
         case "navigate":
             return emitNavigateStatement(project, action as NavigateAction, v9);
-        case "nav_push": {
-            const push = action as NavPushAction;
-            return emitNavigateStatement(
-                project,
-                { target: push.route, anim: push.anim, time: push.time, delay: push.delay, autoDel: push.autoDel },
-                v9
-            );
-        }
+        case "nav_push":
+            return emitNavStackAction(action as NavPushAction, v9);
         case "nav_pop":
-            return `/* nav_pop: navigation stack codegen postponed — wire ui_nav_pop() manually or use navigate */`;
-        case "nav_replace": {
-            const r = action as NavReplaceAction;
-            return emitNavigateStatement(
-                project,
-                { target: r.route, anim: r.anim, time: r.time, delay: r.delay, autoDel: r.autoDel },
-                v9
-            );
-        }
-        case "nav_reset": {
-            const r = action as NavResetAction;
-            return emitNavigateStatement(
-                project,
-                { target: r.route, anim: r.anim, time: r.time, delay: r.delay, autoDel: r.autoDel },
-                v9
-            );
-        }
+            return emitNavStackAction(action, v9);
+        case "nav_replace":
+            return emitNavStackAction(action as NavReplaceAction, v9);
+        case "nav_reset":
+            return emitNavStackAction(action as NavResetAction, v9);
         case "set_text": {
             const comp = findComponentOnPage(page, action.target);
             const fieldId =

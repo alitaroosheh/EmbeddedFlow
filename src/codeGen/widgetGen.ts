@@ -10,6 +10,7 @@ import { emitStyleCalls } from "./styleGen";
 import { styleVarName } from "./stylesGen";
 import { emitAnimationCalls } from "./animationGen";
 import { emitWidgetTextExpr } from "./stringsGen";
+import { emitContainerLayoutLines, emitChildLayoutLines } from "./layoutGen";
 
 /** Optional shared context for widget emission (project-level resolvers). */
 export interface WidgetEmitContext {
@@ -68,6 +69,7 @@ export function emitComponent(
 
     // Position, size, styles apply to all widget types
     lines.push(...posSize(v, comp));
+    lines.push(...emitChildLayoutLines(v, comp));
     lines.push(...emitScrollConfig(v, comp));
     lines.push(...emitStyleRefCalls(v, comp.styleRefs, ctx?.styles));
     if (comp.styles && Object.keys(comp.styles).length > 0) {
@@ -396,20 +398,7 @@ function emitContainer(v: string, c: ContainerComponent, parent: string, pageId:
         );
     }
 
-    if (c.layout === "flex") {
-        const flowMap: Record<string, string> = {
-            row:         "LV_FLEX_FLOW_ROW",
-            column:      "LV_FLEX_FLOW_COLUMN",
-            row_wrap:    "LV_FLEX_FLOW_ROW_WRAP",
-            column_wrap: "LV_FLEX_FLOW_COLUMN_WRAP"
-        };
-        lines.push(
-            `    lv_obj_set_layout(${v}, LV_LAYOUT_FLEX);`,
-            `    lv_obj_set_flex_flow(${v}, ${flowMap[c.flexFlow ?? "row"] ?? "LV_FLEX_FLOW_ROW"});`
-        );
-    } else if (c.layout === "grid") {
-        lines.push(`    lv_obj_set_layout(${v}, LV_LAYOUT_GRID);`);
-    }
+    lines.push(...emitContainerLayoutLines(v, pageId, c));
 
     for (const child of c.children ?? []) {
         lines.push(...emitComponent(pageId, child, v, v9, ctx));

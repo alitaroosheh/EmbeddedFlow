@@ -1,5 +1,8 @@
 {
   "defaultLocale": "en",
+  "localeMeta": {
+    "fa": { "direction": "rtl" }
+  },
   "locales": {
     "en": {
       "string_app_title": "Weather Station",
@@ -23,7 +26,8 @@
       "string_language": "Language",
       "string_language_hint": "Choose interface language",
       "string_english": "English",
-      "string_german": "Deutsch"
+      "string_german": "Deutsch",
+      "string_persian": "فارسی"
     },
     "de": {
       "string_app_title": "Wetterstation",
@@ -47,7 +51,33 @@
       "string_language": "Sprache",
       "string_language_hint": "Oberflächensprache wählen",
       "string_english": "English",
-      "string_german": "Deutsch"
+      "string_german": "Deutsch",
+      "string_persian": "فارسی"
+    },
+    "fa": {
+      "string_app_title": "ایستگاه هوا",
+      "string_night": "شب",
+      "string_temperature": "دما",
+      "string_humidity": "رطوبت",
+      "string_temp_range": "محدوده: ۱۸..۲۸",
+      "string_cool": "سرد",
+      "string_mild": "معتدل",
+      "string_hot": "گرم",
+      "string_reset": "بازنشانی",
+      "string_play_anims": "انیمیشن (نوار)",
+      "string_comfort": "آسایش",
+      "string_dry": "خشک",
+      "string_humid": "مرطوب",
+      "string_footer_hint": "تنظیمات را برای زبان و تم باز کنید.",
+      "string_settings": "تنظیمات",
+      "string_settings_title": "تنظیمات ایستگاه",
+      "string_settings_sub": "زبان و نمایش",
+      "string_back": "بازگشت",
+      "string_language": "زبان",
+      "string_language_hint": "زبان رابط را انتخاب کنید",
+      "string_english": "English",
+      "string_german": "Deutsch",
+      "string_persian": "فارسی"
     }
   }
 }

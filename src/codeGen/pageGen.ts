@@ -4,6 +4,9 @@ import { screenVar, screenInitFn, headerGuard, widgetVar } from "./naming";
 import { emitComponent } from "./widgetGen";
 import { collectPageEvents } from "./eventGen";
 import { collectPageSwipes } from "./swipeGen";
+import { collectPageGridDescriptors } from "./layoutGen";
+import { emitPageInitBaseDir, lvConfRtlCommentBlock } from "./directionGen";
+import { projectNeedsRtl } from "../i18n/textDirection";
 import { lvglIncludeDirective } from "./lvglInclude";
 import { generateImageExternLines } from "../resources/imageCodegen";
 import { emitOpacityHelperLines, anyOpacityAnimation } from "./animationGen";
@@ -73,14 +76,15 @@ export function generatePageHeader(project: EmbfProject, page: Page): string {
 export function generatePageSource(
     project: EmbfProject,
     page: Page,
-    opts?: { stringsApi?: boolean }
+    opts?: { stringsApi?: boolean; textDirection?: boolean }
 ): string {
     const scrVar = screenVar(page.id);
     const initFn = screenInitFn(page.id);
     const v9     = isLvglV9(project);
     const stringsApi = opts?.stringsApi === true;
+    const textDirection = opts?.textDirection === true;
 
-    // Global variable declarations for this page
+    const gridStatics = collectPageGridDescriptors(page.id, page.components);
     const allWidgets = flatWidgets(page);
     const varDecls = allWidgets.map(w =>
         `lv_obj_t *${widgetVar(page.id, w.id)} = NULL;`
@@ -133,6 +137,7 @@ export function generatePageSource(
         `/* ui.h includes every ui_<page>.h so navigate handlers can reference other screens. */`,
         `#include "ui.h"`,
         ``,
+        ...(gridStatics.length > 0 ? [`/* Grid track descriptors */`, ...gridStatics, ``] : []),
         `/* Screen variable */`,
         `lv_obj_t *${scrVar} = NULL;`,
         ``,
@@ -148,6 +153,7 @@ export function generatePageSource(
         `void ${initFn}(void)`,
         `{`,
         `    ${scrVar} = lv_obj_create(NULL);`,
+        ...(textDirection ? [emitPageInitBaseDir(scrVar)] : []),
         ...bgLines,
         ...scrollLines,
         ``,
@@ -202,6 +208,8 @@ export interface GenerateRootHeaderOptions {
     includeBindings?: boolean;
     /** When true, `ui.h` will `#include "ui_strings.h"` for `ui_get_string()`. */
     includeStrings?: boolean;
+    /** When true, `ui.h` will `#include "ui_nav.h"` for stack navigation. */
+    includeNav?: boolean;
 }
 
 export function generateRootHeader(
@@ -219,6 +227,7 @@ export function generateRootHeader(
     const stylesInclude   = opts?.includeStyles   ? [`#include "ui_styles.h"`]   : [];
     const bindingsInclude = opts?.includeBindings ? [`#include "ui_bindings.h"`] : [];
     const stringsInclude  = opts?.includeStrings  ? [`#include "ui_strings.h"`]  : [];
+    const navInclude      = opts?.includeNav      ? [`#include "ui_nav.h"`]      : [];
 
     return [
         AUTOGEN_BANNER,
@@ -235,6 +244,7 @@ export function generateRootHeader(
         ...stylesInclude,
         ...bindingsInclude,
         ...stringsInclude,
+        ...navInclude,
         ``,
         ...imageLines,
         ...includes,
@@ -334,9 +344,30 @@ export function generateRootSource(project: EmbfProject, opts?: { includeStrings
     ].join("\n");
 }
 
-export function generateLvConf(project: EmbfProject): string {
+export function generateLvConf(
+    project: EmbfProject,
+    strings?: import("../i18n/stringsResParser").StringsResFile | null
+): string {
     const { bitDepth, colorFormat } = project.display;
     const colorDepth = bitDepth === 16 ? 16 : bitDepth === 24 ? 24 : 32;
+    const needsRtl = projectNeedsRtl(project, strings ?? null);
+    const rtlBlock = needsRtl
+        ? [
+              `/* Bidirectional + Arabic/Persian shaping (project uses RTL locales) */`,
+              `#define LV_USE_BIDI  1`,
+              `#define LV_USE_ARABIC_PERSIAN_CHARS  1`,
+              `#define LV_FONT_DEJAVU_16_PERSIAN_HEBREW  1`,
+              lvConfRtlCommentBlock(),
+              ``
+          ]
+        : [
+              `/* RTL/BiDi disabled — enable when using ar/fa/he locales: */`,
+              `#define LV_USE_BIDI  0`,
+              `#define LV_USE_ARABIC_PERSIAN_CHARS  0`,
+              `#define LV_FONT_DEJAVU_16_PERSIAN_HEBREW  0`,
+              lvConfRtlCommentBlock(),
+              ``
+          ];
 
     return [
         AUTOGEN_BANNER,
@@ -396,6 +427,7 @@ export function generateLvConf(project: EmbfProject): string {
         `#define LV_USE_FLEX           1`,
         `#define LV_USE_GRID           1`,
         ``,
+        ...rtlBlock,
         `#define LV_USE_LOG  0`,
         `#define LV_USE_ASSERT_NULL    1`,
         `#define LV_USE_ASSERT_MALLOC  1`,

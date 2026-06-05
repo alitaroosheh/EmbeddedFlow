@@ -38,7 +38,18 @@ extern const lv_font_t embf_font_latin1_32;
 #if LV_FONT_MONTSERRAT_48
 extern const lv_font_t embf_font_latin1_48;
 #endif
+#if LV_FONT_DEJAVU_16_PERSIAN_HEBREW
+extern const lv_font_t lv_font_dejavu_16_persian_hebrew;
+#endif
 
+static lv_font_t g_font_latin_12;
+static lv_font_t g_font_latin_14;
+static lv_font_t g_font_latin_16;
+static lv_font_t g_font_latin_18;
+static lv_font_t g_font_latin_20;
+static lv_font_t g_font_latin_24;
+static lv_font_t g_font_latin_32;
+static lv_font_t g_font_latin_48;
 static lv_font_t g_font_ms_12;
 static lv_font_t g_font_ms_14;
 static lv_font_t g_font_ms_16;
@@ -49,41 +60,55 @@ static lv_font_t g_font_ms_32;
 static lv_font_t g_font_ms_48;
 static bool g_preview_fonts_ready;
 
-/** Copy Montserrat into writable structs and wire Latin-1 fallbacks (const ROM fonts cannot be patched in WASM). */
+/** Copy Montserrat into writable structs; chain Latin-1 then Arabic-script fallbacks. */
 static void embf_install_latin_fallbacks(void)
 {
     if (g_preview_fonts_ready) {
         return;
     }
-#define EMBF_WIRE(FROM, TO, LATIN) \
+#define EMBF_WIRE(FROM, TO, FALLBACK) \
     do { \
         (TO) = *(FROM); \
-        (TO).fallback = (LATIN); \
+        (TO).fallback = (FALLBACK); \
     } while (0)
+#if LV_FONT_DEJAVU_16_PERSIAN_HEBREW
+#define EMBF_LATIN_FALLBACK &lv_font_dejavu_16_persian_hebrew
+#else
+#define EMBF_LATIN_FALLBACK NULL
+#endif
 #if LV_FONT_MONTSERRAT_12
-    EMBF_WIRE(&lv_font_montserrat_12, g_font_ms_12, &embf_font_latin1_12);
+    EMBF_WIRE(&embf_font_latin1_12, g_font_latin_12, EMBF_LATIN_FALLBACK);
+    EMBF_WIRE(&lv_font_montserrat_12, g_font_ms_12, &g_font_latin_12);
 #endif
 #if LV_FONT_MONTSERRAT_14
-    EMBF_WIRE(&lv_font_montserrat_14, g_font_ms_14, &embf_font_latin1_14);
+    EMBF_WIRE(&embf_font_latin1_14, g_font_latin_14, EMBF_LATIN_FALLBACK);
+    EMBF_WIRE(&lv_font_montserrat_14, g_font_ms_14, &g_font_latin_14);
 #endif
 #if LV_FONT_MONTSERRAT_16
-    EMBF_WIRE(&lv_font_montserrat_16, g_font_ms_16, &embf_font_latin1_16);
+    EMBF_WIRE(&embf_font_latin1_16, g_font_latin_16, EMBF_LATIN_FALLBACK);
+    EMBF_WIRE(&lv_font_montserrat_16, g_font_ms_16, &g_font_latin_16);
 #endif
 #if LV_FONT_MONTSERRAT_18
-    EMBF_WIRE(&lv_font_montserrat_18, g_font_ms_18, &embf_font_latin1_18);
+    EMBF_WIRE(&embf_font_latin1_18, g_font_latin_18, EMBF_LATIN_FALLBACK);
+    EMBF_WIRE(&lv_font_montserrat_18, g_font_ms_18, &g_font_latin_18);
 #endif
 #if LV_FONT_MONTSERRAT_20
-    EMBF_WIRE(&lv_font_montserrat_20, g_font_ms_20, &embf_font_latin1_20);
+    EMBF_WIRE(&embf_font_latin1_20, g_font_latin_20, EMBF_LATIN_FALLBACK);
+    EMBF_WIRE(&lv_font_montserrat_20, g_font_ms_20, &g_font_latin_20);
 #endif
 #if LV_FONT_MONTSERRAT_24
-    EMBF_WIRE(&lv_font_montserrat_24, g_font_ms_24, &embf_font_latin1_24);
+    EMBF_WIRE(&embf_font_latin1_24, g_font_latin_24, EMBF_LATIN_FALLBACK);
+    EMBF_WIRE(&lv_font_montserrat_24, g_font_ms_24, &g_font_latin_24);
 #endif
 #if LV_FONT_MONTSERRAT_32
-    EMBF_WIRE(&lv_font_montserrat_32, g_font_ms_32, &embf_font_latin1_32);
+    EMBF_WIRE(&embf_font_latin1_32, g_font_latin_32, EMBF_LATIN_FALLBACK);
+    EMBF_WIRE(&lv_font_montserrat_32, g_font_ms_32, &g_font_latin_32);
 #endif
 #if LV_FONT_MONTSERRAT_48
-    EMBF_WIRE(&lv_font_montserrat_48, g_font_ms_48, &embf_font_latin1_48);
+    EMBF_WIRE(&embf_font_latin1_48, g_font_latin_48, EMBF_LATIN_FALLBACK);
+    EMBF_WIRE(&lv_font_montserrat_48, g_font_ms_48, &g_font_latin_48);
 #endif
+#undef EMBF_LATIN_FALLBACK
 #undef EMBF_WIRE
     g_preview_fonts_ready = true;
 }
@@ -980,4 +1005,69 @@ void embf_on_key(int keycode)
 {
     /* Future: keyboard input device */
     (void)keycode;
+}
+
+/* ── Flex / grid layout (preview V5) ─────────────────────────────────────── */
+
+EMSCRIPTEN_KEEPALIVE
+void embf_container_set_flex(lv_obj_t *obj, int flow, int align_main, int align_cross, int align_track)
+{
+    if (!obj) return;
+    lv_obj_set_layout(obj, LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(obj, (lv_flex_flow_t)flow);
+    lv_obj_set_flex_align(obj, (lv_flex_align_t)align_main, (lv_flex_align_t)align_cross,
+                        (lv_flex_align_t)align_track);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void embf_container_set_grid(lv_obj_t *obj, const int32_t *col_dsc, const int32_t *row_dsc,
+                             int col_gap, int row_gap, int align_x, int align_y)
+{
+    if (!obj || !col_dsc || !row_dsc) return;
+    lv_obj_set_layout(obj, LV_LAYOUT_GRID);
+    lv_obj_set_grid_dsc_array(obj, (lv_coord_t *)col_dsc, (lv_coord_t *)row_dsc);
+    lv_obj_set_style_pad_column(obj, (lv_coord_t)col_gap, LV_PART_MAIN);
+    lv_obj_set_style_pad_row(obj, (lv_coord_t)row_gap, LV_PART_MAIN);
+    lv_obj_set_grid_align(obj, (lv_grid_align_t)align_x, (lv_grid_align_t)align_y);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void embf_obj_set_flex_grow(lv_obj_t *obj, int grow)
+{
+    if (!obj) return;
+    lv_obj_set_flex_grow(obj, (uint8_t)grow);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void embf_obj_set_grid_cell(lv_obj_t *obj, int x_align, int col, int col_span,
+                            int y_align, int row, int row_span)
+{
+    if (!obj) return;
+    lv_obj_set_grid_cell(obj, (lv_grid_align_t)x_align, (int32_t)col, (int32_t)col_span,
+                         (lv_grid_align_t)y_align, (int32_t)row, (int32_t)row_span);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void embf_obj_set_base_dir(lv_obj_t *obj, int rtl)
+{
+    if (!obj) return;
+    lv_obj_set_style_base_dir(obj, rtl ? LV_BASE_DIR_RTL : LV_BASE_DIR_LTR, LV_PART_MAIN);
+}
+
+EMSCRIPTEN_KEEPALIVE
+int32_t embf_grid_fr(int32_t x)
+{
+    return LV_GRID_FR(x);
+}
+
+EMSCRIPTEN_KEEPALIVE
+int32_t embf_grid_content(void)
+{
+    return LV_GRID_CONTENT;
+}
+
+EMSCRIPTEN_KEEPALIVE
+int32_t embf_grid_template_last(void)
+{
+    return LV_GRID_TEMPLATE_LAST;
 }

@@ -2,6 +2,7 @@ import type { EmbfProject } from "../types/embf";
 import type { EmbfSemanticIssue } from "../embfSemanticLint";
 import { collectStringRefsInProject, listAllStringKeys } from "./widgetText";
 import type { StringsResFile } from "./stringsResParser";
+import { isRtlLocaleId, resolveTextDirection, textNeedsArabicScript } from "./textDirection";
 
 export function lintStringResourceRefs(
     project: EmbfProject,
@@ -9,6 +10,25 @@ export function lintStringResourceRefs(
 ): EmbfSemanticIssue[] {
     const issues: EmbfSemanticIssue[] = [];
     const refs = collectStringRefsInProject(project);
+
+    if (strings) {
+        for (const localeId of Object.keys(strings.locales)) {
+            const dir = resolveTextDirection(strings, localeId, project.display.direction);
+            if (dir !== "rtl") {
+                continue;
+            }
+            const table = strings.locales[localeId] ?? {};
+            const needsArabicFont = Object.values(table).some(
+                v => typeof v === "string" && textNeedsArabicScript(v)
+            );
+            if (needsArabicFont || isRtlLocaleId(localeId)) {
+                issues.push({
+                    message: `RTL locale "${localeId}" is active in strings.res — enable LV_USE_BIDI and an Arabic-script font (e.g. lv_font_dejavu_16_persian_hebrew) in lv_conf.h (RTL8)`
+                });
+            }
+        }
+    }
+
     if (!refs.length) {
         return issues;
     }
@@ -28,5 +48,6 @@ export function lintStringResourceRefs(
             });
         }
     }
+
     return issues;
 }

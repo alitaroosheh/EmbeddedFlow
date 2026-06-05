@@ -18,6 +18,8 @@ import {
     loadStringsResForCodegen,
     localeToDefBasename
 } from "./stringsGen";
+import { projectUsesNavStack, generateNavStackHeader, generateNavStackSource } from "./navStackGen";
+import { projectNeedsRtl } from "../i18n/textDirection";
 import { convertProjectImages } from "../resources";
 
 export { resolveCodegenOutputDir } from "./outputDir";
@@ -55,8 +57,10 @@ export function generateCode(
     const imageResult = convertProjectImages(project, embfPath, dir);
     const lvglV9 = isLvglV9(project);
     const stringsRes = loadStringsResForCodegen(project, embfPath);
-    const stringsBundle = generateStringsCodegen(project, stringsRes);
+    const needsRtl = projectNeedsRtl(project, stringsRes);
+    const stringsBundle = generateStringsCodegen(project, stringsRes, needsRtl);
     const stringsApi = stringsBundle !== null;
+    const navStack = projectUsesNavStack(project);
 
     files.set(path.join(dir, "ui_display.h"), generateDisplayHeader(project));
 
@@ -81,8 +85,13 @@ export function generateCode(
         );
         files.set(
             path.join(dir, `ui_${page.id}.c`),
-            generatePageSource(project, page, { stringsApi })
+            generatePageSource(project, page, { stringsApi, textDirection: needsRtl })
         );
+    }
+
+    if (navStack) {
+        files.set(path.join(dir, "ui_nav.h"), generateNavStackHeader());
+        files.set(path.join(dir, "ui_nav.c"), generateNavStackSource(project, lvglV9));
     }
 
     const imageSymbols = imageResult.assets.map(a => ({
@@ -118,11 +127,12 @@ export function generateCode(
             includeFonts: fontsHeader !== null,
             includeStyles: stylesHeader !== null,
             includeBindings: bindingsHeader !== null,
-            includeStrings: stringsApi
+            includeStrings: stringsApi,
+            includeNav: navStack
         })
     );
     files.set(path.join(dir, "ui.c"), generateRootSource(project, { includeStrings: stringsApi }));
-    files.set(path.join(dir, "lv_conf.h"), generateLvConf(project));
+    files.set(path.join(dir, "lv_conf.h"), generateLvConf(project, stringsRes));
 
     for (const [relPath, content] of imageResult.files) {
         files.set(path.join(dir, relPath), content);

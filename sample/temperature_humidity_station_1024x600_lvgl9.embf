@@ -296,6 +296,11 @@
                               "type": "set_text",
                               "target": "lbl_temp_value",
                               "text": "20"
+                            },
+                            {
+                              "type": "select_button_group",
+                              "members": ["btn_cool_1", "btn_mild_1", "btn_hot_1"],
+                              "active": "btn_cool_1"
                             }
                           ]
                         }
@@ -332,6 +337,11 @@
                               "type": "set_text",
                               "target": "lbl_temp_value",
                               "text": "24"
+                            },
+                            {
+                              "type": "select_button_group",
+                              "members": ["btn_cool_1", "btn_mild_1", "btn_hot_1"],
+                              "active": "btn_mild_1"
                             }
                           ]
                         }
@@ -368,6 +378,11 @@
                               "type": "set_text",
                               "target": "lbl_temp_value",
                               "text": "30"
+                            },
+                            {
+                              "type": "select_button_group",
+                              "members": ["btn_cool_1", "btn_mild_1", "btn_hot_1"],
+                              "active": "btn_hot_1"
                             }
                           ]
                         }
@@ -427,7 +442,16 @@
                         "borderWidth": 2,
                         "borderRadius": 12
                       },
-                      "events": []
+                      "events": [
+                        {
+                          "trigger": "clicked",
+                          "actions": [
+                            {
+                              "type": "play_animations"
+                            }
+                          ]
+                        }
+                      ]
                     }
                   ]
                 }
@@ -581,6 +605,16 @@
                               "text": {
                                 "ref": "string_dry"
                               }
+                            },
+                            {
+                              "type": "select_button_group",
+                              "members": ["btn_hum_dry", "btn_hum_comfort", "btn_hum_humid"],
+                              "active": "btn_hum_dry",
+                              "selectedStyles": {
+                                "bgColor": "#a78bfa",
+                                "textColor": "#0f172a",
+                                "borderColor": "#a78bfa"
+                              }
                             }
                           ]
                         }
@@ -624,6 +658,16 @@
                               "text": {
                                 "ref": "string_comfort"
                               }
+                            },
+                            {
+                              "type": "select_button_group",
+                              "members": ["btn_hum_dry", "btn_hum_comfort", "btn_hum_humid"],
+                              "active": "btn_hum_comfort",
+                              "selectedStyles": {
+                                "bgColor": "#a78bfa",
+                                "textColor": "#0f172a",
+                                "borderColor": "#a78bfa"
+                              }
                             }
                           ]
                         }
@@ -666,6 +710,16 @@
                               "target": "lbl_hum_status",
                               "text": {
                                 "ref": "string_humid"
+                              }
+                            },
+                            {
+                              "type": "select_button_group",
+                              "members": ["btn_hum_dry", "btn_hum_comfort", "btn_hum_humid"],
+                              "active": "btn_hum_humid",
+                              "selectedStyles": {
+                                "bgColor": "#a78bfa",
+                                "textColor": "#0f172a",
+                                "borderColor": "#a78bfa"
                               }
                             }
                           ]
@@ -1093,6 +1147,11 @@
                         {
                           "type": "set_locale",
                           "locale": "en"
+                        },
+                        {
+                          "type": "select_button_group",
+                          "members": ["btn_lang_en", "btn_lang_de", "btn_lang_fa"],
+                          "active": "btn_lang_en"
                         }
                       ]
                     }
@@ -1123,6 +1182,11 @@
                         {
                           "type": "set_locale",
                           "locale": "de"
+                        },
+                        {
+                          "type": "select_button_group",
+                          "members": ["btn_lang_en", "btn_lang_de", "btn_lang_fa"],
+                          "active": "btn_lang_de"
                         }
                       ]
                     }
@@ -1153,6 +1217,11 @@
                         {
                           "type": "set_locale",
                           "locale": "fa"
+                        },
+                        {
+                          "type": "select_button_group",
+                          "members": ["btn_lang_en", "btn_lang_de", "btn_lang_fa"],
+                          "active": "btn_lang_fa"
                         }
                       ]
                     }

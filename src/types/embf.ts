@@ -296,7 +296,16 @@ export type Action =
     /** Re-apply LVGL default theme. Preview: optional `dark` toggles runtime override; omit `dark` on `value_changed` to mirror switch/checkbox checked state. Firmware: re-init theme on display. */
     | { type: "set_theme"; dark?: boolean }
     /** Switch active string locale at runtime; preview refreshes localized widgets on the current page. */
-    | { type: "set_locale"; locale: string };
+    | { type: "set_locale"; locale: string }
+    /** Highlight one button in a group and restore default styles on the others (preview + firmware). */
+    | {
+          type: "select_button_group";
+          members: string[];
+          active: string;
+          selectedStyles?: StyleProps;
+      }
+    /** Start or restart all widget animations on the current page (preview toolbar / sample button). */
+    | { type: "play_animations" };
 
 export interface EventDef {
     trigger: EventTrigger;

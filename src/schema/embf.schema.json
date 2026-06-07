@@ -532,6 +532,38 @@
               "description": "Locale id from strings.res (e.g. en, de). Switches active language and refreshes localized widget text."
             }
           }
+        },
+        {
+          "type": "object",
+          "required": ["type", "members", "active"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "select_button_group" },
+            "members": {
+              "type": "array",
+              "minItems": 2,
+              "items": { "type": "string", "minLength": 1 },
+              "description": "Button component ids in the same exclusive group"
+            },
+            "active": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Member id to highlight with selectedStyles"
+            },
+            "selectedStyles": {
+              "$ref": "#/definitions/styleProps",
+              "description": "Highlight styles for the active button (defaults to theme primary)"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "play_animations" },
+            "description": "Start or restart all widget animations[] on the current page"
+          }
         }
       ]
     },

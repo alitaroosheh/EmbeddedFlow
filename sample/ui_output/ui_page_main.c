@@ -18,8 +18,9 @@ lv_obj_t *ui_page_main_knob_1 = NULL;
 lv_obj_t *ui_page_main_bar_1 = NULL;
 lv_obj_t *ui_page_main_sld_1 = NULL;
 
-/* Event callback forward declarations */
+/* Forward declarations */
 static void ui_page_main_on_swipe(lv_event_t *e);
+
 
 /* Event callback implementations */
 static void ui_page_main_on_swipe(lv_event_t *e)

@@ -10,7 +10,8 @@ import { projectNeedsRtl } from "../i18n/textDirection";
 import { uiFontLocalizedCall } from "./rtlFontsGen";
 import { lvglIncludeDirective } from "./lvglInclude";
 import { generateImageExternLines } from "../resources/imageCodegen";
-import { emitOpacityHelperLines, anyOpacityAnimation } from "./animationGen";
+import { emitOpacityHelperLines, anyOpacityAnimation, emitPagePlayAnimationsFn } from "./animationGen";
+import { collectButtonGroups, emitButtonGroupHelper, emitButtonGroupInitCalls } from "./buttonGroupGen";
 import { bindingsApplyCall, bindingsInitOnlyCalls } from "./bindingsGen";
 
 const AUTOGEN_BANNER = `/*
@@ -134,9 +135,27 @@ export function generatePageSource(
     // Event callbacks and page swipe handlers
     const events = collectPageEvents(project, page, stringsApi);
     const swipes = collectPageSwipes(project, page);
+    const buttonGroups = collectButtonGroups(page, project);
+    const buttonGroupHelpers = buttonGroups.map(g => emitButtonGroupHelper(page, project, g));
+    const buttonGroupInit = emitButtonGroupInitCalls(page, project);
+    const playAnimFn = emitPagePlayAnimationsFn(page);
     const decls = [...events.decls, ...swipes.decls];
     const impls = [...events.impls, ...swipes.impls];
     const registrations = [...events.registrations, ...swipes.registrations];
+
+    const staticHelperDecls: string[] = [];
+    if (needsOpaHelper) {
+        staticHelperDecls.push(`static void ui_anim_opa_cb(void *obj, int32_t v);`);
+    }
+    for (const g of buttonGroups) {
+        staticHelperDecls.push(`static void ui_${page.id}_select_${g.id}(lv_obj_t *active);`);
+    }
+    if (playAnimFn) {
+        staticHelperDecls.push(`static void ui_${page.id}_play_animations(void);`);
+    }
+    const hasForwardDecls = decls.length > 0 || staticHelperDecls.length > 0;
+    const hasStaticHelpers =
+        needsOpaHelper || buttonGroupHelpers.length > 0 || playAnimFn !== null;
 
     return [
         AUTOGEN_BANNER,
@@ -150,12 +169,16 @@ export function generatePageSource(
         allWidgets.length > 0 ? `/* Widget variables */` : "",
         ...varDecls,
         ``,
-        decls.length > 0 ? `/* Event callback forward declarations */` : "",
+        hasForwardDecls ? `/* Forward declarations */` : "",
         ...decls,
+        ...staticHelperDecls,
         ``,
-        decls.length > 0 ? `/* Event callback implementations */` : "",
-        ...impls.map(fn => fn + "\n"),
+        hasStaticHelpers ? `/* Static helpers */` : "",
         ...opaHelper,
+        ...(buttonGroupHelpers.length > 0 ? buttonGroupHelpers.map(h => h + "\n") : []),
+        ...(playAnimFn ? [playAnimFn + "\n"] : []),
+        impls.length > 0 ? `/* Event callback implementations */` : "",
+        ...impls.map(fn => fn + "\n"),
         `void ${initFn}(void)`,
         `{`,
         `    ${scrVar} = lv_obj_create(NULL);`,
@@ -166,6 +189,7 @@ export function generatePageSource(
         ...bodyLines,
         registrations.length > 0 ? `    /* Event registrations */` : "",
         ...registrations,
+        ...(buttonGroupInit.length > 0 ? [`    /* Exclusive button groups — design default */`, ...buttonGroupInit, ``] : []),
         `}`,
         ``
     ].filter(l => l !== undefined).join("\n");

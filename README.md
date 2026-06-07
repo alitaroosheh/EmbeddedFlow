@@ -10,9 +10,16 @@ Design touch UIs for embedded devices without leaving your editor. **embeddedflo
 
 ---
 
-## What's new in v1.3.0
+## What's new in v1.4.0
 
-Install the latest `.vsix` (`embf-lvgl-1.3.0.vsix`) or update from the Marketplace.
+Install the latest `.vsix` (`embf-lvgl-1.4.0.vsix`) or update from the Marketplace.
+
+- **Exclusive button groups** — flow action **`select_button_group`** for preset/language toggles (preview + firmware); design default applied at page init.
+- **Play animations** — flow action **`play_animations`** to restart widget animations from a button.
+- **Station sample** — Cool/Mild/Hot, humidity modes, and language buttons with working highlight; **Play anims (toolbar)** wired.
+- **Firmware codegen** — static helpers forward-declared at top of each `ui_page_*.c` (fixes `ui_anim_opa_cb` undeclared on ESP-IDF).
+
+## What's new in v1.3.0
 
 - **String resources** — `strings.res` with a table editor (**embeddedflow: Open String Resources**); widget text references keys; **`set_locale`** action and generated `ui_set_locale()` / `ui_refresh_localized_text()`.
 - **RTL + mixed scripts** — Persian/Arabic/Hebrew locales with BiDi codegen; **German umlauts** and **Persian** on the same UI via Montserrat → Latin-1 → DejaVu font fallbacks (`embf_font_latin1_*.c` + `ui_rtl_fonts.c`).
@@ -127,7 +134,7 @@ Define behavior declaratively in the project JSON and edit from the **Navigation
 
 - **Flow diagram** — pages as draggable nodes; connection lines show widget clicks and swipe transitions; bidirectional pairs use one double-headed connector
 - **Page inspector (flow)** — select a node to list, add, edit, or remove transitions for that page
-- **Widget events** — e.g. button click → navigate to another page, set theme, or other actions
+- **Widget events** — e.g. button click → navigate, **`set_locale`**, **`select_button_group`** (exclusive highlight), **`play_animations`**, set theme, or other actions
 - **Page navigation** — target page, animation (slide, fade, etc.), duration
 - **Swipe gestures** — swipe left/right/top/bottom to open a page with the same transition options
 - **Preview** — run mode follows navigation stack; back navigation where configured

@@ -10,14 +10,19 @@ Design touch UIs for embedded devices without leaving your editor. **embeddedflo
 
 ---
 
-## What's new in v1.2.0 (pre-release)
+## What's new in v1.3.0
 
-**Pre-release** — Marketplace version **1.2.0** on the pre-release channel. Install via **Switch to Pre-Release Version**, or use the latest `.vsix` (`embf-lvgl-1.2.0.vsix`).
+Install the latest `.vsix` (`embf-lvgl-1.3.0.vsix`) or update from the Marketplace.
 
-- **Navigation flow diagram** — open **Navigation flow** in the workspace: page boxes, connection lines, drag to arrange, click a page for its transition list, **+ Add connection** to wire two pages.
-- **Bidirectional links** — mutual navigation between two pages renders as a single double-headed connector.
-- **Workspace tabs** — closable tabs per page plus a dedicated flow tab; stay on the flow diagram while adding multiple transitions.
-- **Toolbar** — Project / Edit / View dropdown menus; preview auto-fit and loading improvements.
+- **String resources** — `strings.res` with a table editor (**embeddedflow: Open String Resources**); widget text references keys; **`set_locale`** action and generated `ui_set_locale()` / `ui_refresh_localized_text()`.
+- **RTL + mixed scripts** — Persian/Arabic/Hebrew locales with BiDi codegen; **German umlauts** and **Persian** on the same UI via Montserrat → Latin-1 → DejaVu font fallbacks (`embf_font_latin1_*.c` + `ui_rtl_fonts.c`).
+- **Sample** — `sample/temperature_humidity_station_1024x600_lvgl9.embf` (1024×600, en/de/fa, settings page).
+
+## What's new in v1.2.x (pre-release)
+
+- **Navigation flow diagram** — page graph with draggable nodes, transition editing, **+ Add connection**, bidirectional connectors.
+- **Workspace tabs** — closable page tabs plus **Navigation flow** tab.
+- **Toolbar** — Project / Edit / View menus; preview auto-fit and loading improvements.
 
 ## What's new in v1.1.x
 
@@ -64,6 +69,7 @@ No separate designer app. No cloud account. Everything runs inside VS Code or Cu
 - **Theme** — light/dark colors used by preview and codegen
 - **Pages** — multiple screens, each with its own widget tree
 - **Images** — register PNG/JPEG/BMP assets by id; reference from `image` widgets
+- **String resources** — optional `strings.res` (`project.stringsPath`); locales, default language, per-locale text direction; keys referenced from widget text
 - **Component library** — save reusable groups; insert them from the palette
 
 ### Visual design & live preview
@@ -136,6 +142,7 @@ Generated C includes navigation and event wiring aligned with your flows (LVGL 8
 - Per-page screen sources
 - Event handlers and navigation stubs matching flows
 - Respects **LVGL version** and include path from the project
+- With **strings.res**: `ui_strings.c/h`, per-locale `.def` files, `ui_strings_refresh.c`, and (when RTL locales exist) `ui_rtl_fonts.c/h` plus `embf_font_latin1_*.c` — add those sources to your firmware `CMakeLists.txt` / build (codegen does not emit CMake)
 
 **Optional:** `embeddedflow.liveGenerateOnSave` regenerates on save (skips when parse/semantic errors exist).
 
@@ -171,6 +178,7 @@ Configure in `.embf`:
 | **embeddedflow: New Project** | Wizard: folder, name, LVGL version → new `.embf` |
 | **embeddedflow: Generate C Code** | Export C sources |
 | **embeddedflow: Add Font to Project** | Register a font; optional `lv_font_conv` conversion |
+| **embeddedflow: Open String Resources** | Edit linked `strings.res` (locales and translation keys) |
 | **embeddedflow: Show Output Log** | Extension log |
 
 ---

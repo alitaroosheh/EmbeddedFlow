@@ -10,15 +10,21 @@
 extern "C" {
 #endif
 
-#include "lvgl/lvgl.h"
+#include "lvgl.h"
 
-/** Screen object for page "Main" */
+/** Screen object for page "Page 3" */
 extern lv_obj_t *ui_page_main;
 
 /* Widget objects */
-extern lv_obj_t *ui_page_main_lbl_hello;
+extern lv_obj_t *ui_page_main_sw_1;
+extern lv_obj_t *ui_page_main_rol_1;
+extern lv_obj_t *ui_page_main_ta_1;
+extern lv_obj_t *ui_page_main_spin_1;
+extern lv_obj_t *ui_page_main_knob_1;
+extern lv_obj_t *ui_page_main_bar_1;
+extern lv_obj_t *ui_page_main_sld_1;
 
-/** Create all widgets for the "Main" screen. */
+/** Create all widgets for the "Page 3" screen. */
 void ui_page_main_screen_init(void);
 
 #ifdef __cplusplus

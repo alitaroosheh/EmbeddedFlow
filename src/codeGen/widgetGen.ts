@@ -3,17 +3,24 @@ import type {
     SwitchComponent, BarComponent, SpinnerComponent, ArcComponent, KnobComponent,
     CheckboxComponent, DropdownComponent, RollerComponent, TextareaComponent,
     LineComponent, ContainerComponent, PanelComponent, ImageComponent,
-    FontDef, StyleDef
+    FontDef, StyleDef, WidgetTextValue
 } from "../types/embf";
 import { toIdentifier, widgetVar } from "./naming";
 import { emitStyleCalls } from "./styleGen";
+import { uiFontLocalizedCall } from "./rtlFontsGen";
 import { styleVarName } from "./stylesGen";
 import { emitAnimationCalls } from "./animationGen";
+import { emitWidgetTextExpr } from "./stringsGen";
+import { emitContainerLayoutLines, emitChildLayoutLines } from "./layoutGen";
 
 /** Optional shared context for widget emission (project-level resolvers). */
 export interface WidgetEmitContext {
     fonts?: FontDef[];
     styles?: StyleDef[];
+    /** When true, `{ ref: "key" }` widget text emits `ui_get_string(UI_STR_*)`. */
+    stringsApi?: boolean;
+    /** Montserrat wrappers with DejaVu Arabic/Persian fallback (RTL projects). */
+    useRtlFontFallback?: boolean;
 }
 
 /**
@@ -40,8 +47,8 @@ export function emitComponent(
     const v = widgetVar(pageId, comp.id);
 
     switch (comp.type) {
-        case "label":      lines.push(...emitLabel(v, comp as LabelComponent, parentExpr, lvglV9)); break;
-        case "button":     lines.push(...emitButton(v, comp as ButtonComponent, parentExpr, pageId, lvglV9)); break;
+        case "label":      lines.push(...emitLabel(v, comp as LabelComponent, parentExpr, lvglV9, ctx)); break;
+        case "button":     lines.push(...emitButton(v, comp as ButtonComponent, parentExpr, pageId, lvglV9, ctx)); break;
         case "image":      lines.push(...emitImage(v, comp as ImageComponent, parentExpr, lvglV9)); break;
         case "slider":     lines.push(...emitSlider(v, comp as SliderComponent, parentExpr, lvglV9)); break;
         case "switch":     lines.push(...emitSwitch(v, comp as SwitchComponent, parentExpr, lvglV9)); break;
@@ -49,7 +56,7 @@ export function emitComponent(
         case "spinner":    lines.push(...emitSpinner(v, comp as SpinnerComponent, parentExpr, lvglV9)); break;
         case "arc":        lines.push(...emitArc(v, comp as ArcComponent, parentExpr, lvglV9)); break;
         case "knob":       lines.push(...emitKnob(v, comp as KnobComponent, parentExpr, lvglV9)); break;
-        case "checkbox":   lines.push(...emitCheckbox(v, comp as CheckboxComponent, parentExpr, lvglV9)); break;
+        case "checkbox":   lines.push(...emitCheckbox(v, comp as CheckboxComponent, parentExpr, lvglV9, ctx)); break;
         case "dropdown":   lines.push(...emitDropdown(v, comp as DropdownComponent, parentExpr, lvglV9)); break;
         case "roller":     lines.push(...emitRoller(v, comp as RollerComponent, parentExpr, lvglV9)); break;
         case "textarea":   lines.push(...emitTextarea(v, comp as TextareaComponent, parentExpr, lvglV9)); break;
@@ -65,10 +72,11 @@ export function emitComponent(
 
     // Position, size, styles apply to all widget types
     lines.push(...posSize(v, comp));
+    lines.push(...emitChildLayoutLines(v, comp));
     lines.push(...emitScrollConfig(v, comp));
     lines.push(...emitStyleRefCalls(v, comp.styleRefs, ctx?.styles));
     if (comp.styles && Object.keys(comp.styles).length > 0) {
-        lines.push(...emitStyleCalls(v, comp.styles, "    ", "LV_PART_MAIN | LV_STATE_DEFAULT", { fonts: ctx?.fonts }));
+        lines.push(...emitStyleCalls(v, comp.styles, "    ", "LV_PART_MAIN | LV_STATE_DEFAULT", ctx));
     }
     lines.push(...emitAnimationCalls(v, comp.animations));
     lines.push("");  // blank line between widgets
@@ -125,9 +133,15 @@ function posSize(v: string, comp: Component): string[] {
 
 // ── Label ──────────────────────────────────────────────────────────────────────
 
-function emitLabel(v: string, c: LabelComponent, parent: string, v9: boolean): string[] {
+function emitLabel(
+    v: string,
+    c: LabelComponent,
+    parent: string,
+    v9: boolean,
+    ctx?: WidgetEmitContext
+): string[] {
     const lines = [
-        `    lv_obj_t *${v} = lv_label_create(${parent});`
+        `    ${v} = lv_label_create(${parent});`
     ];
 
     const longModeMap: Record<string, string> = {
@@ -141,28 +155,40 @@ function emitLabel(v: string, c: LabelComponent, parent: string, v9: boolean): s
     }
 
     /* Literal {{field}} templates are resolved in ui_bindings_apply() — do not bake them into ROM. */
-    if (/\{\{/.test(c.text)) {
+    if (typeof c.text === "string" && /\{\{/.test(c.text)) {
         lines.push(`    lv_label_set_text(${v}, "");`);
     } else {
-        lines.push(`    lv_label_set_text(${v}, "${escapeC(c.text)}");`);
+        lines.push(`    lv_label_set_text(${v}, ${emitWidgetTextExpr(c.text, !!ctx?.stringsApi)});`);
     }
     return lines;
 }
 
 // ── Button ─────────────────────────────────────────────────────────────────────
 
-function emitButton(v: string, c: ButtonComponent, parent: string, pageId: string, v9: boolean): string[] {
+function emitButton(
+    v: string,
+    c: ButtonComponent,
+    parent: string,
+    pageId: string,
+    v9: boolean,
+    ctx?: WidgetEmitContext
+): string[] {
     const createFn = v9 ? "lv_button_create" : "lv_btn_create";
     const lines = [
-        `    lv_obj_t *${v} = ${createFn}(${parent});`
+        `    ${v} = ${createFn}(${parent});`
     ];
     if (c.label) {
         const lblVar = `${v}_lbl`;
         lines.push(
             `    lv_obj_t *${lblVar} = lv_label_create(${v});`,
-            `    lv_label_set_text(${lblVar}, "${escapeC(c.label)}");`,
+            `    lv_label_set_text(${lblVar}, ${emitWidgetTextExpr(c.label, !!ctx?.stringsApi)});`,
             `    lv_obj_center(${lblVar});`
         );
+        if (ctx?.useRtlFontFallback) {
+            lines.push(
+                `    lv_obj_set_style_text_font(${lblVar}, ${uiFontLocalizedCall(14)}, LV_PART_MAIN);`
+            );
+        }
     }
     return lines;
 }
@@ -174,7 +200,7 @@ function emitImage(v: string, c: ImageComponent, parent: string, v9: boolean): s
     const setFn    = v9 ? "lv_image_set_src"  : "lv_img_set_src";
     const imgSym   = `ui_img_${toIdentifier(c.src)}`;
     return [
-        `    lv_obj_t *${v} = ${createFn}(${parent});`,
+        `    ${v} = ${createFn}(${parent});`,
         `    ${setFn}(${v}, &${imgSym});`
     ];
 }
@@ -183,7 +209,7 @@ function emitImage(v: string, c: ImageComponent, parent: string, v9: boolean): s
 
 function emitSlider(v: string, c: SliderComponent, parent: string, _v9: boolean): string[] {
     return [
-        `    lv_obj_t *${v} = lv_slider_create(${parent});`,
+        `    ${v} = lv_slider_create(${parent});`,
         `    lv_slider_set_range(${v}, ${c.min}, ${c.max});`,
         `    lv_slider_set_value(${v}, ${c.value}, LV_ANIM_OFF);`
     ];
@@ -193,7 +219,7 @@ function emitSlider(v: string, c: SliderComponent, parent: string, _v9: boolean)
 
 function emitSwitch(v: string, c: SwitchComponent, parent: string, _v9: boolean): string[] {
     const lines = [
-        `    lv_obj_t *${v} = lv_switch_create(${parent});`
+        `    ${v} = lv_switch_create(${parent});`
     ];
     if (c.checked) {
         lines.push(`    lv_obj_add_state(${v}, LV_STATE_CHECKED);`);
@@ -205,7 +231,7 @@ function emitSwitch(v: string, c: SwitchComponent, parent: string, _v9: boolean)
 
 function emitBar(v: string, c: BarComponent, parent: string, _v9: boolean): string[] {
     const lines = [
-        `    lv_obj_t *${v} = lv_bar_create(${parent});`,
+        `    ${v} = lv_bar_create(${parent});`,
         `    lv_bar_set_range(${v}, ${c.min}, ${c.max});`,
         `    lv_bar_set_value(${v}, ${c.value}, LV_ANIM_OFF);`
     ];
@@ -225,7 +251,7 @@ function emitSpinner(v: string, c: SpinnerComponent, parent: string, _v9: boolea
     const speed = c.speed ?? 1000;
     const arcLen = c.arcLength ?? 60;
     return [
-        `    lv_obj_t *${v} = lv_spinner_create(${parent});`,
+        `    ${v} = lv_spinner_create(${parent});`,
         `    lv_spinner_set_anim_params(${v}, ${speed}, ${arcLen});`
     ];
 }
@@ -234,7 +260,7 @@ function emitSpinner(v: string, c: SpinnerComponent, parent: string, _v9: boolea
 
 function emitArc(v: string, c: ArcComponent, parent: string, _v9: boolean): string[] {
     const lines = [
-        `    lv_obj_t *${v} = lv_arc_create(${parent});`,
+        `    ${v} = lv_arc_create(${parent});`,
         `    lv_arc_set_range(${v}, ${c.min}, ${c.max});`,
         `    lv_arc_set_value(${v}, ${c.value});`
     ];
@@ -263,7 +289,7 @@ function emitKnob(v: string, c: KnobComponent, parent: string, _v9: boolean): st
     const start = c.startAngle ?? 135;
     const end   = c.endAngle   ?? 45;
     const lines = [
-        `    lv_obj_t *${v} = lv_arc_create(${parent});`,
+        `    ${v} = lv_arc_create(${parent});`,
         `    lv_arc_set_range(${v}, ${c.min}, ${c.max});`,
         `    lv_arc_set_value(${v}, ${c.value});`,
         `    lv_arc_set_bg_angles(${v}, ${start}, ${end});`,
@@ -286,12 +312,18 @@ function hexToColor(hex: string): string {
 
 // ── Checkbox ───────────────────────────────────────────────────────────────────
 
-function emitCheckbox(v: string, c: CheckboxComponent, parent: string, _v9: boolean): string[] {
+function emitCheckbox(
+    v: string,
+    c: CheckboxComponent,
+    parent: string,
+    _v9: boolean,
+    ctx?: WidgetEmitContext
+): string[] {
     const lines = [
-        `    lv_obj_t *${v} = lv_checkbox_create(${parent});`
+        `    ${v} = lv_checkbox_create(${parent});`
     ];
     if (c.text) {
-        lines.push(`    lv_checkbox_set_text(${v}, "${escapeC(c.text)}");`);
+        lines.push(`    lv_checkbox_set_text(${v}, ${emitWidgetTextExpr(c.text, !!ctx?.stringsApi)});`);
     }
     if (c.checked) {
         lines.push(`    lv_obj_add_state(${v}, LV_STATE_CHECKED);`);
@@ -304,7 +336,7 @@ function emitCheckbox(v: string, c: CheckboxComponent, parent: string, _v9: bool
 function emitDropdown(v: string, c: DropdownComponent, parent: string, _v9: boolean): string[] {
     const optStr = c.options.join("\n");
     return [
-        `    lv_obj_t *${v} = lv_dropdown_create(${parent});`,
+        `    ${v} = lv_dropdown_create(${parent});`,
         `    lv_dropdown_set_options(${v}, "${escapeC(optStr)}");`,
         `    lv_dropdown_set_selected(${v}, ${c.selectedIndex});`
     ];
@@ -318,7 +350,7 @@ function emitRoller(v: string, c: RollerComponent, parent: string, _v9: boolean)
         ? "LV_ROLLER_MODE_INFINITE"
         : "LV_ROLLER_MODE_NORMAL";
     return [
-        `    lv_obj_t *${v} = lv_roller_create(${parent});`,
+        `    ${v} = lv_roller_create(${parent});`,
         `    lv_roller_set_options(${v}, "${escapeC(optStr)}", ${modeConst});`,
         `    lv_roller_set_selected(${v}, ${c.selectedIndex}, LV_ANIM_OFF);`
     ];
@@ -328,7 +360,7 @@ function emitRoller(v: string, c: RollerComponent, parent: string, _v9: boolean)
 
 function emitTextarea(v: string, c: TextareaComponent, parent: string, _v9: boolean): string[] {
     const lines = [
-        `    lv_obj_t *${v} = lv_textarea_create(${parent});`
+        `    ${v} = lv_textarea_create(${parent});`
     ];
     if (c.text) {
         lines.push(`    lv_textarea_set_text(${v}, "${escapeC(c.text)}");`);
@@ -349,7 +381,7 @@ function emitLine(v: string, c: LineComponent, parent: string, pageId: string, _
     const ptsLiteral = c.points.map(p => `{${p.x}, ${p.y}}`).join(", ");
     const lines = [
         `    static lv_point_precise_t ${pointsVar}[] = {${ptsLiteral}};`,
-        `    lv_obj_t *${v} = lv_line_create(${parent});`,
+        `    ${v} = lv_line_create(${parent});`,
         `    lv_line_set_points(${v}, ${pointsVar}, ${c.points.length});`
     ];
     if (c.rounded) {
@@ -362,7 +394,7 @@ function emitLine(v: string, c: LineComponent, parent: string, pageId: string, _
 
 function emitContainer(v: string, c: ContainerComponent, parent: string, pageId: string, v9: boolean, ctx?: WidgetEmitContext): string[] {
     const lines = [
-        `    lv_obj_t *${v} = lv_obj_create(${parent});`
+        `    ${v} = lv_obj_create(${parent});`
     ];
 
     if (!c.styles?.bgColor && (c.styles?.bgOpacity === undefined || c.styles.bgOpacity === 0)) {
@@ -374,20 +406,7 @@ function emitContainer(v: string, c: ContainerComponent, parent: string, pageId:
         );
     }
 
-    if (c.layout === "flex") {
-        const flowMap: Record<string, string> = {
-            row:         "LV_FLEX_FLOW_ROW",
-            column:      "LV_FLEX_FLOW_COLUMN",
-            row_wrap:    "LV_FLEX_FLOW_ROW_WRAP",
-            column_wrap: "LV_FLEX_FLOW_COLUMN_WRAP"
-        };
-        lines.push(
-            `    lv_obj_set_layout(${v}, LV_LAYOUT_FLEX);`,
-            `    lv_obj_set_flex_flow(${v}, ${flowMap[c.flexFlow ?? "row"] ?? "LV_FLEX_FLOW_ROW"});`
-        );
-    } else if (c.layout === "grid") {
-        lines.push(`    lv_obj_set_layout(${v}, LV_LAYOUT_GRID);`);
-    }
+    lines.push(...emitContainerLayoutLines(v, pageId, c));
 
     for (const child of c.children ?? []) {
         lines.push(...emitComponent(pageId, child, v, v9, ctx));
@@ -399,7 +418,7 @@ function emitContainer(v: string, c: ContainerComponent, parent: string, pageId:
 
 function emitPanel(v: string, c: PanelComponent, parent: string, pageId: string, v9: boolean, ctx?: WidgetEmitContext): string[] {
     const lines = [
-        `    lv_obj_t *${v} = lv_obj_create(${parent});`
+        `    ${v} = lv_obj_create(${parent});`
     ];
     if (!c.styles?.bgColor && (c.styles?.bgOpacity === undefined || c.styles.bgOpacity === 0)) {
         lines.push(

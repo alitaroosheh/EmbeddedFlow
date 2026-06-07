@@ -115,7 +115,7 @@
 #define LV_FONT_MONTSERRAT_46   0
 #define LV_FONT_MONTSERRAT_48   1
 
-#define LV_FONT_DEJAVU_16_PERSIAN_HEBREW  0
+#define LV_FONT_DEJAVU_16_PERSIAN_HEBREW  1
 #define LV_FONT_SIMSUN_14_CJK            0
 #define LV_FONT_SIMSUN_16_CJK            0
 #define LV_FONT_UNSCII_8    0
@@ -135,8 +135,8 @@
 #define LV_TXT_LINE_BREAK_LONG_PRE_MIN_LEN  3
 #define LV_TXT_LINE_BREAK_LONG_POST_MIN_LEN 3
 #define LV_TXT_COLOR_CMD "#"
-#define LV_USE_BIDI         0
-#define LV_USE_ARABIC_PERSIAN_CHARS 0
+#define LV_USE_BIDI         1
+#define LV_USE_ARABIC_PERSIAN_CHARS 1
 
 /* ── Widgets ──────────────────────────────────────────────────────────── */
 #define LV_USE_ANIMIMG      1

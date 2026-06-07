@@ -36,7 +36,9 @@
     "onCommand:embeddedflow.openPreview",
     "onCommand:embeddedflow.generateCode",
     "onCommand:embeddedflow.showOutput",
-    "onCommand:embeddedflow.addFont"
+    "onCommand:embeddedflow.addFont",
+    "onCommand:embeddedflow.openStringResources",
+    "onCustomEditor:embeddedflow.stringsRes"
   ],
   "main": "./out/extension.js",
   "icon": "media/embeddedflow-icon.png",
@@ -88,6 +90,23 @@
         "command": "embeddedflow.addFont",
         "title": "embeddedflow: Add Font to Project",
         "icon": "$(symbol-text)"
+      },
+      {
+        "command": "embeddedflow.openStringResources",
+        "title": "embeddedflow: Open String Resources",
+        "icon": "$(globe)"
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "embeddedflow.stringsRes",
+        "displayName": "String Resources",
+        "selector": [
+          {
+            "filenamePattern": "*.res"
+          }
+        ],
+        "priority": "default"
       }
     ],
     "menus": {
@@ -106,6 +125,9 @@
         },
         {
           "command": "embeddedflow.addFont"
+        },
+        {
+          "command": "embeddedflow.openStringResources"
         }
       ],
       "editor/title": [

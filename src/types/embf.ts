@@ -6,6 +6,14 @@ export type TextDirection = "ltr" | "rtl";
 /** How generated C code includes LVGL (platform include paths differ). */
 export type LvglIncludePath = "lvgl.h" | "lvgl/lvgl.h";
 
+/** Widget copy that references a row in the linked `.res` file. */
+export interface StringResourceRef {
+    ref: string;
+}
+
+/** Literal string or `{ "ref": "key" }` string resource reference. */
+export type WidgetTextValue = string | StringResourceRef;
+
 /** Reusable grouped widget saved in the project (insert copies onto a page). */
 export interface ComponentLibraryEntry {
     id: string;
@@ -98,6 +106,13 @@ export interface ProjectMeta {
      * @default "lvgl/lvgl.h"
      */
     lvglInclude?: LvglIncludePath;
+    /**
+     * Path to application string resources (`.res` only).
+     * Relative to the `.embf` file; default `strings.res` when omitted.
+     */
+    stringsPath?: string;
+    /** Firmware project root for clangd symbol discovery (Phase 2+). */
+    firmwarePath?: string;
 }
 
 export interface DisplayConfig {
@@ -274,12 +289,14 @@ export type Action =
     | NavPopAction
     | NavReplaceAction
     | NavResetAction
-    | { type: "set_text";    target: string; text: string }          // update label text
+    | { type: "set_text"; target: string; text: WidgetTextValue } // update label text
     | { type: "set_value";   target: string; value: number }         // slider/bar/arc
     | { type: "set_checked"; target: string; checked: boolean }      // switch/checkbox
     | { type: "set_hidden";  target: string; hidden: boolean }       // show/hide widget
     /** Re-apply LVGL default theme. Preview: optional `dark` toggles runtime override; omit `dark` on `value_changed` to mirror switch/checkbox checked state. Firmware: re-init theme on display. */
-    | { type: "set_theme"; dark?: boolean };
+    | { type: "set_theme"; dark?: boolean }
+    /** Switch active string locale at runtime; preview refreshes localized widgets on the current page. */
+    | { type: "set_locale"; locale: string };
 
 export interface EventDef {
     trigger: EventTrigger;
@@ -313,6 +330,16 @@ export interface BaseComponent {
     scrollX?: boolean;
     /** Enable/disable vertical scrolling on this widget (LVGL scroll dir). */
     scrollY?: boolean;
+    /** Flex child: grow factor when parent `layout` is flex (0 = fixed). */
+    flexGrow?: number;
+    /** Grid child: column index (0-based). */
+    gridCol?: number;
+    /** Grid child: row index (0-based). */
+    gridRow?: number;
+    gridColSpan?: number;
+    gridRowSpan?: number;
+    gridCellXAlign?: "start" | "end" | "center" | "stretch";
+    gridCellYAlign?: "start" | "end" | "center" | "stretch";
 }
 
 /** Property of a widget that can be animated. Maps to a `lv_obj_set_*` setter in codegen. */
@@ -361,13 +388,13 @@ export interface StyleProps {
 
 export interface LabelComponent extends BaseComponent {
     type: "label";
-    text: string;
+    text: WidgetTextValue;
     longMode?: "wrap" | "dot" | "scroll" | "clip";
 }
 
 export interface ButtonComponent extends BaseComponent {
     type: "button";
-    label?: string;
+    label?: WidgetTextValue;
 }
 
 export interface ImageComponent extends BaseComponent {
@@ -432,7 +459,7 @@ export interface KnobComponent extends BaseComponent {
 
 export interface CheckboxComponent extends BaseComponent {
     type: "checkbox";
-    text?: string;
+    text?: WidgetTextValue;
     checked: boolean;
 }
 
@@ -462,10 +489,30 @@ export interface LineComponent extends BaseComponent {
     rounded?: boolean;
 }
 
+export type FlexAlign =
+    | "start"
+    | "end"
+    | "center"
+    | "space_evenly"
+    | "space_around"
+    | "space_between";
+
+/** Grid track: pixel number, `"content"`, or `"Nfr"` fraction. */
+export type GridTrackSize = number | "content" | string;
+
 export interface ContainerComponent extends BaseComponent {
     type: "container";
     layout?: "none" | "flex" | "grid";
     flexFlow?: "row" | "column" | "row_wrap" | "column_wrap";
+    flexAlign?: FlexAlign;
+    flexCrossAlign?: FlexAlign;
+    flexTrackCrossAlign?: FlexAlign;
+    gridColumnDescriptors?: GridTrackSize[];
+    gridRowDescriptors?: GridTrackSize[];
+    gridColumnGap?: number;
+    gridRowGap?: number;
+    gridAlign?: FlexAlign;
+    gridVAlign?: FlexAlign;
     children: Component[];
 }
 

@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { normalizeScreenLoadAnim } from "./codeGen/screenLoadAnim";
 import { validateModelPropertyDeep } from "./embfModel";
+import { validateWidgetTextField } from "./i18n/widgetText";
 import type { EmbfProject, LvglVersion } from "./types/embf";
 
 const COLOR_FORMATS = new Set<string>(["RGB565", "RGB888", "ARGB8888", "L8", "AL88"]);
@@ -126,6 +127,21 @@ function validateEmbf(data: unknown): EmbfProject {
         const inc = projectObj["lvglInclude"];
         if (inc !== "lvgl.h" && inc !== "lvgl/lvgl.h") {
             throw new EmbfParseError('project.lvglInclude must be "lvgl.h" or "lvgl/lvgl.h" when set');
+        }
+    }
+    if (projectObj["stringsPath"] !== undefined) {
+        const sp = projectObj["stringsPath"];
+        if (typeof sp !== "string" || !sp.trim()) {
+            throw new EmbfParseError("project.stringsPath must be a non-empty string when set");
+        }
+        if (!/\.res$/i.test(sp.trim())) {
+            throw new EmbfParseError("project.stringsPath must use the .res extension");
+        }
+    }
+    if (projectObj["firmwarePath"] !== undefined) {
+        const fp = projectObj["firmwarePath"];
+        if (typeof fp !== "string" || !fp.trim()) {
+            throw new EmbfParseError("project.firmwarePath must be a non-empty string when set");
         }
     }
 
@@ -522,8 +538,12 @@ function validateEventActionShape(action: Record<string, unknown>, ap: string): 
             break;
         case "set_text":
             needTarget("set_text");
-            if (typeof action["text"] !== "string") {
-                throw new EmbfParseError(`${ap}: set_text requires string "text"`);
+            if (action["text"] === undefined) {
+                throw new EmbfParseError(`${ap}: set_text requires "text"`);
+            }
+            validateWidgetTextField(action["text"], `${ap}.text`);
+            if (typeof action["text"] === "string") {
+                validateBindingTemplates(action["text"], `${ap}.text`);
             }
             break;
         case "set_value":
@@ -549,6 +569,16 @@ function validateEventActionShape(action: Record<string, unknown>, ap: string): 
                 throw new EmbfParseError(`${ap}: set_theme "dark" must be a boolean when set`);
             }
             break;
+        case "set_locale": {
+            const loc = action["locale"];
+            if (typeof loc !== "string" || !loc.trim()) {
+                throw new EmbfParseError(`${ap}: set_locale requires non-empty string "locale"`);
+            }
+            if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(loc.trim())) {
+                throw new EmbfParseError(`${ap}: set_locale locale "${loc}" is not a valid locale id`);
+            }
+            break;
+        }
         default:
             throw new EmbfParseError(`${ap}: unknown action type "${ty}"`);
     }
@@ -585,14 +615,18 @@ function validateComponentDeep(comp: unknown, path: string): void {
     validateOptionalAnimations(o, path);
     validateOptionalBindings(o, path);
     validateOptionalScroll(o, path);
+    validateOptionalLayoutChild(o, path);
 
     const t = o["type"] as string;
     switch (t) {
         case "label": {
-            if (typeof o["text"] !== "string") {
-                throw new EmbfParseError(`${path}.text must be a string`);
+            if (o["text"] === undefined) {
+                throw new EmbfParseError(`${path}.text is required`);
             }
-            validateBindingTemplates(o["text"] as string, `${path}.text`);
+            validateWidgetTextField(o["text"], `${path}.text`);
+            if (typeof o["text"] === "string") {
+                validateBindingTemplates(o["text"], `${path}.text`);
+            }
             if (o["longMode"] !== undefined) {
                 const lm = o["longMode"];
                 if (lm !== "wrap" && lm !== "dot" && lm !== "scroll" && lm !== "clip") {
@@ -602,8 +636,11 @@ function validateComponentDeep(comp: unknown, path: string): void {
             break;
         }
         case "button":
-            if (o["label"] !== undefined && typeof o["label"] !== "string") {
-                throw new EmbfParseError(`${path}.label must be a string when set`);
+            if (o["label"] !== undefined) {
+                validateWidgetTextField(o["label"], `${path}.label`);
+                if (typeof o["label"] === "string") {
+                    validateBindingTemplates(o["label"], `${path}.label`);
+                }
             }
             break;
         case "image":
@@ -658,8 +695,11 @@ function validateComponentDeep(comp: unknown, path: string): void {
             if (typeof o["checked"] !== "boolean") {
                 throw new EmbfParseError(`${path}.checked must be a boolean`);
             }
-            if (t === "checkbox" && o["text"] !== undefined && typeof o["text"] !== "string") {
-                throw new EmbfParseError(`${path}.text must be a string when set`);
+            if (t === "checkbox" && o["text"] !== undefined) {
+                validateWidgetTextField(o["text"], `${path}.text`);
+                if (typeof o["text"] === "string") {
+                    validateBindingTemplates(o["text"], `${path}.text`);
+                }
             }
             break;
         case "dropdown":
@@ -747,11 +787,87 @@ function validateComponentDeep(comp: unknown, path: string): void {
                         );
                     }
                 }
+                validateContainerLayoutFields(o, path);
             }
             break;
         }
         default:
             break;
+    }
+}
+
+const FLEX_ALIGN_VALUES = new Set<string>([
+    "start",
+    "end",
+    "center",
+    "space_evenly",
+    "space_around",
+    "space_between"
+]);
+
+const GRID_CELL_ALIGN_VALUES = new Set<string>(["start", "end", "center", "stretch"]);
+
+function validateOptionalLayoutChild(o: Record<string, unknown>, path: string): void {
+    if (o["flexGrow"] !== undefined) {
+        if (!isFiniteNumber(o["flexGrow"]) || o["flexGrow"] < 0) {
+            throw new EmbfParseError(`${path}.flexGrow must be a non-negative number`);
+        }
+    }
+    for (const k of ["gridCol", "gridRow", "gridColSpan", "gridRowSpan"] as const) {
+        if (o[k] !== undefined) {
+            if (!isFiniteNumber(o[k]) || (o[k] as number) < 0) {
+                throw new EmbfParseError(`${path}.${k} must be a non-negative integer`);
+            }
+        }
+    }
+    for (const k of ["gridCellXAlign", "gridCellYAlign"] as const) {
+        if (o[k] !== undefined) {
+            const v = o[k];
+            if (typeof v !== "string" || !GRID_CELL_ALIGN_VALUES.has(v)) {
+                throw new EmbfParseError(`${path}.${k} must be start, end, center, or stretch`);
+            }
+        }
+    }
+}
+
+function validateGridTrackList(raw: unknown, path: string): void {
+    if (!Array.isArray(raw)) {
+        throw new EmbfParseError(`${path} must be an array`);
+    }
+    for (let i = 0; i < raw.length; i++) {
+        const t = raw[i];
+        if (t === "content") {
+            continue;
+        }
+        if (typeof t === "number" && isFiniteNumber(t)) {
+            continue;
+        }
+        if (typeof t === "string" && /^(\d+(?:\.\d+)?)fr$/i.test(t.trim())) {
+            continue;
+        }
+        throw new EmbfParseError(`${path}[${i}] must be a pixel number, "content", or "Nfr"`);
+    }
+}
+
+function validateContainerLayoutFields(o: Record<string, unknown>, path: string): void {
+    for (const k of ["flexAlign", "flexCrossAlign", "flexTrackCrossAlign", "gridAlign", "gridVAlign"] as const) {
+        if (o[k] !== undefined) {
+            const v = o[k];
+            if (typeof v !== "string" || !FLEX_ALIGN_VALUES.has(v)) {
+                throw new EmbfParseError(`${path}.${k} must be a flex/grid align value`);
+            }
+        }
+    }
+    if (o["gridColumnDescriptors"] !== undefined) {
+        validateGridTrackList(o["gridColumnDescriptors"], `${path}.gridColumnDescriptors`);
+    }
+    if (o["gridRowDescriptors"] !== undefined) {
+        validateGridTrackList(o["gridRowDescriptors"], `${path}.gridRowDescriptors`);
+    }
+    for (const k of ["gridColumnGap", "gridRowGap"] as const) {
+        if (o[k] !== undefined && (!isFiniteNumber(o[k]) || (o[k] as number) < 0)) {
+            throw new EmbfParseError(`${path}.${k} must be a non-negative number`);
+        }
     }
 }
 

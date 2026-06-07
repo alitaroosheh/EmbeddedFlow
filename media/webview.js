@@ -82,6 +82,9 @@ const previewZoomSelect = /** @type {HTMLSelectElement | null} */ (
 const toolbarWidgetSelect = /** @type {HTMLSelectElement | null} */ (
     document.getElementById("toolbar-widget-select")
 );
+const previewLocaleSelect = /** @type {HTMLSelectElement | null} */ (
+    document.getElementById("preview-locale")
+);
 const designGridCheck = /** @type {HTMLInputElement | null} */ (document.getElementById("design-grid"));
 const designRulersCheck = /** @type {HTMLInputElement | null} */ (document.getElementById("design-rulers"));
 const rulerTop = /** @type {HTMLCanvasElement | null} */ (document.getElementById("ruler-top"));
@@ -199,6 +202,20 @@ let previewLayoutObserver = null;
 let previewLayoutResizeRaf = 0;
 /** @type {import("../src/types/embf").EmbfProject | null} */
 let currentProject = null;
+/** @type {{ defaultLocale: string, locales: Record<string, Record<string, string>>, keys?: string[], localeMeta?: Record<string, { direction?: string }> } | null} */
+let currentStringsRes = null;
+/** @type {string[]} */
+let stringResourceKeys = [];
+/** @type {string} */
+let stringsResLoadError = "";
+/** Preview locale override (empty = use strings.res defaultLocale). */
+let previewLocale = "";
+/** Avoid stacking locale refresh work on the main thread (prevents UI freeze). */
+let previewLocaleRefreshScheduled = false;
+/** Navigation stack for nav_push / nav_pop preview (N5). */
+const previewNavStack = [];
+/** Keep grid descriptor WASM buffers alive per container id. */
+const gridDscStore = new Map();
 
 /**
  * Closable workspace tabs (page previews + optional navigation flow).
@@ -243,6 +260,7 @@ function screenLoadAnimToLv(anim) {
 function clearPageScreenCache() {
     /* Drop JS handles only — never lv_obj_delete() the active screen (crashes LVGL/WASM). */
     pageScreenCache.clear();
+    gridDscStore.clear();
 }
 
 function invalidatePageScreen(pageId) {
@@ -524,6 +542,20 @@ async function handleLoad(payload, generation = loadGeneration) {
         return;
     }
     currentProject = payload.project;
+    if (payload.stringsRes && typeof payload.stringsRes === "object") {
+        currentStringsRes = payload.stringsRes;
+        stringResourceKeys = Array.isArray(payload.stringsRes.keys) ? payload.stringsRes.keys.slice() : [];
+    } else {
+        currentStringsRes = null;
+        stringResourceKeys = [];
+    }
+    previewNavStack.length = 0;
+    stringsResLoadError = typeof payload.stringsResError === "string" ? payload.stringsResError : "";
+    populatePreviewLocaleSelect(
+        payload.stringsResLocaleIds ??
+            (currentStringsRes ? Object.keys(currentStringsRes.locales).sort() : []),
+        currentStringsRes?.defaultLocale ?? ""
+    );
     codegenOutputResolved =
         typeof payload.codegenOutputResolved === "string" ? payload.codegenOutputResolved : "";
     displayRound = !!(currentProject?.display && currentProject.display.round === true);
@@ -1392,6 +1424,8 @@ function ensurePageScreenBuilt(project, pageIndex) {
 
     const screenObj = wasm._embf_create_screen();
 
+    applyPreviewBaseDir(wasm, screenObj);
+
     if (page.backgroundColor) {
         wasm._embf_obj_set_style_bg_color(screenObj, parseColor(page.backgroundColor));
     }
@@ -1627,6 +1661,194 @@ function setDataModelField(fieldId, value) {
     return false;
 }
 
+function isWidgetTextRef(value) {
+    return (
+        value !== null &&
+        typeof value === "object" &&
+        !Array.isArray(value) &&
+        typeof value.ref === "string"
+    );
+}
+
+function widgetTextMode(value) {
+    return isWidgetTextRef(value) ? "resource" : "literal";
+}
+
+function widgetTextLiteral(value) {
+    return typeof value === "string" ? value : "";
+}
+
+function widgetTextRefKey(value) {
+    return isWidgetTextRef(value) ? value.ref : "";
+}
+
+/** Resolve label/button/checkbox copy for preview (defaultLocale → any locale → key id). */
+function resolveWidgetTextDisplay(value) {
+    if (value === undefined || value === null) {
+        return "";
+    }
+    if (typeof value === "string") {
+        return applyBindingTemplates(value);
+    }
+    if (isWidgetTextRef(value)) {
+        const key = value.ref;
+        if (!currentStringsRes) {
+            return key;
+        }
+        const tryLoc = loc => {
+            const table = currentStringsRes.locales[loc];
+            return table && Object.prototype.hasOwnProperty.call(table, key) ? table[key] : undefined;
+        };
+        const activeLoc = previewLocale || currentStringsRes.defaultLocale;
+        if (activeLoc) {
+            const fromActive = tryLoc(activeLoc);
+            if (fromActive !== undefined) {
+                return applyBindingTemplates(fromActive);
+            }
+        }
+        const fromDefault = tryLoc(currentStringsRes.defaultLocale);
+        if (fromDefault !== undefined) {
+            return applyBindingTemplates(fromDefault);
+        }
+        for (const loc of Object.keys(currentStringsRes.locales)) {
+            const v = tryLoc(loc);
+            if (v !== undefined) {
+                return applyBindingTemplates(v);
+            }
+        }
+        return key;
+    }
+    return String(value);
+}
+
+/** Re-apply localized copy after preview locale change (updates cached screens in place). */
+function refreshPreviewLocaleText() {
+    if (!currentProject || !WasmModule || !wasmReady) {
+        return;
+    }
+    if (previewLocaleRefreshScheduled) {
+        return;
+    }
+    previewLocaleRefreshScheduled = true;
+    requestAnimationFrame(() => {
+        previewLocaleRefreshScheduled = false;
+        refreshPreviewLocaleTextNow();
+    });
+}
+
+/** Apply string-resource text + base_dir on one cached screen without rebuilding LVGL objects. */
+function refreshPageLocalizedStrings(wasm, page, idMap) {
+    if (!page || !idMap) {
+        return;
+    }
+
+    function walk(comps) {
+        for (const c of comps ?? []) {
+            const ptr = idMap.get(c.id);
+            if (ptr) {
+                if (c.type === "label") {
+                    if (typeof c.text === "string" && c.text.indexOf("{{") !== -1) {
+                        const strPtr = wasm.stringToNewUTF8(applyBindingTemplates(c.text));
+                        wasm._embf_label_set_text(ptr, strPtr);
+                        wasm._free(strPtr);
+                    } else if (isWidgetTextRef(c.text)) {
+                        const strPtr = wasm.stringToNewUTF8(resolveWidgetTextDisplay(c.text));
+                        wasm._embf_label_set_text(ptr, strPtr);
+                        wasm._free(strPtr);
+                    }
+                } else if (c.type === "button") {
+                    if (typeof c.label === "string" && c.label.indexOf("{{") !== -1) {
+                        const strPtr = wasm.stringToNewUTF8(applyBindingTemplates(c.label));
+                        wasm._embf_button_set_label?.(ptr, strPtr);
+                        wasm._free(strPtr);
+                    } else if (isWidgetTextRef(c.label)) {
+                        const strPtr = wasm.stringToNewUTF8(resolveWidgetTextDisplay(c.label));
+                        wasm._embf_button_set_label?.(ptr, strPtr);
+                        wasm._free(strPtr);
+                    }
+                } else if (c.type === "checkbox") {
+                    if (typeof c.text === "string" && c.text.indexOf("{{") !== -1) {
+                        const strPtr = wasm.stringToNewUTF8(applyBindingTemplates(c.text));
+                        wasm._embf_checkbox_set_text?.(ptr, strPtr);
+                        wasm._free(strPtr);
+                    } else if (isWidgetTextRef(c.text)) {
+                        const strPtr = wasm.stringToNewUTF8(resolveWidgetTextDisplay(c.text));
+                        wasm._embf_checkbox_set_text?.(ptr, strPtr);
+                        wasm._free(strPtr);
+                    }
+                }
+            }
+            if (c.children?.length) {
+                walk(c.children);
+            }
+        }
+    }
+    walk(page.components);
+}
+
+function refreshPreviewLocaleTextNow() {
+    const wasm = WasmModule;
+    const project = currentProject;
+    if (!wasm || !project || !wasmReady) {
+        return;
+    }
+
+    for (const [pageId, entry] of pageScreenCache) {
+        const page = project.pages.find(p => p.id === pageId);
+        if (!page) {
+            continue;
+        }
+        applyPreviewBaseDir(wasm, entry.screenPtr);
+        refreshPageLocalizedStrings(wasm, page, entry.idToObjPtr);
+    }
+
+    const page = project.pages[currentPageIndex];
+    if (!page) {
+        return;
+    }
+
+    let entry = pageScreenCache.get(page.id);
+    if (!entry) {
+        applyPageSwitch(project, currentPageIndex);
+        entry = pageScreenCache.get(page.id);
+    }
+    if (!entry) {
+        return;
+    }
+
+    objPtrToId = entry.objPtrToId;
+    idToObjPtr = entry.idToObjPtr;
+    applyPreviewBaseDir(wasm, entry.screenPtr);
+    refreshPageLocalizedStrings(wasm, page, entry.idToObjPtr);
+    wasm._embf_load_screen(entry.screenPtr);
+    refreshPreviewBindings(page);
+    pumpPreviewRedraw(2);
+    drawDesignOverlay();
+}
+
+function populatePreviewLocaleSelect(localeIds, defaultLocale) {
+    if (!previewLocaleSelect) {
+        return;
+    }
+    const ids = Array.isArray(localeIds) ? localeIds.filter(Boolean) : [];
+    if (!ids.length) {
+        previewLocaleSelect.innerHTML = "";
+        previewLocaleSelect.disabled = true;
+        previewLocale = "";
+        return;
+    }
+    previewLocaleSelect.disabled = false;
+    if (!previewLocale || !ids.includes(previewLocale)) {
+        previewLocale = defaultLocale && ids.includes(defaultLocale) ? defaultLocale : ids[0];
+    }
+    previewLocaleSelect.innerHTML = ids
+        .map(
+            loc =>
+                `<option value="${esc(loc)}"${loc === previewLocale ? " selected" : ""}>${esc(loc)}</option>`
+        )
+        .join("");
+}
+
 /** Mirror firmware `ui_bindings_apply()` for the live preview after button actions. */
 function refreshPreviewBindings(page) {
     if (!page || !WasmModule || !getPreviewProperties().length) {
@@ -1642,8 +1864,16 @@ function refreshPreviewBindings(page) {
                     const strPtr = wasm.stringToNewUTF8(applyBindingTemplates(c.text));
                     wasm._embf_label_set_text(ptr, strPtr);
                     wasm._free(strPtr);
+                } else if (c.type === "label" && isWidgetTextRef(c.text)) {
+                    const strPtr = wasm.stringToNewUTF8(resolveWidgetTextDisplay(c.text));
+                    wasm._embf_label_set_text(ptr, strPtr);
+                    wasm._free(strPtr);
                 } else if (c.type === "button" && typeof c.label === "string" && c.label.indexOf("{{") !== -1) {
                     const strPtr = wasm.stringToNewUTF8(applyBindingTemplates(c.label));
+                    wasm._embf_button_set_label?.(ptr, strPtr);
+                    wasm._free(strPtr);
+                } else if (c.type === "button" && isWidgetTextRef(c.label)) {
+                    const strPtr = wasm.stringToNewUTF8(resolveWidgetTextDisplay(c.label));
                     wasm._embf_button_set_label?.(ptr, strPtr);
                     wasm._free(strPtr);
                 } else if (c.type === "slider") {
@@ -1665,6 +1895,162 @@ function refreshPreviewBindings(page) {
     walk(page.components);
 }
 
+const RTL_LOCALE_IDS = new Set(["ar", "fa", "he", "ur", "ps", "ku", "dv"]);
+
+function isRtlLocaleIdPreview(localeId) {
+    const base = String(localeId ?? "").split(/[-_]/)[0]?.toLowerCase() ?? "";
+    return RTL_LOCALE_IDS.has(base);
+}
+
+/** RTL2: active locale → localeMeta → inferred RTL id → display.direction → ltr */
+function resolvePreviewTextDirection() {
+    const loc = (previewLocale || currentStringsRes?.defaultLocale || "").trim();
+    if (loc && currentStringsRes?.localeMeta?.[loc]?.direction) {
+        return currentStringsRes.localeMeta[loc].direction === "rtl" ? "rtl" : "ltr";
+    }
+    if (loc && isRtlLocaleIdPreview(loc)) {
+        return "rtl";
+    }
+    const disp = currentProject?.display?.direction;
+    if (disp === "rtl" || disp === "ltr") {
+        return disp;
+    }
+    return "ltr";
+}
+
+const EMBF_FLEX_FLOW = { row: 0, column: 1, row_wrap: 4, column_wrap: 5 };
+const EMBF_FLEX_ALIGN = {
+    start: 0,
+    end: 1,
+    center: 2,
+    space_evenly: 3,
+    space_around: 4,
+    space_between: 5
+};
+const EMBF_GRID_CELL_ALIGN = { start: 0, center: 1, end: 2, stretch: 3 };
+
+function gridTrackToWasm(wasm, track) {
+    if (track === "content" && typeof wasm._embf_grid_content === "function") {
+        return wasm._embf_grid_content();
+    }
+    if (typeof track === "number" && Number.isFinite(track)) {
+        return Math.round(track);
+    }
+    const m = /^(\d+(?:\.\d+)?)fr$/i.exec(String(track ?? "").trim());
+    if (m && typeof wasm._embf_grid_fr === "function") {
+        return wasm._embf_grid_fr(Math.max(1, Math.round(Number(m[1]))));
+    }
+    const px = Number.parseInt(String(track), 10);
+    if (Number.isFinite(px)) {
+        return px;
+    }
+    return typeof wasm._embf_grid_fr === "function" ? wasm._embf_grid_fr(1) : 1;
+}
+
+function buildGridDscBuffer(wasm, tracks) {
+    const vals = (tracks ?? ["1fr"]).map(t => gridTrackToWasm(wasm, t));
+    if (typeof wasm._embf_grid_template_last === "function") {
+        vals.push(wasm._embf_grid_template_last());
+    }
+    const buf = wasm._malloc(vals.length * 4);
+    vals.forEach((v, i) => {
+        wasm.HEAP32[(buf >> 2) + i] = v;
+    });
+    return { buf };
+}
+
+function applyContainerLayoutEmbf(wasm, obj, comp) {
+    if (!obj || comp.type !== "container") {
+        return;
+    }
+    if (comp.layout === "flex" && typeof wasm._embf_container_set_flex === "function") {
+        const flow = EMBF_FLEX_FLOW[comp.flexFlow ?? "row"] ?? 0;
+        const main = EMBF_FLEX_ALIGN[comp.flexAlign ?? "start"] ?? 0;
+        const cross = EMBF_FLEX_ALIGN[comp.flexCrossAlign ?? "start"] ?? 0;
+        const track = EMBF_FLEX_ALIGN[comp.flexTrackCrossAlign ?? "start"] ?? 0;
+        wasm._embf_container_set_flex(obj, flow, main, cross, track);
+    } else if (comp.layout === "grid" && typeof wasm._embf_container_set_grid === "function") {
+        const col = buildGridDscBuffer(wasm, comp.gridColumnDescriptors ?? ["1fr"]);
+        const row = buildGridDscBuffer(wasm, comp.gridRowDescriptors ?? ["1fr"]);
+        gridDscStore.set(comp.id, [col.buf, row.buf]);
+        wasm._embf_container_set_grid(
+            obj,
+            col.buf,
+            row.buf,
+            Math.round(comp.gridColumnGap ?? 0),
+            Math.round(comp.gridRowGap ?? 0),
+            EMBF_FLEX_ALIGN[comp.gridAlign ?? "start"] ?? 0,
+            EMBF_FLEX_ALIGN[comp.gridVAlign ?? "start"] ?? 0
+        );
+    }
+}
+
+function applyChildLayoutEmbf(wasm, obj, comp) {
+    if (!obj) {
+        return;
+    }
+    if (comp.flexGrow !== undefined && comp.flexGrow > 0 && typeof wasm._embf_obj_set_flex_grow === "function") {
+        wasm._embf_obj_set_flex_grow(obj, Math.round(comp.flexGrow));
+    }
+    if (
+        typeof wasm._embf_obj_set_grid_cell === "function" &&
+        (comp.gridCol !== undefined ||
+            comp.gridRow !== undefined ||
+            comp.gridColSpan !== undefined ||
+            comp.gridRowSpan !== undefined)
+    ) {
+        wasm._embf_obj_set_grid_cell(
+            obj,
+            EMBF_GRID_CELL_ALIGN[comp.gridCellXAlign ?? "stretch"] ?? 3,
+            comp.gridCol ?? 0,
+            comp.gridColSpan ?? 1,
+            EMBF_GRID_CELL_ALIGN[comp.gridCellYAlign ?? "stretch"] ?? 3,
+            comp.gridRow ?? 0,
+            comp.gridRowSpan ?? 1
+        );
+    }
+}
+
+function applyPreviewBaseDir(wasm, screenObj) {
+    if (!screenObj || typeof wasm._embf_obj_set_base_dir !== "function") {
+        return;
+    }
+    wasm._embf_obj_set_base_dir(screenObj, resolvePreviewTextDirection() === "rtl" ? 1 : 0);
+}
+
+function previewNavigateToPage(targetIdx, navOpts, stackMode) {
+    const page = currentProject?.pages?.[currentPageIndex];
+    const target = currentProject?.pages?.[targetIdx];
+    if (!page || !target) {
+        return;
+    }
+    if (stackMode === "push" && previewNavStack.length < 16) {
+        previewNavStack.push(page.id);
+    } else if (stackMode === "reset") {
+        previewNavStack.length = 0;
+    }
+    currentPageIndex = targetIdx;
+    selectedComponentOrder = [];
+    inspectorShowingPage = false;
+    dragState = null;
+    pendingDrag = null;
+    marqueeState = null;
+    pageSelectProgrammatic = true;
+    try {
+        if (pageSelect) {
+            pageSelect.value = String(targetIdx);
+        }
+        switchToPage(currentProject, targetIdx, navOpts ?? { anim: "none" });
+        drawDesignOverlay();
+        renderInspector();
+        renderPageList();
+        renderToolbarWidgetSelect();
+        renderFlowPanel();
+    } finally {
+        pageSelectProgrammatic = false;
+    }
+}
+
 function buildComponentEmbf(wasm, comp, parent) {
     if (comp.hidden) return;
     let obj = 0;
@@ -1673,15 +2059,15 @@ function buildComponentEmbf(wasm, comp, parent) {
     switch (comp.type) {
         case "label": {
             obj = wasm._embf_create_label(parent, comp.x, comp.y, comp.width, comp.height);
-            const ptr = wasm.stringToNewUTF8(applyBindingTemplates(comp.text ?? ""));
+            const ptr = wasm.stringToNewUTF8(resolveWidgetTextDisplay(comp.text));
             wasm._embf_label_set_text(obj, ptr);
             wasm._free(ptr);
             break;
         }
         case "button": {
             obj = wasm._embf_create_button(parent, comp.x, comp.y, comp.width, comp.height);
-            if (comp.label) {
-                const ptr = wasm.stringToNewUTF8(applyBindingTemplates(comp.label));
+            if (comp.label !== undefined && comp.label !== null && comp.label !== "") {
+                const ptr = wasm.stringToNewUTF8(resolveWidgetTextDisplay(comp.label));
                 wasm._embf_button_set_label(obj, ptr);
                 wasm._free(ptr);
             }
@@ -1724,8 +2110,8 @@ function buildComponentEmbf(wasm, comp, parent) {
         }
         case "checkbox": {
             obj = wasm._embf_create_checkbox(parent, comp.x, comp.y, comp.width, comp.height);
-            if (comp.text) {
-                const ptr = wasm.stringToNewUTF8(applyBindingTemplates(comp.text));
+            if (comp.text !== undefined && comp.text !== null && comp.text !== "") {
+                const ptr = wasm.stringToNewUTF8(resolveWidgetTextDisplay(comp.text));
                 wasm._embf_checkbox_set_text(obj, ptr);
                 wasm._free(ptr);
             }
@@ -1792,6 +2178,9 @@ function buildComponentEmbf(wasm, comp, parent) {
         case "container":
         case "panel": {
             obj = wasm._embf_create_container(parent, comp.x, comp.y, comp.width, comp.height);
+            if (comp.type === "container") {
+                applyContainerLayoutEmbf(wasm, obj, comp);
+            }
             for (const child of comp.children ?? []) {
                 buildComponentEmbf(wasm, child, obj);
             }
@@ -1818,6 +2207,7 @@ function buildComponentEmbf(wasm, comp, parent) {
     }
 
     applyStylesEmbf(wasm, obj, comp.styles ?? {});
+    applyChildLayoutEmbf(wasm, obj, comp);
 }
 
 function applyStylesEmbf(wasm, obj, styles) {
@@ -1962,31 +2352,79 @@ function dispatchAction(action, eventValue, currentPage) {
                 log("warn", `navigate: page "${action.target}" not found`);
                 return;
             }
-            currentPageIndex = targetIdx;
-            selectedComponentOrder = [];
-            inspectorShowingPage = false;
-            dragState = null;
-            pendingDrag = null;
-            marqueeState = null;
-            pageSelectProgrammatic = true;
-            try {
-                if (pageSelect) {
-                    pageSelect.value = String(targetIdx);
-                }
-                switchToPage(currentProject, targetIdx, {
-                    anim: action.anim,
-                    time: action.time,
-                    delay: action.delay,
-                    autoDel: action.autoDel
-                });
-                drawDesignOverlay();
-                renderInspector();
-                renderPageList();
-                renderToolbarWidgetSelect();
-                renderFlowPanel();
-            } finally {
-                pageSelectProgrammatic = false;
+            previewNavigateToPage(targetIdx, {
+                anim: action.anim,
+                time: action.time,
+                delay: action.delay,
+                autoDel: action.autoDel
+            });
+            break;
+        }
+        case "nav_push": {
+            if (isWorkspaceFlowActive()) {
+                break;
             }
+            const targetIdx = currentProject.pages.findIndex(p => p.id === action.route);
+            if (targetIdx < 0) {
+                log("warn", `nav_push: page "${action.route}" not found`);
+                return;
+            }
+            previewNavigateToPage(
+                targetIdx,
+                { anim: action.anim, time: action.time, delay: action.delay, autoDel: action.autoDel },
+                "push"
+            );
+            break;
+        }
+        case "nav_pop": {
+            if (isWorkspaceFlowActive() || previewNavStack.length === 0) {
+                break;
+            }
+            const prevId = previewNavStack.pop();
+            const targetIdx = currentProject.pages.findIndex(p => p.id === prevId);
+            if (targetIdx < 0) {
+                log("warn", `nav_pop: page "${prevId}" not found`);
+                return;
+            }
+            previewNavigateToPage(targetIdx, {
+                anim: action.anim,
+                time: action.time,
+                delay: action.delay,
+                autoDel: action.autoDel
+            });
+            break;
+        }
+        case "nav_replace": {
+            if (isWorkspaceFlowActive()) {
+                break;
+            }
+            const targetIdx = currentProject.pages.findIndex(p => p.id === action.route);
+            if (targetIdx < 0) {
+                log("warn", `nav_replace: page "${action.route}" not found`);
+                return;
+            }
+            previewNavigateToPage(targetIdx, {
+                anim: action.anim,
+                time: action.time,
+                delay: action.delay,
+                autoDel: action.autoDel
+            });
+            break;
+        }
+        case "nav_reset": {
+            if (isWorkspaceFlowActive()) {
+                break;
+            }
+            const targetIdx = currentProject.pages.findIndex(p => p.id === action.route);
+            if (targetIdx < 0) {
+                log("warn", `nav_reset: page "${action.route}" not found`);
+                return;
+            }
+            previewNavigateToPage(
+                targetIdx,
+                { anim: action.anim, time: action.time, delay: action.delay, autoDel: action.autoDel },
+                "reset"
+            );
             break;
         }
         case "set_text": {
@@ -1996,14 +2434,20 @@ function dispatchAction(action, eventValue, currentPage) {
                 targetComp?.type === "label" && typeof targetComp.text === "string"
                     ? singleBindingFieldInLabel(targetComp.text)
                     : null;
-            if (bindField) {
+            if (bindField && typeof action.text === "string") {
                 setDataModelField(bindField, action.text);
                 refreshPreviewBindings(page);
                 break;
             }
             const ptr = idToObjPtr.get(action.target);
             if (!ptr) return;
-            const strPtr = wasm.stringToNewUTF8(action.text);
+            const displayText =
+                isWidgetTextRef(action.text)
+                    ? resolveWidgetTextDisplay(action.text)
+                    : typeof action.text === "string"
+                      ? action.text
+                      : "";
+            const strPtr = wasm.stringToNewUTF8(displayText);
             if (targetComp?.type === "button") {
                 wasm._embf_button_set_label?.(ptr, strPtr);
             } else {
@@ -2082,6 +2526,18 @@ function dispatchAction(action, eventValue, currentPage) {
                 previewDarkOverride = !!eventValue;
             }
             applyEmbfThemeFromProject(currentProject);
+            break;
+        }
+        case "set_locale": {
+            const loc = typeof action.locale === "string" ? action.locale.trim() : "";
+            if (!loc) {
+                return;
+            }
+            previewLocale = loc;
+            if (previewLocaleSelect) {
+                previewLocaleSelect.value = loc;
+            }
+            refreshPreviewLocaleText();
             break;
         }
     }
@@ -5009,7 +5465,46 @@ function wirePageInspectorActions() {
             });
         });
     }
+    const stringsBtn = document.getElementById("btn-open-strings-res");
+    if (stringsBtn && !stringsBtn.dataset.wired) {
+        stringsBtn.dataset.wired = "1";
+        stringsBtn.addEventListener("click", e => {
+            e.preventDefault();
+            vscode.postMessage({ type: "openStringResources" });
+        });
+    }
     wireProjectStylesAndFieldsActions();
+    wireWidgetTextModeToggles();
+}
+
+/** Toggle literal vs resource inputs in widget text inspector fields. */
+function wireWidgetTextModeToggles() {
+    if (!inspectorForm) {
+        return;
+    }
+    inspectorForm.querySelectorAll("select[name$='Mode']").forEach(sel => {
+        if (!(sel instanceof HTMLSelectElement) || sel.dataset.wired) {
+            return;
+        }
+        if (!/^textMode$|^labelMode$/.test(sel.name)) {
+            return;
+        }
+        sel.dataset.wired = "1";
+        const base = sel.name.replace(/Mode$/, "");
+        const sync = () => {
+            const literal = inspectorForm.querySelector(`input[name="${base}"]`);
+            const ref = inspectorForm.querySelector(`select[name="${base}Ref"]`);
+            const isResource = sel.value === "resource";
+            if (literal instanceof HTMLInputElement) {
+                literal.hidden = isResource;
+            }
+            if (ref instanceof HTMLSelectElement) {
+                ref.hidden = !isResource;
+            }
+        };
+        sel.addEventListener("change", sync);
+        sync();
+    });
 }
 
 /** Add/Remove buttons for the project-level styles + data-fields panels in the page inspector. */
@@ -5363,6 +5858,19 @@ function renderPageInspectorHtml(page, project) {
         `<div class="field"><p style="font-size:11px;color:#888;margin:0 0 8px;line-height:1.35;">` +
         `Resolved: <code>${esc(codegenOutputResolved || "(workspace default or ui_output next to .embf)")}</code><br/>` +
         `Relative to the .embf file, or absolute. On first Generate C Code you will be asked if empty.` +
+        `</p></div>` +
+        `<div class="inspector-group-title">String resources</div>` +
+        fieldText(
+            "proj_stringsPath",
+            "Strings file (.res)",
+            (project.project && project.project.stringsPath) || "strings.res"
+        ) +
+        `<button type="button" class="tb-btn-small" id="btn-open-strings-res">Edit string table…</button>` +
+        `<div class="field"><p style="font-size:11px;color:#888;margin:0 0 8px;line-height:1.35;">` +
+        `Path to translation table (must end in <code>.res</code>). Default: <code>strings.res</code> next to the .embf file.` +
+        (stringsResLoadError
+            ? `<br/><span style="color:var(--vscode-errorForeground);">${esc(stringsResLoadError)}</span>`
+            : "") +
         `</p></div>` +
         `<div class="inspector-group-title">Display</div>` +
         `<div class="row2">` +
@@ -5923,6 +6431,80 @@ function mixText(name, label, val) {
     return fieldText(name, label, val ?? "");
 }
 
+function mixWidgetText(name, label, val) {
+    if (isInspMixed(val)) {
+        return (
+            `<div class="field widget-text-field" data-inspector-mixed="1"><label>${esc(label)}</label>` +
+            `<select name="${esc(name)}Mode" disabled><option>(mixed)</option></select>` +
+            `<input type="text" name="${esc(name)}" value="" placeholder="(mixed)" disabled /></div>`
+        );
+    }
+    return widgetTextFieldHtml(name, label, val);
+}
+
+function widgetTextFieldHtml(name, label, val) {
+    const mode = widgetTextMode(val);
+    const literal = widgetTextLiteral(val);
+    const refKey = widgetTextRefKey(val);
+    const keys = stringResourceKeys.length ? stringResourceKeys : refKey ? [refKey] : [];
+    const keyOptions =
+        `<option value="">— select key —</option>` +
+        keys
+            .map(k => `<option value="${esc(k)}"${k === refKey ? " selected" : ""}>${esc(k)}</option>`)
+            .join("") +
+        (refKey && !keys.includes(refKey)
+            ? `<option value="${esc(refKey)}" selected>${esc(refKey)} (missing)</option>`
+            : "");
+    const missingHint =
+        mode === "resource" && refKey && currentStringsRes && !keys.includes(refKey)
+            ? `<p class="inspector-field-hint" style="color:var(--vscode-errorForeground);margin:4px 0 0;">Key "${esc(refKey)}" is not defined in strings.res</p>`
+            : "";
+    return (
+        `<div class="field widget-text-field"><label>${esc(label)}</label>` +
+        `<div class="row2">` +
+        `<select name="${esc(name)}Mode">` +
+        `<option value="literal"${mode === "literal" ? " selected" : ""}>Literal</option>` +
+        `<option value="resource"${mode === "resource" ? " selected" : ""}>String resource</option>` +
+        `</select>` +
+        `<select name="${esc(name)}Ref"${mode === "resource" ? "" : " hidden"}>${keyOptions}</select>` +
+        `</div>` +
+        `<input type="text" name="${esc(name)}" value="${esc(literal)}"${mode === "literal" ? "" : " hidden"} placeholder="Text" />` +
+        missingHint +
+        `</div>`
+    );
+}
+
+function readWidgetTextPatch(fieldName) {
+    if (!inspectorForm) {
+        return undefined;
+    }
+    const modeEl = inspectorForm.elements.namedItem(`${fieldName}Mode`);
+    if (modeEl instanceof HTMLSelectElement && modeEl.closest("[data-inspector-mixed]")) {
+        return undefined;
+    }
+    if (modeEl instanceof HTMLSelectElement && modeEl.value === "resource") {
+        const refEl = inspectorForm.elements.namedItem(`${fieldName}Ref`);
+        const key =
+            refEl instanceof HTMLSelectElement
+                ? refEl.value.trim()
+                : refEl instanceof HTMLInputElement
+                  ? refEl.value.trim()
+                  : "";
+        if (!key) {
+            return null;
+        }
+        return { ref: key };
+    }
+    const textEl = inspectorForm.elements.namedItem(fieldName);
+    if (textEl instanceof HTMLInputElement && textEl.closest("[data-inspector-mixed]") && textEl.value.trim() === "") {
+        return undefined;
+    }
+    if (textEl instanceof HTMLInputElement) {
+        return textEl.value;
+    }
+    return undefined;
+}
+
 function mixTextarea(name, label, val) {
     if (isInspMixed(val)) {
         return (
@@ -6026,7 +6608,7 @@ function widgetTypeSpecificFieldsHtml(type, m) {
     let html = "";
     switch (type) {
         case "label":
-            html += mixText("text", "Text", /** @type {unknown} */ (m.text));
+            html += mixWidgetText("text", "Text", /** @type {unknown} */ (m.text));
             html += mixSelect("longMode", "Long mode", [
                 { value: "", label: "(default)" },
                 { value: "wrap", label: "wrap" },
@@ -6036,7 +6618,7 @@ function widgetTypeSpecificFieldsHtml(type, m) {
             ], /** @type {unknown} */ (m.longMode) ?? "");
             break;
         case "button":
-            html += mixText("label", "Label text", /** @type {unknown} */ (m.label));
+            html += mixWidgetText("label", "Label text", /** @type {unknown} */ (m.label));
             break;
         case "image":
             html += mixText("src", "Asset id", /** @type {unknown} */ (m.src));
@@ -6106,7 +6688,7 @@ function widgetTypeSpecificFieldsHtml(type, m) {
             html += mixCheck("checked", "Checked", /** @type {unknown} */ (m.checked));
             break;
         case "checkbox":
-            html += mixText("text", "Label text", /** @type {unknown} */ (m.text));
+            html += mixWidgetText("text", "Label text", /** @type {unknown} */ (m.text));
             html += mixCheck("checked", "Checked", /** @type {unknown} */ (m.checked));
             break;
         case "dropdown":
@@ -6597,6 +7179,7 @@ function renderInspector() {
                 : renderMultiInspectorHtml(ids));
         inspectorSyncing = false;
         refreshMixedCheckboxes(inspectorForm);
+        wireWidgetTextModeToggles();
 
         if (inspectorFocusSnap) {
             requestAnimationFrame(() => {
@@ -6669,6 +7252,7 @@ function renderInspector() {
     refreshMixedCheckboxes(inspectorForm);
     wireImageInspectorActions();
     wireBindingsInspectorActions(comp);
+    wireWidgetTextModeToggles();
 
     if (inspectorFocusSnap) {
         requestAnimationFrame(() => {
@@ -6921,6 +7505,11 @@ function readInspectorPatch() {
         if (!(taTextEl.closest("[data-inspector-mixed]") && taTextEl.value.trim() === "")) {
             patch.text = taTextEl.value;
         }
+    } else if (selectedType === "label" || selectedType === "checkbox") {
+        const wt = readWidgetTextPatch("text");
+        if (wt !== undefined) {
+            patch.text = wt;
+        }
     } else {
         const textEl = inspectorForm.elements.namedItem("text");
         if (
@@ -6941,12 +7530,19 @@ function readInspectorPatch() {
         patch.placeholder = phEl.value;
     }
 
-    const labelEl = inspectorForm.elements.namedItem("label");
-    if (
-        labelEl instanceof HTMLInputElement &&
-        !(labelEl.closest("[data-inspector-mixed]") && labelEl.value.trim() === "")
-    ) {
-        patch.label = labelEl.value;
+    if (selectedType === "button") {
+        const wl = readWidgetTextPatch("label");
+        if (wl !== undefined) {
+            patch.label = wl;
+        }
+    } else {
+        const labelEl = inspectorForm.elements.namedItem("label");
+        if (
+            labelEl instanceof HTMLInputElement &&
+            !(labelEl.closest("[data-inspector-mixed]") && labelEl.value.trim() === "")
+        ) {
+            patch.label = labelEl.value;
+        }
     }
 
     const srcEl = inspectorForm.elements.namedItem("src");
@@ -7110,6 +7706,16 @@ function readPageInspectorPatch() {
     const outPath = inspectorForm.elements.namedItem("proj_outputPath");
     if (outPath instanceof HTMLInputElement) {
         patch.projOutputPath = outPath.value.trim() === "" ? null : outPath.value.trim();
+    }
+
+    const stringsPath = inspectorForm.elements.namedItem("proj_stringsPath");
+    if (stringsPath instanceof HTMLInputElement) {
+        const t = stringsPath.value.trim();
+        if (t === "" || t === "strings.res") {
+            patch.projStringsPath = null;
+        } else if (/\.res$/i.test(t)) {
+            patch.projStringsPath = t;
+        }
     }
 
     const lvInc = inspectorForm.elements.namedItem("proj_lvglInclude");
@@ -8767,6 +9373,13 @@ if (toolbarWidgetSelect) {
             return;
         }
         setSelection(compId);
+    });
+}
+
+if (previewLocaleSelect) {
+    previewLocaleSelect.addEventListener("change", () => {
+        previewLocale = previewLocaleSelect.value;
+        refreshPreviewLocaleText();
     });
 }
 

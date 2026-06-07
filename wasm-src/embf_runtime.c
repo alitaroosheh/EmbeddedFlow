@@ -14,6 +14,115 @@
 #include <string.h>
 #include <emscripten.h>
 
+#if LV_FONT_MONTSERRAT_12
+extern const lv_font_t embf_font_latin1_12;
+#endif
+#if LV_FONT_MONTSERRAT_14
+extern const lv_font_t embf_font_latin1_14;
+#endif
+#if LV_FONT_MONTSERRAT_16
+extern const lv_font_t embf_font_latin1_16;
+#endif
+#if LV_FONT_MONTSERRAT_18
+extern const lv_font_t embf_font_latin1_18;
+#endif
+#if LV_FONT_MONTSERRAT_20
+extern const lv_font_t embf_font_latin1_20;
+#endif
+#if LV_FONT_MONTSERRAT_24
+extern const lv_font_t embf_font_latin1_24;
+#endif
+#if LV_FONT_MONTSERRAT_32
+extern const lv_font_t embf_font_latin1_32;
+#endif
+#if LV_FONT_MONTSERRAT_48
+extern const lv_font_t embf_font_latin1_48;
+#endif
+#if LV_FONT_DEJAVU_16_PERSIAN_HEBREW
+extern const lv_font_t lv_font_dejavu_16_persian_hebrew;
+#endif
+
+static lv_font_t g_font_latin_12;
+static lv_font_t g_font_latin_14;
+static lv_font_t g_font_latin_16;
+static lv_font_t g_font_latin_18;
+static lv_font_t g_font_latin_20;
+static lv_font_t g_font_latin_24;
+static lv_font_t g_font_latin_32;
+static lv_font_t g_font_latin_48;
+static lv_font_t g_font_ms_12;
+static lv_font_t g_font_ms_14;
+static lv_font_t g_font_ms_16;
+static lv_font_t g_font_ms_18;
+static lv_font_t g_font_ms_20;
+static lv_font_t g_font_ms_24;
+static lv_font_t g_font_ms_32;
+static lv_font_t g_font_ms_48;
+static bool g_preview_fonts_ready;
+
+/** Copy Montserrat into writable structs; chain Latin-1 then Arabic-script fallbacks. */
+static void embf_install_latin_fallbacks(void)
+{
+    if (g_preview_fonts_ready) {
+        return;
+    }
+#define EMBF_WIRE(FROM, TO, FALLBACK) \
+    do { \
+        (TO) = *(FROM); \
+        (TO).fallback = (FALLBACK); \
+    } while (0)
+#if LV_FONT_DEJAVU_16_PERSIAN_HEBREW
+#define EMBF_LATIN_FALLBACK &lv_font_dejavu_16_persian_hebrew
+#else
+#define EMBF_LATIN_FALLBACK NULL
+#endif
+#if LV_FONT_MONTSERRAT_12
+    EMBF_WIRE(&embf_font_latin1_12, g_font_latin_12, EMBF_LATIN_FALLBACK);
+    EMBF_WIRE(&lv_font_montserrat_12, g_font_ms_12, &g_font_latin_12);
+#endif
+#if LV_FONT_MONTSERRAT_14
+    EMBF_WIRE(&embf_font_latin1_14, g_font_latin_14, EMBF_LATIN_FALLBACK);
+    EMBF_WIRE(&lv_font_montserrat_14, g_font_ms_14, &g_font_latin_14);
+#endif
+#if LV_FONT_MONTSERRAT_16
+    EMBF_WIRE(&embf_font_latin1_16, g_font_latin_16, EMBF_LATIN_FALLBACK);
+    EMBF_WIRE(&lv_font_montserrat_16, g_font_ms_16, &g_font_latin_16);
+#endif
+#if LV_FONT_MONTSERRAT_18
+    EMBF_WIRE(&embf_font_latin1_18, g_font_latin_18, EMBF_LATIN_FALLBACK);
+    EMBF_WIRE(&lv_font_montserrat_18, g_font_ms_18, &g_font_latin_18);
+#endif
+#if LV_FONT_MONTSERRAT_20
+    EMBF_WIRE(&embf_font_latin1_20, g_font_latin_20, EMBF_LATIN_FALLBACK);
+    EMBF_WIRE(&lv_font_montserrat_20, g_font_ms_20, &g_font_latin_20);
+#endif
+#if LV_FONT_MONTSERRAT_24
+    EMBF_WIRE(&embf_font_latin1_24, g_font_latin_24, EMBF_LATIN_FALLBACK);
+    EMBF_WIRE(&lv_font_montserrat_24, g_font_ms_24, &g_font_latin_24);
+#endif
+#if LV_FONT_MONTSERRAT_32
+    EMBF_WIRE(&embf_font_latin1_32, g_font_latin_32, EMBF_LATIN_FALLBACK);
+    EMBF_WIRE(&lv_font_montserrat_32, g_font_ms_32, &g_font_latin_32);
+#endif
+#if LV_FONT_MONTSERRAT_48
+    EMBF_WIRE(&embf_font_latin1_48, g_font_latin_48, EMBF_LATIN_FALLBACK);
+    EMBF_WIRE(&lv_font_montserrat_48, g_font_ms_48, &g_font_latin_48);
+#endif
+#undef EMBF_LATIN_FALLBACK
+#undef EMBF_WIRE
+    g_preview_fonts_ready = true;
+}
+
+static const lv_font_t *embf_preview_default_font(void)
+{
+    embf_install_latin_fallbacks();
+#if LV_FONT_MONTSERRAT_14
+    return &g_font_ms_14;
+#else
+    return LV_FONT_DEFAULT;
+#endif
+}
+
 /* ── Display buffer ─────────────────────────────────────────────────────── */
 
 static int g_width  = 0;
@@ -147,6 +256,7 @@ void embf_init(int width, int height, int dark_theme,
 
     /* Init LVGL */
     lv_init();
+    embf_install_latin_fallbacks();
     lv_tick_set_cb(tick_get_cb);
 
     /* Create display */
@@ -176,7 +286,7 @@ void embf_init(int width, int height, int dark_theme,
 
     /* Apply theme */
     lv_theme_t *theme = lv_theme_default_init(
-        g_display, primary, secondary, dark_theme ? true : false, LV_FONT_DEFAULT);
+        g_display, primary, secondary, dark_theme ? true : false, embf_preview_default_font());
     lv_display_set_theme(g_display, theme);
 
 #if LV_USE_SYSMON
@@ -318,9 +428,20 @@ lv_obj_t *embf_create_button(lv_obj_t *parent, int x, int y, int w, int h)
 EMSCRIPTEN_KEEPALIVE
 void embf_button_set_label(lv_obj_t *btn, const char *text)
 {
-    lv_obj_t *lbl = lv_label_create(btn);
+    lv_obj_t *lbl = NULL;
+    const uint32_t n = lv_obj_get_child_cnt(btn);
+    for(uint32_t i = 0; i < n; i++) {
+        lv_obj_t *ch = lv_obj_get_child(btn, i);
+        if(lv_obj_check_type(ch, &lv_label_class)) {
+            lbl = ch;
+            break;
+        }
+    }
+    if(!lbl) {
+        lbl = lv_label_create(btn);
+        lv_obj_center(lbl);
+    }
     lv_label_set_text(lbl, text);
-    lv_obj_center(lbl);
 }
 
 EMSCRIPTEN_KEEPALIVE
@@ -595,14 +716,15 @@ void embf_obj_set_style_pad_all(lv_obj_t *obj, int pad)
  * Enabled sizes (lv_conf.h): 12 14 16 18 20 24 32 48            */
 static const lv_font_t *font_by_size(int size)
 {
-    if (size <=  12) return &lv_font_montserrat_12;
-    if (size <=  15) return &lv_font_montserrat_14;
-    if (size <=  17) return &lv_font_montserrat_16;
-    if (size <=  19) return &lv_font_montserrat_18;
-    if (size <=  22) return &lv_font_montserrat_20;
-    if (size <=  28) return &lv_font_montserrat_24;
-    if (size <=  40) return &lv_font_montserrat_32;
-    return &lv_font_montserrat_48;
+    embf_install_latin_fallbacks();
+    if (size <=  12) return &g_font_ms_12;
+    if (size <=  15) return &g_font_ms_14;
+    if (size <=  17) return &g_font_ms_16;
+    if (size <=  19) return &g_font_ms_18;
+    if (size <=  22) return &g_font_ms_20;
+    if (size <=  28) return &g_font_ms_24;
+    if (size <=  40) return &g_font_ms_32;
+    return &g_font_ms_48;
 }
 
 EMSCRIPTEN_KEEPALIVE
@@ -665,7 +787,7 @@ void embf_set_theme(int dark_theme, uint32_t primary_argb, uint32_t secondary_ar
     lv_color_t secondary = secondary_argb ? unpack_color(secondary_argb) : lv_palette_main(LV_PALETTE_CYAN);
 
     lv_theme_t *theme = lv_theme_default_init(
-        g_display, primary, secondary, dark_theme ? true : false, LV_FONT_DEFAULT);
+        g_display, primary, secondary, dark_theme ? true : false, embf_preview_default_font());
     lv_display_set_theme(g_display, theme);
 
     /* Propagate the style change to every existing object */
@@ -883,4 +1005,69 @@ void embf_on_key(int keycode)
 {
     /* Future: keyboard input device */
     (void)keycode;
+}
+
+/* ── Flex / grid layout (preview V5) ─────────────────────────────────────── */
+
+EMSCRIPTEN_KEEPALIVE
+void embf_container_set_flex(lv_obj_t *obj, int flow, int align_main, int align_cross, int align_track)
+{
+    if (!obj) return;
+    lv_obj_set_layout(obj, LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(obj, (lv_flex_flow_t)flow);
+    lv_obj_set_flex_align(obj, (lv_flex_align_t)align_main, (lv_flex_align_t)align_cross,
+                        (lv_flex_align_t)align_track);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void embf_container_set_grid(lv_obj_t *obj, const int32_t *col_dsc, const int32_t *row_dsc,
+                             int col_gap, int row_gap, int align_x, int align_y)
+{
+    if (!obj || !col_dsc || !row_dsc) return;
+    lv_obj_set_layout(obj, LV_LAYOUT_GRID);
+    lv_obj_set_grid_dsc_array(obj, (lv_coord_t *)col_dsc, (lv_coord_t *)row_dsc);
+    lv_obj_set_style_pad_column(obj, (lv_coord_t)col_gap, LV_PART_MAIN);
+    lv_obj_set_style_pad_row(obj, (lv_coord_t)row_gap, LV_PART_MAIN);
+    lv_obj_set_grid_align(obj, (lv_grid_align_t)align_x, (lv_grid_align_t)align_y);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void embf_obj_set_flex_grow(lv_obj_t *obj, int grow)
+{
+    if (!obj) return;
+    lv_obj_set_flex_grow(obj, (uint8_t)grow);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void embf_obj_set_grid_cell(lv_obj_t *obj, int x_align, int col, int col_span,
+                            int y_align, int row, int row_span)
+{
+    if (!obj) return;
+    lv_obj_set_grid_cell(obj, (lv_grid_align_t)x_align, (int32_t)col, (int32_t)col_span,
+                         (lv_grid_align_t)y_align, (int32_t)row, (int32_t)row_span);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void embf_obj_set_base_dir(lv_obj_t *obj, int rtl)
+{
+    if (!obj) return;
+    lv_obj_set_style_base_dir(obj, rtl ? LV_BASE_DIR_RTL : LV_BASE_DIR_LTR, LV_PART_MAIN);
+}
+
+EMSCRIPTEN_KEEPALIVE
+int32_t embf_grid_fr(int32_t x)
+{
+    return LV_GRID_FR(x);
+}
+
+EMSCRIPTEN_KEEPALIVE
+int32_t embf_grid_content(void)
+{
+    return LV_GRID_CONTENT;
+}
+
+EMSCRIPTEN_KEEPALIVE
+int32_t embf_grid_template_last(void)
+{
+    return LV_GRID_TEMPLATE_LAST;
 }

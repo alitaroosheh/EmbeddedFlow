@@ -56,6 +56,9 @@ $exports = @(
     "_embf_create_line","_embf_line_set_points",
     "_embf_obj_set_hidden","_embf_obj_get_screen_coords",
     "_embf_obj_set_scroll_dir",
+    "_embf_container_set_flex","_embf_container_set_grid",
+    "_embf_obj_set_flex_grow","_embf_obj_set_grid_cell","_embf_obj_set_base_dir",
+    "_embf_grid_fr","_embf_grid_content","_embf_grid_template_last",
     "_embf_obj_set_style_bg_color","_embf_obj_set_style_bg_color_part","_embf_obj_set_style_text_color",
     "_embf_obj_set_style_font_size",
     "_embf_obj_set_style_border_color","_embf_obj_set_style_text_align",
@@ -89,6 +92,8 @@ $rspLines = @(
     "-o `"$OutJs`"",
     "`"$RuntimeC`""
 )
+$latinFontFiles = Get-ChildItem -Path $ScriptDir -Filter "embf_font_latin1_*.c" | Select-Object -ExpandProperty FullName
+$rspLines += $latinFontFiles | ForEach-Object { "`"$_`"" }
 $rspLines += $lvglCFiles | ForEach-Object { "`"$_`"" }
 $rspLines | Set-Content -Path $RspFile -Encoding UTF8
 

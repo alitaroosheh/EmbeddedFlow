@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { generatePageHeader, generateRootHeader } from "../src/codeGen/pageGen";
 import { lvglIncludeDirective } from "../src/codeGen/lvglInclude";
+import { readLatin1FontSource } from "../src/codeGen/rtlFontsGen";
 import { minimalProject } from "./fixtures";
 
 describe("codegen LVGL include path", () => {
@@ -23,5 +24,11 @@ describe("codegen LVGL include path", () => {
         const p = minimalProject();
         p.project.lvglInclude = "lvgl/lvgl.h";
         expect(generateRootHeader(p)).toContain('#include "lvgl/lvgl.h"');
+    });
+
+    it("rewrites latin1 font includes to match project.lvglInclude", () => {
+        expect(readLatin1FontSource(14, "lvgl.h")).toContain('#include "lvgl.h"');
+        expect(readLatin1FontSource(14, "lvgl.h")).not.toContain("lvgl/lvgl.h");
+        expect(readLatin1FontSource(14, "lvgl/lvgl.h")).toContain('#include "lvgl/lvgl.h"');
     });
 });

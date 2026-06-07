@@ -10,8 +10,14 @@
 extern "C" {
 #endif
 
-#include "lvgl/lvgl.h"
+#include "ui_display.h"
+#include "lvgl.h"
+#include "ui_styles.h"
+#include "ui_strings.h"
+#include "ui_rtl_fonts.h"
 
+#include "ui_page_station.h"
+#include "ui_page_settings.h"
 #include "ui_page_main.h"
 
 /**

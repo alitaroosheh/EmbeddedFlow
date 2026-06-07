@@ -21,11 +21,17 @@ import { registerEmbeddedFlowOutput, embeddedFlowLog } from "./outputLog";
 import { resolveEmbfForPreview } from "./embfPreviewResolve";
 import { readEmbfText } from "./embfHistory";
 import { runCreateNewProjectFlow } from "./embfNewProject";
+import { StringsResEditorProvider, embfPathsLinkedToStringsRes, openStringsResForEmbf } from "./stringsResEditorProvider";
+import { resolveStringsResPath } from "./i18n/stringsResPath";
+import { readStringsResFile, parseStringsResSource } from "./i18n/stringsResParser";
+import { lintStringResourceRefs } from "./i18n/stringsResLint";
+import { collectStringRefsInProject } from "./i18n/widgetText";
 
 // Map from .embf file path → file watcher
 const watchers = new Map<string, fs.FSWatcher>();
 
 const embfDiagnostics = vscode.languages.createDiagnosticCollection("embeddedflow");
+const stringsResDiagnostics = vscode.languages.createDiagnosticCollection("embeddedflow-strings");
 const embfLintDebounceMs = 400;
 const embfLintTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const liveGenDebounceMs = 600;
@@ -39,6 +45,9 @@ export function activate(context: vscode.ExtensionContext): void {
     registerEmbeddedFlowOutput(embfOutput);
 
     context.subscriptions.push(embfDiagnostics);
+    context.subscriptions.push(stringsResDiagnostics);
+
+    context.subscriptions.push(StringsResEditorProvider.register(context));
 
     embeddedFlowLog("extension", "info", `activate (${context.extensionPath})`);
 
@@ -78,6 +87,22 @@ export function activate(context: vscode.ExtensionContext): void {
                 return;
             }
             await runAddFontCommand(filePath);
+        }),
+        vscode.commands.registerCommand("embeddedflow.openStringResources", async (uri?: vscode.Uri) => {
+            const filePath = await resolveCodegenEmbfPath(uri);
+            if (!filePath) {
+                vscode.window.showErrorMessage(
+                    "EmbeddedFlow: Open a .embf file or UI preview, then run Open String Resources."
+                );
+                return;
+            }
+            try {
+                const project = parseEmbfSource(fs.readFileSync(filePath, "utf8"));
+                await openStringsResForEmbf(filePath, project);
+            } catch (e) {
+                const msg = e instanceof Error ? e.message : String(e);
+                vscode.window.showErrorMessage(`EmbeddedFlow: ${msg}`);
+            }
         })
     );
 
@@ -89,6 +114,9 @@ export function activate(context: vscode.ExtensionContext): void {
             }
             if (isEmbfDocument(doc)) {
                 updateEmbfDiagnostics(doc);
+            }
+            if (isStringsResDocument(doc)) {
+                updateStringsResDiagnostics(doc);
             }
         })
     );
@@ -115,11 +143,19 @@ export function activate(context: vscode.ExtensionContext): void {
         if (isEmbfDocument(doc)) {
             updateEmbfDiagnostics(doc);
         }
+        if (isStringsResDocument(doc)) {
+            updateStringsResDiagnostics(doc);
+        }
     }
     context.subscriptions.push(
         vscode.workspace.onDidSaveTextDocument(doc => {
             if (isEmbfDocument(doc)) {
                 updateEmbfDiagnostics(doc);
+            }
+            if (isStringsResDocument(doc)) {
+                updateStringsResDiagnostics(doc);
+                refreshEmbfDiagnosticsForStringsRes(doc.uri.fsPath);
+                schedulePreviewRefreshForStringsRes(doc.uri.fsPath);
             }
             scheduleLiveGenerateOnSave(doc);
         })
@@ -204,6 +240,91 @@ function isEmbfDocument(doc: vscode.TextDocument): boolean {
     return doc.languageId === "embf" || doc.fileName.toLowerCase().endsWith(".embf");
 }
 
+function isStringsResDocument(doc: vscode.TextDocument): boolean {
+    return doc.fileName.toLowerCase().endsWith(".res");
+}
+
+function stringsResFallbackRange(doc: vscode.TextDocument): vscode.Range {
+    const lastLine = Math.max(0, doc.lineCount - 1);
+    const endChar = doc.lineAt(lastLine).text.length;
+    return new vscode.Range(0, 0, lastLine, endChar);
+}
+
+function updateStringsResDiagnostics(doc: vscode.TextDocument): void {
+    if (!isStringsResDocument(doc)) {
+        return;
+    }
+    try {
+        parseStringsResSource(doc.getText(), doc.fileName);
+        stringsResDiagnostics.delete(doc.uri);
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        const d = new vscode.Diagnostic(stringsResFallbackRange(doc), msg, vscode.DiagnosticSeverity.Error);
+        d.source = "embeddedflow";
+        stringsResDiagnostics.set(doc.uri, [d]);
+    }
+}
+
+function loadStringsForEmbfLint(project: EmbfProject, embfPath: string) {
+    if (!collectStringRefsInProject(project).length) {
+        return { strings: null as ReturnType<typeof readStringsResFile> | null, missingFile: false };
+    }
+    const abs = resolveStringsResPath(project, embfPath);
+    if (!fs.existsSync(abs)) {
+        return { strings: null, missingFile: true };
+    }
+    try {
+        return { strings: readStringsResFile(abs), missingFile: false };
+    } catch {
+        return { strings: null, missingFile: true };
+    }
+}
+
+function refreshEmbfDiagnosticsForStringsRes(resPath: string): void {
+    for (const embfPath of embfPathsLinkedToStringsRes(resPath)) {
+        const doc = vscode.workspace.textDocuments.find(d => d.uri.fsPath === embfPath);
+        if (doc) {
+            updateEmbfDiagnostics(doc);
+        }
+    }
+}
+
+function schedulePreviewRefreshForStringsRes(resPath: string): void {
+    const normalized = path.normalize(resPath);
+    const embfPaths = new Set(embfPathsLinkedToStringsRes(resPath));
+    for (const embfPath of EmbfPreviewPanel.getOpenEmbfPaths()) {
+        try {
+            const project = parseEmbfSource(fs.readFileSync(embfPath, "utf8"));
+            const linked = resolveStringsResPath(project, embfPath);
+            if (path.normalize(linked) === normalized) {
+                embfPaths.add(embfPath);
+            }
+        } catch {
+            /* ignore */
+        }
+    }
+    for (const embfPath of embfPaths) {
+        schedulePreviewRefreshFromEditorPath(embfPath);
+    }
+}
+
+function schedulePreviewRefreshFromEditorPath(embfPath: string): void {
+    if (!EmbfPreviewPanel.getPanel(embfPath)) {
+        return;
+    }
+    const prev = previewRefreshTimers.get(embfPath);
+    if (prev) {
+        clearTimeout(prev);
+    }
+    previewRefreshTimers.set(
+        embfPath,
+        setTimeout(() => {
+            previewRefreshTimers.delete(embfPath);
+            EmbfPreviewPanel.getPanel(embfPath)?.refreshFromEmbfSource();
+        }, previewRefreshDebounceMs)
+    );
+}
+
 function embfFallbackRange(doc: vscode.TextDocument): vscode.Range {
     const lastLine = Math.max(0, doc.lineCount - 1);
     const endChar = doc.lineAt(lastLine).text.length;
@@ -218,6 +339,14 @@ function updateEmbfDiagnostics(doc: vscode.TextDocument): void {
     try {
         const project = parseEmbfSource(text);
         const semantic = lintEmbfProject(text, project);
+        const { strings, missingFile } = loadStringsForEmbfLint(project, doc.uri.fsPath);
+        if (missingFile && collectStringRefsInProject(project).length) {
+            semantic.push({
+                message: `String resources file not found or invalid (${resolveStringsResPath(project, doc.uri.fsPath)})`
+            });
+        } else {
+            semantic.push(...lintStringResourceRefs(project, strings));
+        }
         if (semantic.length === 0) {
             embfDiagnostics.delete(doc.uri);
             return;

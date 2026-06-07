@@ -4,7 +4,9 @@
     "name": "Temperature / Humidity Station",
     "lvglVersion": "9.5.0",
     "lvglInclude": "lvgl.h",
-    "description": "Fancy LVGL 9.5 preview: temperature & humidity with a clock and interactive demo buttons"
+    "description": "Fancy LVGL 9.5 preview: temperature & humidity with a clock and interactive demo buttons",
+    "outputPath": "main",
+    "stringsPath": "strings.res"
   },
   "display": {
     "width": 1024,
@@ -17,23 +19,22 @@
     "round": false
   },
   "theme": {
-    "dark": true,
+    "dark": false,
     "primaryColor": "#2dd4ff",
     "secondaryColor": "#a78bfa"
   },
   "styles": [
     {
       "id": "app_bg",
-      "name": "App background",
       "props": {
         "bgColor": "#070a12",
         "bgOpacity": 255,
         "borderRadius": 0
-      }
+      },
+      "name": "App background"
     },
     {
       "id": "header_card",
-      "name": "Header card",
       "props": {
         "bgColor": "#0f172a",
         "bgOpacity": 235,
@@ -41,11 +42,11 @@
         "borderWidth": 2,
         "borderRadius": 18,
         "padding": 14
-      }
+      },
+      "name": "Header card"
     },
     {
       "id": "metric_card",
-      "name": "Metric card",
       "props": {
         "bgColor": "#0b1222",
         "bgOpacity": 235,
@@ -53,47 +54,47 @@
         "borderWidth": 2,
         "borderRadius": 22,
         "padding": 18
-      }
+      },
+      "name": "Metric card"
     },
     {
       "id": "muted_text",
-      "name": "Muted text",
       "props": {
         "textColor": "#94a3b8",
         "fontSize": 18,
         "align": "left"
-      }
+      },
+      "name": "Muted text"
     },
     {
       "id": "title_text",
-      "name": "Title text",
       "props": {
         "textColor": "#e5e7eb",
         "fontSize": 28,
         "align": "left"
-      }
+      },
+      "name": "Title text"
     },
     {
       "id": "value_glow",
-      "name": "Value glow text",
       "props": {
         "textColor": "#2dd4ff",
         "fontSize": 76,
         "align": "center"
-      }
+      },
+      "name": "Value glow text"
     },
     {
       "id": "unit_text",
-      "name": "Unit text",
       "props": {
         "textColor": "#a78bfa",
         "fontSize": 30,
         "align": "center"
-      }
+      },
+      "name": "Unit text"
     },
     {
       "id": "chip",
-      "name": "Info chip",
       "props": {
         "bgColor": "#0f172a",
         "bgOpacity": 240,
@@ -102,18 +103,19 @@
         "borderRadius": 16,
         "padding": 10,
         "textColor": "#e5e7eb"
-      }
+      },
+      "name": "Info chip"
     },
     {
       "id": "divider_line",
-      "name": "Divider line",
       "props": {
         "bgColor": "#1f2a44",
         "bgOpacity": 255,
         "borderColor": "#1f2a44",
         "borderWidth": 2,
         "borderRadius": 8
-      }
+      },
+      "name": "Divider line"
     }
   ],
   "pages": [
@@ -135,140 +137,6 @@
           ],
           "children": [
             {
-              "id": "cont_header",
-              "type": "container",
-              "x": 24,
-              "y": 18,
-              "width": 976,
-              "height": 64,
-              "layout": "none",
-              "styleRefs": [
-                "header_card"
-              ],
-              "children": [
-                {
-                  "id": "lbl_app_title",
-                  "type": "label",
-                  "x": 14,
-                  "y": 10,
-                  "width": 340,
-                  "height": 32,
-                  "text": "Weather Station",
-                  "styles": {
-                    "fontSize": 26,
-                    "textColor": "#e5e7eb"
-                  },
-                  "events": []
-                },
-                {
-                  "id": "btn_open_settings",
-                  "type": "button",
-                  "x": 300,
-                  "y": 12,
-                  "width": 118,
-                  "height": 40,
-                  "label": "Settings",
-                  "styles": {
-                    "textColor": "#e5e7eb",
-                    "bgColor": "#0f172a",
-                    "indicatorColor": "#2dd4ff",
-                    "borderColor": "#1f2a44",
-                    "borderWidth": 2,
-                    "borderRadius": 12
-                  },
-                  "events": [
-                    {
-                      "trigger": "clicked",
-                      "actions": [
-                        {
-                          "type": "navigate",
-                          "target": "page_settings",
-                          "anim": "move_left",
-                          "time": 300
-                        }
-                      ]
-                    }
-                  ]
-                },
-                {
-                  "id": "lbl_clock",
-                  "type": "label",
-                  "x": 720,
-                  "y": 12,
-                  "width": 210,
-                  "height": 32,
-                  "text": "08:41",
-                  "styles": {
-                    "fontSize": 26,
-                    "textColor": "#e5e7eb",
-                    "align": "right"
-                  },
-                  "animations": [
-                    {
-                      "property": "opacity",
-                      "from": 180,
-                      "to": 255,
-                      "duration": 700,
-                      "easing": "ease_in_out",
-                      "repeat": -1
-                    }
-                  ]
-                },
-                {
-                  "id": "spn_refresh",
-                  "type": "spinner",
-                  "x": 668,
-                  "y": 14,
-                  "width": 38,
-                  "height": 38,
-                  "speed": 900,
-                  "arcLength": 62,
-                  "styles": {
-                    "indicatorColor": "#a78bfa",
-                    "bgColor": "#0f172a",
-                    "borderColor": "#1f2a44",
-                    "textColor": "#94a3b8"
-                  },
-                  "hidden": false,
-                  "events": []
-                },
-                {
-                  "id": "sw_night",
-                  "type": "switch",
-                  "x": 660,
-                  "y": 16,
-                  "width": 48,
-                  "height": 28,
-                  "checked": true,
-                  "events": [
-                    {
-                      "trigger": "value_changed",
-                      "actions": [
-                        {
-                          "type": "set_theme"
-                        }
-                      ]
-                    }
-                  ]
-                },
-                {
-                  "id": "lbl_night",
-                  "type": "label",
-                  "x": 604,
-                  "y": 18,
-                  "width": 80,
-                  "height": 28,
-                  "text": "Night",
-                  "styles": {
-                    "fontSize": 18,
-                    "textColor": "#94a3b8",
-                    "align": "left"
-                  }
-                }
-              ]
-            },
-
-            {
               "id": "ln_header_sep",
               "type": "line",
               "x": 0,
@@ -277,11 +145,16 @@
               "height": 6,
               "rounded": true,
               "points": [
-                { "x": 24, "y": 0 },
-                { "x": 1000, "y": 0 }
+                {
+                  "x": 24,
+                  "y": 0
+                },
+                {
+                  "x": 1000,
+                  "y": 0
+                }
               ]
             },
-
             {
               "id": "cont_main_left",
               "type": "container",
@@ -301,7 +174,9 @@
                   "y": 10,
                   "width": 250,
                   "height": 26,
-                  "text": "TEMPERATURE",
+                  "text": {
+                    "ref": "string_temperature"
+                  },
                   "styles": {
                     "fontSize": 22,
                     "textColor": "#e5e7eb"
@@ -372,7 +247,9 @@
                   "y": 222,
                   "width": 440,
                   "height": 26,
-                  "text": "Range: 18..28",
+                  "text": {
+                    "ref": "string_temp_range"
+                  },
                   "styles": {
                     "fontSize": 18,
                     "textColor": "#94a3b8",
@@ -395,7 +272,9 @@
                       "y": 0,
                       "width": 110,
                       "height": 36,
-                      "label": "Cool",
+                      "label": {
+                        "ref": "string_cool"
+                      },
                       "styles": {
                         "textColor": "#e5e7eb",
                         "bgColor": "#0f172a",
@@ -408,8 +287,16 @@
                         {
                           "trigger": "clicked",
                           "actions": [
-                            { "type": "set_value", "target": "arc_temp_gauge", "value": 20 },
-                            { "type": "set_text", "target": "lbl_temp_value", "text": "20" }
+                            {
+                              "type": "set_value",
+                              "target": "arc_temp_gauge",
+                              "value": 20
+                            },
+                            {
+                              "type": "set_text",
+                              "target": "lbl_temp_value",
+                              "text": "20"
+                            }
                           ]
                         }
                       ]
@@ -421,7 +308,9 @@
                       "y": 0,
                       "width": 110,
                       "height": 36,
-                      "label": "Mild",
+                      "label": {
+                        "ref": "string_mild"
+                      },
                       "styles": {
                         "textColor": "#e5e7eb",
                         "bgColor": "#0f172a",
@@ -434,8 +323,16 @@
                         {
                           "trigger": "clicked",
                           "actions": [
-                            { "type": "set_value", "target": "arc_temp_gauge", "value": 24 },
-                            { "type": "set_text", "target": "lbl_temp_value", "text": "24" }
+                            {
+                              "type": "set_value",
+                              "target": "arc_temp_gauge",
+                              "value": 24
+                            },
+                            {
+                              "type": "set_text",
+                              "target": "lbl_temp_value",
+                              "text": "24"
+                            }
                           ]
                         }
                       ]
@@ -447,7 +344,9 @@
                       "y": 0,
                       "width": 110,
                       "height": 36,
-                      "label": "Hot",
+                      "label": {
+                        "ref": "string_hot"
+                      },
                       "styles": {
                         "textColor": "#0f172a",
                         "bgColor": "#2dd4ff",
@@ -460,8 +359,16 @@
                         {
                           "trigger": "clicked",
                           "actions": [
-                            { "type": "set_value", "target": "arc_temp_gauge", "value": 30 },
-                            { "type": "set_text", "target": "lbl_temp_value", "text": "30" }
+                            {
+                              "type": "set_value",
+                              "target": "arc_temp_gauge",
+                              "value": 30
+                            },
+                            {
+                              "type": "set_text",
+                              "target": "lbl_temp_value",
+                              "text": "30"
+                            }
                           ]
                         }
                       ]
@@ -473,7 +380,9 @@
                       "y": 44,
                       "width": 220,
                       "height": 36,
-                      "label": "Reset",
+                      "label": {
+                        "ref": "string_reset"
+                      },
                       "styles": {
                         "textColor": "#e5e7eb",
                         "bgColor": "#0f172a",
@@ -486,8 +395,16 @@
                         {
                           "trigger": "clicked",
                           "actions": [
-                            { "type": "set_value", "target": "arc_temp_gauge", "value": 24 },
-                            { "type": "set_text", "target": "lbl_temp_value", "text": "24" }
+                            {
+                              "type": "set_value",
+                              "target": "arc_temp_gauge",
+                              "value": 24
+                            },
+                            {
+                              "type": "set_text",
+                              "target": "lbl_temp_value",
+                              "text": "24"
+                            }
                           ]
                         }
                       ]
@@ -499,7 +416,9 @@
                       "y": 44,
                       "width": 220,
                       "height": 36,
-                      "label": "Play anims (toolbar)",
+                      "label": {
+                        "ref": "string_play_anims"
+                      },
                       "styles": {
                         "textColor": "#e5e7eb",
                         "bgColor": "#0f172a",
@@ -514,7 +433,6 @@
                 }
               ]
             },
-
             {
               "id": "cont_main_right",
               "type": "container",
@@ -534,7 +452,9 @@
                   "y": 10,
                   "width": 250,
                   "height": 26,
-                  "text": "HUMIDITY",
+                  "text": {
+                    "ref": "string_humidity"
+                  },
                   "styles": {
                     "fontSize": 22,
                     "textColor": "#e5e7eb"
@@ -595,7 +515,6 @@
                     "align": "left"
                   }
                 },
-
                 {
                   "id": "lbl_hum_status",
                   "type": "label",
@@ -603,7 +522,9 @@
                   "y": 152,
                   "width": 200,
                   "height": 42,
-                  "text": "Comfort",
+                  "text": {
+                    "ref": "string_comfort"
+                  },
                   "styleRefs": [
                     "chip"
                   ],
@@ -629,7 +550,9 @@
                       "y": 52,
                       "width": 132,
                       "height": 36,
-                      "label": "Dry",
+                      "label": {
+                        "ref": "string_dry"
+                      },
                       "styles": {
                         "textColor": "#e5e7eb",
                         "bgColor": "#0f172a",
@@ -642,9 +565,23 @@
                         {
                           "trigger": "clicked",
                           "actions": [
-                            { "type": "set_value", "target": "bar_hum", "value": 35 },
-                            { "type": "set_text", "target": "lbl_hum_value", "text": "35" },
-                            { "type": "set_text", "target": "lbl_hum_status", "text": "Dry" }
+                            {
+                              "type": "set_value",
+                              "target": "bar_hum",
+                              "value": 35
+                            },
+                            {
+                              "type": "set_text",
+                              "target": "lbl_hum_value",
+                              "text": "35"
+                            },
+                            {
+                              "type": "set_text",
+                              "target": "lbl_hum_status",
+                              "text": {
+                                "ref": "string_dry"
+                              }
+                            }
                           ]
                         }
                       ]
@@ -656,7 +593,9 @@
                       "y": 52,
                       "width": 132,
                       "height": 36,
-                      "label": "Comfort",
+                      "label": {
+                        "ref": "string_comfort"
+                      },
                       "styles": {
                         "textColor": "#e5e7eb",
                         "bgColor": "#0f172a",
@@ -669,9 +608,23 @@
                         {
                           "trigger": "clicked",
                           "actions": [
-                            { "type": "set_value", "target": "bar_hum", "value": 56 },
-                            { "type": "set_text", "target": "lbl_hum_value", "text": "56" },
-                            { "type": "set_text", "target": "lbl_hum_status", "text": "Comfort" }
+                            {
+                              "type": "set_value",
+                              "target": "bar_hum",
+                              "value": 56
+                            },
+                            {
+                              "type": "set_text",
+                              "target": "lbl_hum_value",
+                              "text": "56"
+                            },
+                            {
+                              "type": "set_text",
+                              "target": "lbl_hum_status",
+                              "text": {
+                                "ref": "string_comfort"
+                              }
+                            }
                           ]
                         }
                       ]
@@ -683,7 +636,9 @@
                       "y": 52,
                       "width": 132,
                       "height": 36,
-                      "label": "Humid",
+                      "label": {
+                        "ref": "string_humid"
+                      },
                       "styles": {
                         "textColor": "#0f172a",
                         "bgColor": "#a78bfa",
@@ -696,16 +651,29 @@
                         {
                           "trigger": "clicked",
                           "actions": [
-                            { "type": "set_value", "target": "bar_hum", "value": 78 },
-                            { "type": "set_text", "target": "lbl_hum_value", "text": "78" },
-                            { "type": "set_text", "target": "lbl_hum_status", "text": "Humid" }
+                            {
+                              "type": "set_value",
+                              "target": "bar_hum",
+                              "value": 78
+                            },
+                            {
+                              "type": "set_text",
+                              "target": "lbl_hum_value",
+                              "text": "78"
+                            },
+                            {
+                              "type": "set_text",
+                              "target": "lbl_hum_status",
+                              "text": {
+                                "ref": "string_humid"
+                              }
+                            }
                           ]
                         }
                       ]
                     }
                   ]
                 },
-
                 {
                   "id": "ln_trend",
                   "type": "line",
@@ -715,24 +683,47 @@
                   "height": 74,
                   "rounded": true,
                   "points": [
-                    { "x": 0, "y": 60 },
-                    { "x": 60, "y": 46 },
-                    { "x": 120, "y": 50 },
-                    { "x": 180, "y": 32 },
-                    { "x": 240, "y": 34 },
-                    { "x": 300, "y": 18 },
-                    { "x": 380, "y": 26 },
-                    { "x": 440, "y": 14 }
+                    {
+                      "x": 0,
+                      "y": 60
+                    },
+                    {
+                      "x": 60,
+                      "y": 46
+                    },
+                    {
+                      "x": 120,
+                      "y": 50
+                    },
+                    {
+                      "x": 180,
+                      "y": 32
+                    },
+                    {
+                      "x": 240,
+                      "y": 34
+                    },
+                    {
+                      "x": 300,
+                      "y": 18
+                    },
+                    {
+                      "x": 380,
+                      "y": 26
+                    },
+                    {
+                      "x": 440,
+                      "y": 14
+                    }
                   ]
                 }
               ]
             },
-
             {
               "id": "cont_footer",
               "type": "container",
-              "x": 24,
-              "y": 486,
+              "x": 17,
+              "y": 498,
               "width": 976,
               "height": 92,
               "layout": "none",
@@ -758,7 +749,9 @@
                   "y": 16,
                   "width": 470,
                   "height": 60,
-                  "text": "Open Settings for display, alerts, and sensor options.",
+                  "text": {
+                    "ref": "string_footer_hint"
+                  },
                   "styles": {
                     "fontSize": 18,
                     "textColor": "#94a3b8",
@@ -766,10 +759,162 @@
                   }
                 }
               ]
+            },
+            {
+              "id": "cont_header",
+              "type": "container",
+              "x": 24,
+              "y": 18,
+              "width": 976,
+              "height": 64,
+              "layout": "none",
+              "styleRefs": [
+                "header_card"
+              ],
+              "children": [
+                {
+                  "id": "lbl_app_title",
+                  "type": "label",
+                  "x": 14,
+                  "y": 10,
+                  "width": 340,
+                  "height": 32,
+                  "text": {
+                    "ref": "string_app_title"
+                  },
+                  "styles": {
+                    "fontSize": 26,
+                    "textColor": "#e5e7eb"
+                  },
+                  "events": []
+                },
+                {
+                  "id": "btn_open_settings",
+                  "type": "button",
+                  "x": 300,
+                  "y": 12,
+                  "width": 118,
+                  "height": 40,
+                  "styles": {
+                    "textColor": "#e5e7eb",
+                    "bgColor": "#0f172a",
+                    "indicatorColor": "#2dd4ff",
+                    "borderColor": "#1f2a44",
+                    "borderWidth": 2,
+                    "borderRadius": 12
+                  },
+                  "events": [
+                    {
+                      "trigger": "clicked",
+                      "actions": [
+                        {
+                          "type": "navigate",
+                          "target": "page_settings",
+                          "anim": "move_left",
+                          "time": 300
+                        }
+                      ]
+                    }
+                  ],
+                  "hidden": false,
+                  "animations": [],
+                  "label": {
+                    "ref": "string_settings"
+                  }
+                },
+                {
+                  "id": "lbl_clock",
+                  "type": "label",
+                  "x": 720,
+                  "y": 12,
+                  "width": 210,
+                  "height": 32,
+                  "text": "08:41",
+                  "styles": {
+                    "fontSize": 26,
+                    "textColor": "#e5e7eb",
+                    "align": "right"
+                  },
+                  "animations": [
+                    {
+                      "property": "opacity",
+                      "from": 180,
+                      "to": 255,
+                      "duration": 700,
+                      "easing": "ease_in_out",
+                      "repeat": -1
+                    }
+                  ]
+                },
+                {
+                  "id": "spn_refresh",
+                  "type": "spinner",
+                  "x": 792,
+                  "y": 8,
+                  "width": 38,
+                  "height": 38,
+                  "speed": 900,
+                  "arcLength": 62,
+                  "styles": {
+                    "indicatorColor": "#a78bfa",
+                    "bgColor": "#0f172a",
+                    "borderColor": "#1f2a44",
+                    "textColor": "#94a3b8"
+                  },
+                  "hidden": false,
+                  "events": []
+                },
+                {
+                  "id": "sw_night",
+                  "type": "switch",
+                  "x": 662,
+                  "y": 18,
+                  "width": 48,
+                  "height": 28,
+                  "checked": true,
+                  "events": [
+                    {
+                      "trigger": "value_changed",
+                      "actions": [
+                        {
+                          "type": "set_theme"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "id": "lbl_night",
+                  "type": "label",
+                  "x": 548,
+                  "y": 18,
+                  "width": 108,
+                  "height": 28,
+                  "text": {
+                    "ref": "string_night"
+                  },
+                  "styles": {
+                    "fontSize": 18,
+                    "textColor": "#94a3b8",
+                    "align": "left"
+                  }
+                }
+              ]
             }
           ]
         }
-      ]
+      ],
+      "swipes": [
+        {
+          "direction": "top",
+          "target": "page_main",
+          "anim": "move_top"
+        }
+      ],
+      "flowX": 240,
+      "flowY": 54,
+      "scrollX": false,
+      "scrollY": false
     },
     {
       "id": "page_settings",
@@ -784,7 +929,9 @@
           "width": 1024,
           "height": 600,
           "layout": "none",
-          "styleRefs": ["app_bg"],
+          "styleRefs": [
+            "app_bg"
+          ],
           "children": [
             {
               "id": "cont_settings_header",
@@ -794,7 +941,9 @@
               "width": 976,
               "height": 64,
               "layout": "none",
-              "styleRefs": ["header_card"],
+              "styleRefs": [
+                "header_card"
+              ],
               "children": [
                 {
                   "id": "lbl_settings_title",
@@ -803,7 +952,9 @@
                   "y": 10,
                   "width": 320,
                   "height": 32,
-                  "text": "Station Settings",
+                  "text": {
+                    "ref": "string_settings_title"
+                  },
                   "styles": {
                     "fontSize": 26,
                     "textColor": "#e5e7eb"
@@ -816,7 +967,9 @@
                   "y": 38,
                   "width": 400,
                   "height": 22,
-                  "text": "Display, alerts, and sensor preferences",
+                  "text": {
+                    "ref": "string_settings_sub"
+                  },
                   "styles": {
                     "fontSize": 16,
                     "textColor": "#94a3b8"
@@ -829,7 +982,9 @@
                   "y": 12,
                   "width": 140,
                   "height": 40,
-                  "label": "Back",
+                  "label": {
+                    "ref": "string_back"
+                  },
                   "styles": {
                     "textColor": "#0f172a",
                     "bgColor": "#2dd4ff",
@@ -862,65 +1017,221 @@
               "width": 1024,
               "height": 6,
               "points": [
-                { "x": 24, "y": 0 },
-                { "x": 1000, "y": 0 }
+                {
+                  "x": 24,
+                  "y": 0
+                },
+                {
+                  "x": 1000,
+                  "y": 0
+                }
               ]
             },
             {
-              "id": "cont_settings_display",
+              "id": "cont_settings_body",
               "type": "container",
               "x": 24,
               "y": 110,
-              "width": 468,
-              "height": 368,
+              "width": 976,
+              "height": 470,
               "layout": "none",
-              "styleRefs": ["metric_card"],
+              "styleRefs": [
+                "metric_card"
+              ],
               "children": [
                 {
-                  "id": "lbl_display_section",
+                  "id": "lbl_language_title",
                   "type": "label",
-                  "x": 18,
-                  "y": 12,
-                  "width": 200,
+                  "x": 24,
+                  "y": 24,
+                  "width": 240,
                   "height": 28,
-                  "text": "Display",
+                  "text": {
+                    "ref": "string_language"
+                  },
                   "styles": {
                     "fontSize": 22,
                     "textColor": "#e5e7eb"
                   }
                 },
                 {
-                  "id": "lbl_brightness",
+                  "id": "lbl_language_hint",
                   "type": "label",
-                  "x": 18,
-                  "y": 52,
-                  "width": 200,
-                  "height": 24,
-                  "text": "Screen brightness",
-                  "styleRefs": ["muted_text"]
+                  "x": 24,
+                  "y": 54,
+                  "width": 520,
+                  "height": 22,
+                  "text": {
+                    "ref": "string_language_hint"
+                  },
+                  "styles": {
+                    "fontSize": 16,
+                    "textColor": "#94a3b8"
+                  }
                 },
                 {
-                  "id": "slider_brightness",
-                  "type": "slider",
-                  "x": 18,
-                  "y": 80,
-                  "width": 420,
-                  "height": 28,
-                  "min": 10,
-                  "max": 100,
-                  "value": 72,
+                  "id": "btn_lang_en",
+                  "type": "button",
+                  "x": 24,
+                  "y": 92,
+                  "width": 220,
+                  "height": 44,
+                  "label": {
+                    "ref": "string_english"
+                  },
                   "styles": {
-                    "indicatorColor": "#2dd4ff",
-                    "bgColor": "#0f172a"
+                    "textColor": "#0f172a",
+                    "bgColor": "#2dd4ff",
+                    "borderColor": "#2dd4ff",
+                    "borderWidth": 2,
+                    "borderRadius": 12
+                  },
+                  "events": [
+                    {
+                      "trigger": "clicked",
+                      "actions": [
+                        {
+                          "type": "set_locale",
+                          "locale": "en"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "id": "btn_lang_de",
+                  "type": "button",
+                  "x": 260,
+                  "y": 92,
+                  "width": 220,
+                  "height": 44,
+                  "label": {
+                    "ref": "string_german"
+                  },
+                  "styles": {
+                    "textColor": "#e5e7eb",
+                    "bgColor": "#0f172a",
+                    "indicatorColor": "#a78bfa",
+                    "borderColor": "#1f2a44",
+                    "borderWidth": 2,
+                    "borderRadius": 12
+                  },
+                  "events": [
+                    {
+                      "trigger": "clicked",
+                      "actions": [
+                        {
+                          "type": "set_locale",
+                          "locale": "de"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "id": "btn_lang_fa",
+                  "type": "button",
+                  "x": 496,
+                  "y": 92,
+                  "width": 220,
+                  "height": 44,
+                  "label": {
+                    "ref": "string_persian"
+                  },
+                  "styles": {
+                    "textColor": "#e5e7eb",
+                    "bgColor": "#0f172a",
+                    "indicatorColor": "#a78bfa",
+                    "borderColor": "#1f2a44",
+                    "borderWidth": 2,
+                    "borderRadius": 12
+                  },
+                  "events": [
+                    {
+                      "trigger": "clicked",
+                      "actions": [
+                        {
+                          "type": "set_locale",
+                          "locale": "fa"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "id": "ln_settings_divider",
+                  "type": "line",
+                  "x": 24,
+                  "y": 168,
+                  "width": 928,
+                  "height": 2,
+                  "points": [
+                    {
+                      "x": 0,
+                      "y": 0
+                    },
+                    {
+                      "x": 928,
+                      "y": 0
+                    }
+                  ]
+                },
+                {
+                  "id": "lbl_dark_mode",
+                  "type": "label",
+                  "x": 24,
+                  "y": 196,
+                  "width": 240,
+                  "height": 28,
+                  "text": "Dark theme",
+                  "styleRefs": [
+                    "muted_text"
+                  ],
+                  "styles": {
+                    "fontSize": 18
+                  }
+                },
+                {
+                  "id": "sw_dark_theme",
+                  "type": "switch",
+                  "x": 896,
+                  "y": 194,
+                  "width": 56,
+                  "height": 32,
+                  "checked": true,
+                  "events": [
+                    {
+                      "trigger": "value_changed",
+                      "actions": [
+                        {
+                          "type": "set_theme"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "id": "lbl_brightness",
+                  "type": "label",
+                  "x": 24,
+                  "y": 252,
+                  "width": 240,
+                  "height": 28,
+                  "text": "Screen brightness",
+                  "styleRefs": [
+                    "muted_text"
+                  ],
+                  "styles": {
+                    "fontSize": 18
                   }
                 },
                 {
                   "id": "lbl_brightness_val",
                   "type": "label",
-                  "x": 360,
-                  "y": 52,
-                  "width": 80,
-                  "height": 24,
+                  "x": 864,
+                  "y": 252,
+                  "width": 88,
+                  "height": 28,
                   "text": "72%",
                   "styles": {
                     "fontSize": 18,
@@ -929,305 +1240,130 @@
                   }
                 },
                 {
-                  "id": "lbl_units",
-                  "type": "label",
-                  "x": 18,
-                  "y": 128,
-                  "width": 160,
-                  "height": 24,
-                  "text": "Temperature units",
-                  "styleRefs": ["muted_text"]
-                },
-                {
-                  "id": "dd_temp_units",
-                  "type": "dropdown",
-                  "x": 18,
-                  "y": 156,
-                  "width": 220,
-                  "height": 40,
-                  "options": ["Celsius (°C)", "Fahrenheit (°F)"],
-                  "selectedIndex": 0,
-                  "styles": {
-                    "textColor": "#e5e7eb",
-                    "bgColor": "#0f172a",
-                    "borderColor": "#1f2a44",
-                    "borderWidth": 2,
-                    "borderRadius": 10
-                  }
-                },
-                {
-                  "id": "lbl_dark_mode",
-                  "type": "label",
-                  "x": 18,
-                  "y": 214,
-                  "width": 200,
-                  "height": 24,
-                  "text": "Dark theme",
-                  "styleRefs": ["muted_text"]
-                },
-                {
-                  "id": "sw_dark_theme",
-                  "type": "switch",
-                  "x": 380,
-                  "y": 210,
-                  "width": 56,
-                  "height": 30,
-                  "checked": true,
-                  "events": [
-                    {
-                      "trigger": "value_changed",
-                      "actions": [{ "type": "set_theme" }]
-                    }
-                  ]
-                },
-                {
-                  "id": "lbl_screen_timeout",
-                  "type": "label",
-                  "x": 18,
-                  "y": 262,
-                  "width": 220,
-                  "height": 24,
-                  "text": "Screen timeout",
-                  "styleRefs": ["muted_text"]
-                },
-                {
-                  "id": "roller_timeout",
-                  "type": "roller",
-                  "x": 18,
-                  "y": 290,
-                  "width": 420,
-                  "height": 64,
-                  "options": ["30 sec", "1 min", "2 min", "5 min", "Never"],
-                  "selectedIndex": 2,
-                  "mode": "normal",
-                  "styles": {
-                    "textColor": "#e5e7eb",
-                    "bgColor": "#0f172a",
-                    "borderColor": "#1f2a44"
-                  }
-                }
-              ]
-            },
-            {
-              "id": "cont_settings_alerts",
-              "type": "container",
-              "x": 512,
-              "y": 110,
-              "width": 488,
-              "height": 368,
-              "layout": "none",
-              "styleRefs": ["metric_card"],
-              "children": [
-                {
-                  "id": "lbl_alerts_section",
-                  "type": "label",
-                  "x": 18,
-                  "y": 12,
-                  "width": 200,
-                  "height": 28,
-                  "text": "Alerts & sensors",
-                  "styles": {
-                    "fontSize": 22,
-                    "textColor": "#e5e7eb"
-                  }
-                },
-                {
-                  "id": "lbl_alert_hum_high",
-                  "type": "label",
-                  "x": 18,
-                  "y": 52,
-                  "width": 280,
-                  "height": 24,
-                  "text": "High humidity warning (>70%)",
-                  "styleRefs": ["muted_text"]
-                },
-                {
-                  "id": "sw_alert_humidity",
-                  "type": "switch",
-                  "x": 400,
-                  "y": 48,
-                  "width": 56,
-                  "height": 30,
-                  "checked": true
-                },
-                {
-                  "id": "lbl_alert_temp",
-                  "type": "label",
-                  "x": 18,
-                  "y": 96,
-                  "width": 280,
-                  "height": 24,
-                  "text": "Freeze alert (<5°C)",
-                  "styleRefs": ["muted_text"]
-                },
-                {
-                  "id": "sw_alert_freeze",
-                  "type": "switch",
-                  "x": 400,
-                  "y": 92,
-                  "width": 56,
-                  "height": 30,
-                  "checked": false
-                },
-                {
-                  "id": "chk_sound_alerts",
-                  "type": "checkbox",
-                  "x": 18,
-                  "y": 140,
-                  "width": 280,
+                  "id": "slider_brightness",
+                  "type": "slider",
+                  "x": 24,
+                  "y": 288,
+                  "width": 928,
                   "height": 32,
-                  "text": "Sound on alerts",
-                  "checked": true,
-                  "styles": {
-                    "textColor": "#e5e7eb"
-                  }
-                },
-                {
-                  "id": "chk_led_pulse",
-                  "type": "checkbox",
-                  "x": 18,
-                  "y": 178,
-                  "width": 280,
-                  "height": 32,
-                  "text": "LED pulse on update",
-                  "checked": false,
-                  "styles": {
-                    "textColor": "#e5e7eb"
-                  }
-                },
-                {
-                  "id": "lbl_sample_rate",
-                  "type": "label",
-                  "x": 18,
-                  "y": 224,
-                  "width": 200,
-                  "height": 24,
-                  "text": "Sensor sample rate",
-                  "styleRefs": ["muted_text"]
-                },
-                {
-                  "id": "bar_sample_rate",
-                  "type": "bar",
-                  "x": 18,
-                  "y": 254,
-                  "width": 440,
-                  "height": 18,
-                  "min": 0,
+                  "min": 10,
                   "max": 100,
-                  "value": 40,
+                  "value": 72,
                   "styles": {
-                    "indicatorColor": "#a78bfa",
+                    "indicatorColor": "#2dd4ff",
                     "bgColor": "#0f172a"
-                  }
-                },
-                {
-                  "id": "lbl_sample_hint",
-                  "type": "label",
-                  "x": 18,
-                  "y": 280,
-                  "width": 440,
-                  "height": 22,
-                  "text": "Normal — one reading every 30 seconds",
-                  "styles": {
-                    "fontSize": 15,
-                    "textColor": "#94a3b8"
-                  }
-                },
-                {
-                  "id": "sw_wifi_sync",
-                  "type": "switch",
-                  "x": 18,
-                  "y": 316,
-                  "width": 56,
-                  "height": 30,
-                  "checked": true
-                },
-                {
-                  "id": "lbl_wifi_sync",
-                  "type": "label",
-                  "x": 84,
-                  "y": 320,
-                  "width": 360,
-                  "height": 24,
-                  "text": "Cloud sync (Wi‑Fi connected)",
-                  "styleRefs": ["muted_text"]
-                }
-              ]
-            },
-            {
-              "id": "cont_settings_device",
-              "type": "container",
-              "x": 24,
-              "y": 494,
-              "width": 976,
-              "height": 88,
-              "layout": "none",
-              "styleRefs": ["header_card"],
-              "children": [
-                {
-                  "id": "lbl_device_name",
-                  "type": "label",
-                  "x": 18,
-                  "y": 14,
-                  "width": 140,
-                  "height": 28,
-                  "text": "Device name",
-                  "styleRefs": ["muted_text"]
-                },
-                {
-                  "id": "ta_device_name",
-                  "type": "textarea",
-                  "x": 18,
-                  "y": 42,
-                  "width": 320,
-                  "height": 36,
-                  "text": "Living Room Station",
-                  "placeholder": "Enter name…",
-                  "oneLine": true,
-                  "styles": {
-                    "textColor": "#e5e7eb",
-                    "bgColor": "#0b1222",
-                    "borderColor": "#1f2a44",
-                    "borderWidth": 2,
-                    "borderRadius": 10
-                  }
-                },
-                {
-                  "id": "lbl_firmware",
-                  "type": "label",
-                  "x": 360,
-                  "y": 20,
-                  "width": 280,
-                  "height": 24,
-                  "text": "Firmware v1.0.0 · LVGL 9.5",
-                  "styles": {
-                    "fontSize": 16,
-                    "textColor": "#94a3b8"
-                  }
-                },
-                {
-                  "id": "btn_reset_defaults",
-                  "type": "button",
-                  "x": 720,
-                  "y": 22,
-                  "width": 220,
-                  "height": 40,
-                  "label": "Reset to defaults",
-                  "styles": {
-                    "textColor": "#e5e7eb",
-                    "bgColor": "#0f172a",
-                    "indicatorColor": "#a78bfa",
-                    "borderColor": "#1f2a44",
-                    "borderWidth": 2,
-                    "borderRadius": 12
                   }
                 }
               ]
             }
           ]
         }
+      ],
+      "flowX": 103,
+      "flowY": 235,
+      "swipes": [
+        {
+          "direction": "left",
+          "target": "page_main"
+        }
       ]
+    },
+    {
+      "id": "page_main",
+      "name": "Page 3",
+      "components": [
+        {
+          "id": "sw_1",
+          "x": 435,
+          "y": 174,
+          "width": 52,
+          "height": 28,
+          "type": "switch",
+          "checked": false
+        },
+        {
+          "id": "rol_1",
+          "x": 277,
+          "y": 196,
+          "width": 100,
+          "height": 120,
+          "type": "roller",
+          "options": [
+            "A",
+            "B",
+            "C"
+          ],
+          "selectedIndex": 0
+        },
+        {
+          "id": "ta_1",
+          "x": 397,
+          "y": 248,
+          "width": 160,
+          "height": 72,
+          "type": "textarea",
+          "text": ""
+        },
+        {
+          "id": "spin_1",
+          "x": 429,
+          "y": 319,
+          "width": 48,
+          "height": 48,
+          "type": "spinner",
+          "speed": 1000,
+          "arcLength": 60
+        },
+        {
+          "id": "knob_1",
+          "x": 330,
+          "y": 93,
+          "width": 80,
+          "height": 80,
+          "type": "knob",
+          "min": 0,
+          "max": 100,
+          "value": 50,
+          "startAngle": 135,
+          "endAngle": 45
+        },
+        {
+          "id": "bar_1",
+          "x": 500,
+          "y": 88,
+          "width": 140,
+          "height": 20,
+          "type": "bar",
+          "min": 0,
+          "max": 100,
+          "value": 40
+        },
+        {
+          "id": "sld_1",
+          "x": 592,
+          "y": 198,
+          "width": 140,
+          "height": 24,
+          "type": "slider",
+          "min": 0,
+          "max": 100,
+          "value": 50
+        }
+      ],
+      "swipes": [
+        {
+          "direction": "bottom",
+          "target": "page_station",
+          "anim": "move_top"
+        },
+        {
+          "direction": "right",
+          "target": "page_settings",
+          "anim": "out_right"
+        }
+      ],
+      "flowX": 345,
+      "flowY": 218
     }
   ]
 }
-

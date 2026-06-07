@@ -14,6 +14,9 @@ import type {
 import { widgetVar, screenVar, toIdentifier } from "./naming";
 import { screenLoadAnimCConstant } from "./screenLoadAnim";
 import { dataSetterName } from "./bindingsGen";
+import { emitWidgetTextExpr } from "./stringsGen";
+import { getWidgetTextRef } from "../i18n/widgetText";
+import { emitNavStackAction } from "./navStackGen";
 
 const BINDING_RE = /\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g;
 
@@ -44,13 +47,14 @@ export function emitEventCallback(
     project: EmbfProject,
     page: Page,
     comp: Component,
-    evtDef: EventDef
+    evtDef: EventDef,
+    stringsApi = false
 ): { decl: string; impl: string; registration: string } {
     const v9     = project.project.lvglVersion.startsWith("9");
     const cbName = eventCbName(page.id, comp.id, evtDef.trigger);
     const objVar = widgetVar(page.id, comp.id);
 
-    const actionLines = evtDef.actions.map(a => emitAction(project, page, a, v9));
+    const actionLines = evtDef.actions.map(a => emitAction(project, page, a, v9, stringsApi));
     /* ui_set_*() already calls ui_bindings_apply(); a second apply after every click
      * can corrupt partial-framebuffer displays (green flash / blank labels). */
     const needsBindingsRefresh =
@@ -238,43 +242,31 @@ function emitWidgetSetValue(page: Page, targetId: string, value: number): string
 }
 
 /** Emit one action as a C statement (no leading indent). */
-function emitAction(project: EmbfProject, page: Page, action: Action, v9: boolean): string {
+function emitAction(
+    project: EmbfProject,
+    page: Page,
+    action: Action,
+    v9: boolean,
+    stringsApi = false
+): string {
     switch (action.type) {
         case "navigate":
             return emitNavigateStatement(project, action as NavigateAction, v9);
-        case "nav_push": {
-            const push = action as NavPushAction;
-            return emitNavigateStatement(
-                project,
-                { target: push.route, anim: push.anim, time: push.time, delay: push.delay, autoDel: push.autoDel },
-                v9
-            );
-        }
+        case "nav_push":
+            return emitNavStackAction(action as NavPushAction, v9);
         case "nav_pop":
-            return `/* nav_pop: navigation stack codegen postponed — wire ui_nav_pop() manually or use navigate */`;
-        case "nav_replace": {
-            const r = action as NavReplaceAction;
-            return emitNavigateStatement(
-                project,
-                { target: r.route, anim: r.anim, time: r.time, delay: r.delay, autoDel: r.autoDel },
-                v9
-            );
-        }
-        case "nav_reset": {
-            const r = action as NavResetAction;
-            return emitNavigateStatement(
-                project,
-                { target: r.route, anim: r.anim, time: r.time, delay: r.delay, autoDel: r.autoDel },
-                v9
-            );
-        }
+            return emitNavStackAction(action, v9);
+        case "nav_replace":
+            return emitNavStackAction(action as NavReplaceAction, v9);
+        case "nav_reset":
+            return emitNavStackAction(action as NavResetAction, v9);
         case "set_text": {
             const comp = findComponentOnPage(page, action.target);
             const fieldId =
                 comp?.type === "label" && typeof comp.text === "string"
                     ? singleBindingFieldInLabel(comp.text)
                     : null;
-            if (fieldId) {
+            if (fieldId && typeof action.text === "string") {
                 const field = project.dataModel?.fields?.find(f => f.id === fieldId);
                 if (field) {
                     const setter = emitDataSetterForText(field, action.text);
@@ -283,15 +275,12 @@ function emitAction(project: EmbfProject, page: Page, action: Action, v9: boolea
                     }
                 }
             }
-            const escaped = action.text
-                .replace(/\\/g, "\\\\")
-                .replace(/"/g, '\\"')
-                .replace(/\n/g, "\\n");
+            const textExpr = emitSetTextArg(action.text, stringsApi);
             if (comp?.type === "button") {
                 const wv = widgetVar(page.id, action.target);
-                return `lv_label_set_text(lv_obj_get_child(${wv}, 0), "${escaped}");`;
+                return `lv_label_set_text(lv_obj_get_child(${wv}, 0), ${textExpr});`;
             }
-            return `lv_label_set_text(${widgetVar(page.id, action.target)}, "${escaped}");`;
+            return `lv_label_set_text(${widgetVar(page.id, action.target)}, ${textExpr});`;
         }
         case "set_value": {
             const comp = findComponentOnPage(page, action.target);
@@ -340,16 +329,31 @@ function emitAction(project: EmbfProject, page: Page, action: Action, v9: boolea
             }
             return `{ lv_theme_t *t = lv_theme_default_init(lv_disp_get_default(), ${primary}, ${secondary}, ${darkExpr}, LV_FONT_DEFAULT); lv_disp_set_theme(lv_disp_get_default(), t); lv_obj_invalidate(lv_scr_act()); }`;
         }
+        case "set_locale": {
+            const loc = action.locale.trim().replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+            if (stringsApi) {
+                return `{ ui_set_locale("${loc}"); }`;
+            }
+            return `/* set_locale "${loc}": string resources not linked — add strings.res and regenerate */`;
+        }
         default:
             return `/* unsupported action: ${(action as any).type} */`;
     }
+}
+
+function emitSetTextArg(text: import("../types/embf").WidgetTextValue, stringsApi: boolean): string {
+    return emitWidgetTextExpr(text, stringsApi);
 }
 
 /**
  * Collect all event callback data for a page.
  * Returns arrays of decls, impls, and registration lines.
  */
-export function collectPageEvents(project: EmbfProject, page: Page): {
+export function collectPageEvents(
+    project: EmbfProject,
+    page: Page,
+    stringsApi = false
+): {
     decls: string[];
     impls: string[];
     registrations: string[];
@@ -361,7 +365,13 @@ export function collectPageEvents(project: EmbfProject, page: Page): {
     function walk(comps: Component[]): void {
         for (const comp of comps) {
             for (const evtDef of comp.events ?? []) {
-                const { decl, impl, registration } = emitEventCallback(project, page, comp, evtDef);
+                const { decl, impl, registration } = emitEventCallback(
+                    project,
+                    page,
+                    comp,
+                    evtDef,
+                    stringsApi
+                );
                 decls.push(decl);
                 impls.push(impl);
                 registrations.push(registration);

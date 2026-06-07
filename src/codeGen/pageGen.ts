@@ -4,6 +4,10 @@ import { screenVar, screenInitFn, headerGuard, widgetVar } from "./naming";
 import { emitComponent } from "./widgetGen";
 import { collectPageEvents } from "./eventGen";
 import { collectPageSwipes } from "./swipeGen";
+import { collectPageGridDescriptors } from "./layoutGen";
+import { emitPageInitBaseDir, lvConfRtlCommentBlock } from "./directionGen";
+import { projectNeedsRtl } from "../i18n/textDirection";
+import { uiFontLocalizedCall } from "./rtlFontsGen";
 import { lvglIncludeDirective } from "./lvglInclude";
 import { generateImageExternLines } from "../resources/imageCodegen";
 import { emitOpacityHelperLines, anyOpacityAnimation } from "./animationGen";
@@ -70,18 +74,29 @@ export function generatePageHeader(project: EmbfProject, page: Page): string {
 // Per-page source: ui_<page_id>.c
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function generatePageSource(project: EmbfProject, page: Page): string {
+export function generatePageSource(
+    project: EmbfProject,
+    page: Page,
+    opts?: { stringsApi?: boolean; textDirection?: boolean }
+): string {
     const scrVar = screenVar(page.id);
     const initFn = screenInitFn(page.id);
     const v9     = isLvglV9(project);
+    const stringsApi = opts?.stringsApi === true;
+    const textDirection = opts?.textDirection === true;
 
-    // Global variable declarations for this page
+    const gridStatics = collectPageGridDescriptors(page.id, page.components);
     const allWidgets = flatWidgets(page);
     const varDecls = allWidgets.map(w =>
         `lv_obj_t *${widgetVar(page.id, w.id)} = NULL;`
     );
 
-    const widgetCtx = { fonts: project.fonts, styles: project.styles };
+    const widgetCtx = {
+        fonts: project.fonts,
+        styles: project.styles,
+        stringsApi,
+        useRtlFontFallback: textDirection
+    };
     const bodyLines: string[] = [];
     for (const comp of page.components) {
         bodyLines.push(...emitComponent(page.id, comp, scrVar, v9, widgetCtx));
@@ -117,7 +132,7 @@ export function generatePageSource(project: EmbfProject, page: Page): string {
     }
 
     // Event callbacks and page swipe handlers
-    const events = collectPageEvents(project, page);
+    const events = collectPageEvents(project, page, stringsApi);
     const swipes = collectPageSwipes(project, page);
     const decls = [...events.decls, ...swipes.decls];
     const impls = [...events.impls, ...swipes.impls];
@@ -128,6 +143,7 @@ export function generatePageSource(project: EmbfProject, page: Page): string {
         `/* ui.h includes every ui_<page>.h so navigate handlers can reference other screens. */`,
         `#include "ui.h"`,
         ``,
+        ...(gridStatics.length > 0 ? [`/* Grid track descriptors */`, ...gridStatics, ``] : []),
         `/* Screen variable */`,
         `lv_obj_t *${scrVar} = NULL;`,
         ``,
@@ -143,6 +159,7 @@ export function generatePageSource(project: EmbfProject, page: Page): string {
         `void ${initFn}(void)`,
         `{`,
         `    ${scrVar} = lv_obj_create(NULL);`,
+        ...(textDirection ? [emitPageInitBaseDir(scrVar)] : []),
         ...bgLines,
         ...scrollLines,
         ``,
@@ -195,6 +212,12 @@ export interface GenerateRootHeaderOptions {
     includeStyles?: boolean;
     /** When true, `ui.h` will `#include "ui_bindings.h"` so callers get setters/getters. */
     includeBindings?: boolean;
+    /** When true, `ui.h` will `#include "ui_strings.h"` for `ui_get_string()`. */
+    includeStrings?: boolean;
+    /** When true, `ui.h` will `#include "ui_nav.h"` for stack navigation. */
+    includeNav?: boolean;
+    /** When true, `ui.h` will `#include "ui_rtl_fonts.h"` for Arabic/Persian font fallbacks. */
+    includeRtlFonts?: boolean;
 }
 
 export function generateRootHeader(
@@ -211,6 +234,9 @@ export function generateRootHeader(
     const fontsInclude    = opts?.includeFonts    ? [`#include "ui_fonts.h"`]    : [];
     const stylesInclude   = opts?.includeStyles   ? [`#include "ui_styles.h"`]   : [];
     const bindingsInclude = opts?.includeBindings ? [`#include "ui_bindings.h"`] : [];
+    const stringsInclude  = opts?.includeStrings  ? [`#include "ui_strings.h"`]  : [];
+    const navInclude      = opts?.includeNav      ? [`#include "ui_nav.h"`]      : [];
+    const rtlFontsInclude = opts?.includeRtlFonts ? [`#include "ui_rtl_fonts.h"`] : [];
 
     return [
         AUTOGEN_BANNER,
@@ -226,6 +252,9 @@ export function generateRootHeader(
         ...fontsInclude,
         ...stylesInclude,
         ...bindingsInclude,
+        ...stringsInclude,
+        ...navInclude,
+        ...rtlFontsInclude,
         ``,
         ...imageLines,
         ...includes,
@@ -245,7 +274,10 @@ export function generateRootHeader(
     ].join("\n");
 }
 
-export function generateRootSource(project: EmbfProject): string {
+export function generateRootSource(
+    project: EmbfProject,
+    opts?: { includeStrings?: boolean; needsRtl?: boolean }
+): string {
     const v9          = isLvglV9(project);
     const dark        = project.theme?.dark ? "true" : "false";
     const primaryHex  = project.theme?.primaryColor  ? hexToRaw(project.theme.primaryColor)  : "2196F3";
@@ -262,6 +294,8 @@ export function generateRootSource(project: EmbfProject): string {
         ? `    lv_screen_load(${screenVar(firstScreen.id)});`
         : `    lv_scr_load(${screenVar(firstScreen.id)});`;
 
+    const themeFont = opts?.needsRtl ? uiFontLocalizedCall(14) : `LV_FONT_DEFAULT`;
+
     const themeInit = v9
         ? [
             `    lv_theme_t *theme = lv_theme_default_init(`,
@@ -269,7 +303,7 @@ export function generateRootSource(project: EmbfProject): string {
             `        lv_color_hex(0x${primaryHex}),`,
             `        lv_color_hex(0x${secondaryHex}),`,
             `        ${dark},`,
-            `        LV_FONT_DEFAULT`,
+            `        ${themeFont}`,
             `    );`,
             `    lv_display_set_theme(lv_display_get_default(), theme);`
           ]
@@ -279,11 +313,22 @@ export function generateRootSource(project: EmbfProject): string {
             `        lv_color_hex(0x${primaryHex}),`,
             `        lv_color_hex(0x${secondaryHex}),`,
             `        ${dark},`,
-            `        LV_FONT_DEFAULT`,
+            `        ${themeFont}`,
             `    );`,
             `    lv_disp_set_theme(lv_disp_get_default(), theme);`
           ];
 
+    const rtlFontsInit = opts?.needsRtl === true
+        ? [`    /* Montserrat + DejaVu fallback for en/de/fa mixed strings */`, `    ui_rtl_fonts_init();`, ``]
+        : [];
+    const stringsInit =
+        opts?.includeStrings === true
+            ? [`    /* String resources (strings.res) — active table defaults to strings.res defaultLocale */`, `    ui_strings_init();`, ``]
+            : [];
+    const rtlAfterScreens =
+        opts?.includeStrings === true && opts?.needsRtl === true
+            ? [`    /* RTL: re-apply base_dir now that all screens exist */`, `    ui_apply_text_direction();`, ``]
+            : [];
     const stylesInit = (project.styles?.length ?? 0) > 0
         ? [`    /* Initialise named lv_style_t objects (ui_styles.c) */`, `    ui_styles_init();`, ``]
         : [];
@@ -304,8 +349,10 @@ export function generateRootSource(project: EmbfProject): string {
         ``,
         `void ui_init(void)`,
         `{`,
+        ...rtlFontsInit,
         ...themeInit,
         ``,
+        ...stringsInit,
         ...stylesInit,
         `    /* Create all screens */`,
         ...initCalls,
@@ -315,14 +362,36 @@ export function generateRootSource(project: EmbfProject): string {
         loadCall,
         ``,
         ...bindingsAfterLoad,
+        ...rtlAfterScreens,
         `}`,
         ``
     ].join("\n");
 }
 
-export function generateLvConf(project: EmbfProject): string {
+export function generateLvConf(
+    project: EmbfProject,
+    strings?: import("../i18n/stringsResParser").StringsResFile | null
+): string {
     const { bitDepth, colorFormat } = project.display;
     const colorDepth = bitDepth === 16 ? 16 : bitDepth === 24 ? 24 : 32;
+    const needsRtl = projectNeedsRtl(project, strings ?? null);
+    const rtlBlock = needsRtl
+        ? [
+              `/* Bidirectional + Arabic/Persian shaping (project uses RTL locales) */`,
+              `#define LV_USE_BIDI  1`,
+              `#define LV_USE_ARABIC_PERSIAN_CHARS  1`,
+              `#define LV_FONT_DEJAVU_16_PERSIAN_HEBREW  1`,
+              lvConfRtlCommentBlock(),
+              ``
+          ]
+        : [
+              `/* RTL/BiDi disabled — enable when using ar/fa/he locales: */`,
+              `#define LV_USE_BIDI  0`,
+              `#define LV_USE_ARABIC_PERSIAN_CHARS  0`,
+              `#define LV_FONT_DEJAVU_16_PERSIAN_HEBREW  0`,
+              lvConfRtlCommentBlock(),
+              ``
+          ];
 
     return [
         AUTOGEN_BANNER,
@@ -382,6 +451,7 @@ export function generateLvConf(project: EmbfProject): string {
         `#define LV_USE_FLEX           1`,
         `#define LV_USE_GRID           1`,
         ``,
+        ...rtlBlock,
         `#define LV_USE_LOG  0`,
         `#define LV_USE_ASSERT_NULL    1`,
         `#define LV_USE_ASSERT_MALLOC  1`,

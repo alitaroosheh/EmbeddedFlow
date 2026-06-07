@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import * as fs from "fs";
 import * as path from "path";
 import { EmbfProject } from "./types/embf";
 import { buildComponentsSidebarHtml } from "./embfPaletteIcons";
@@ -36,6 +37,10 @@ import { addPageInEmbfFile, removePageInEmbfFile, renamePageInEmbfFile } from ".
 import { addNavigateFlowInEmbfFile, removeNavigateFlowInEmbfFile } from "./embfFlowEdit";
 import { addPageSwipeFlowInEmbfFile, removePageSwipeFlowInEmbfFile } from "./embfPageSwipeEdit";
 import { embeddedFlowLog } from "./outputLog";
+import { getStringsResRelPath, resolveStringsResPath } from "./i18n/stringsResPath";
+import { readStringsResFile } from "./i18n/stringsResParser";
+import { listAllStringKeys } from "./i18n/widgetText";
+import { openStringsResForEmbf } from "./stringsResEditorProvider";
 
 // Messages sent from extension host → webview
 export type HostToWebviewMessage =
@@ -134,7 +139,8 @@ export type WebviewToHostMessage =
           direction: string;
       }
     | { type: "generateCode" }
-    | { type: "newProject" };
+    | { type: "newProject" }
+    | { type: "openStringResources" };
 
 export interface WebviewLoadPayload {
     project: EmbfProject;
@@ -157,6 +163,17 @@ export interface WebviewLoadPayload {
     codegenOutputResolved?: string;
     /** Resolved image files for preview overlays (`id` → webview URI). */
     imageAssets?: { id: string; uri: string; path: string }[];
+    /** Parsed string resources for preview text resolution (I18n6/I18n7). */
+    stringsRes?: {
+        defaultLocale: string;
+        locales: Record<string, Record<string, string>>;
+        keys: string[];
+        localeMeta?: Record<string, { direction?: "ltr" | "rtl" }>;
+    } | null;
+    stringsResRelPath?: string;
+    stringsResError?: string;
+    /** Locale ids available in the linked `.res` (for preview picker). */
+    stringsResLocaleIds?: string[];
 }
 
 export interface SendProjectOptions {
@@ -349,6 +366,26 @@ export class EmbfPreviewPanel {
         });
         payload.imageAssets = imageAssets;
 
+        payload.stringsResRelPath = getStringsResRelPath(project);
+        try {
+            const stringsAbs = resolveStringsResPath(project, this._filePath);
+            if (fs.existsSync(stringsAbs)) {
+                const stringsDoc = readStringsResFile(stringsAbs);
+                payload.stringsRes = {
+                    defaultLocale: stringsDoc.defaultLocale,
+                    locales: stringsDoc.locales,
+                    keys: listAllStringKeys(stringsDoc),
+                    localeMeta: stringsDoc.localeMeta
+                };
+                payload.stringsResLocaleIds = Object.keys(stringsDoc.locales).sort();
+            } else {
+                payload.stringsRes = null;
+            }
+        } catch (e) {
+            payload.stringsRes = null;
+            payload.stringsResError = e instanceof Error ? e.message : String(e);
+        }
+
         this.postToWebview({
             type: "load",
             payload
@@ -408,6 +445,8 @@ export class EmbfPreviewPanel {
             );
         } else if (msg.type === "newProject") {
             void this._runNewProjectFromPreview();
+        } else if (msg.type === "openStringResources") {
+            void openStringsResForEmbf(this._filePath, readEmbfProject(this._filePath));
         } else if (msg.type === "log") {
             embeddedFlowLog("webview", msg.level, msg.text);
         } else if (msg.type === "ready") {
@@ -1206,6 +1245,18 @@ export class EmbfPreviewPanel {
             border-radius: 3px;
         }
         #toolbar label { font-size: 12px; color: #999; }
+        #toolbar .tb-toolbar-check {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            margin-right: 2px;
+            cursor: pointer;
+            user-select: none;
+            white-space: nowrap;
+        }
+        #toolbar .tb-toolbar-check:hover {
+            color: #ccc;
+        }
         #toolbar .tb-btn {
             background: #3c3c3c;
             color: #ccc;
@@ -2650,10 +2701,6 @@ export class EmbfPreviewPanel {
             <div class="tb-menu-wrap">
                 <button type="button" class="tb-menu-trigger" id="tb-menu-view-trigger" aria-haspopup="true">View ▾</button>
                 <div class="tb-menu-panel" id="tb-menu-view" hidden role="menu">
-                    <label class="tb-menu-check" title="Select and drag widgets">
-                        <input type="checkbox" id="design-mode" checked />
-                        Design mode
-                    </label>
                     <label class="tb-menu-check" title="Snap moves and resize to grid">
                         <input type="checkbox" id="design-grid" />
                         Grid snap
@@ -2687,8 +2734,14 @@ export class EmbfPreviewPanel {
             </div>
         </div>
         <div class="tb-bar-context">
+            <label class="tb-toolbar-check" title="Select and drag widgets; off = run LVGL interactions">
+                <input type="checkbox" id="design-mode" checked />
+                Design mode
+            </label>
             <label for="page-select">Page:</label>
             <select id="page-select"></select>
+            <label for="preview-locale">Locale:</label>
+            <select id="preview-locale" title="Preview string locale from strings.res" disabled></select>
             <label for="toolbar-widget-select">Widget:</label>
             <select id="toolbar-widget-select" title="Select a widget on the current page"></select>
         </div>

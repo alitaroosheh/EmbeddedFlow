@@ -9,6 +9,8 @@ import type {
     StyleProps,
     TextDirection
 } from "./types/embf";
+import { isStringsResPath } from "./i18n/stringsResPath";
+import { patchWidgetTextField } from "./i18n/widgetText";
 import { SUPPORTED_VERSIONS } from "./embfParser";
 import { allocateNewComponentId } from "./embfWidgetFactory";
 
@@ -344,6 +346,34 @@ function setRollerMode(comp: Record<string, unknown>, value: unknown): void {
     }
 }
 
+function patchContainerFlexGrid(comp: ContainerComponent, patch: Record<string, unknown>): void {
+    const alignKeys = [
+        "flexAlign",
+        "flexCrossAlign",
+        "flexTrackCrossAlign",
+        "gridAlign",
+        "gridVAlign"
+    ] as const;
+    for (const k of alignKeys) {
+        if (k in patch && typeof patch[k] === "string") {
+            const v = (patch[k] as string).trim();
+            if (v === "") {
+                delete comp[k];
+            } else if (/^(start|end|center|space_evenly|space_around|space_between)$/.test(v)) {
+                comp[k] = v as NonNullable<ContainerComponent["flexAlign"]>;
+            }
+        }
+    }
+    if ("gridColumnGap" in patch) setFiniteInt(comp as unknown as Record<string, unknown>, "gridColumnGap", patch.gridColumnGap);
+    if ("gridRowGap" in patch) setFiniteInt(comp as unknown as Record<string, unknown>, "gridRowGap", patch.gridRowGap);
+    if ("gridColumnDescriptors" in patch && Array.isArray(patch.gridColumnDescriptors)) {
+        comp.gridColumnDescriptors = patch.gridColumnDescriptors as ContainerComponent["gridColumnDescriptors"];
+    }
+    if ("gridRowDescriptors" in patch && Array.isArray(patch.gridRowDescriptors)) {
+        comp.gridRowDescriptors = patch.gridRowDescriptors as ContainerComponent["gridRowDescriptors"];
+    }
+}
+
 /**
  * Apply editable inspector fields onto a component (does not validate the full project).
  */
@@ -412,10 +442,21 @@ export function applyComponentPatch(comp: Component, patch: Record<string, unkno
 
     if ("scrollX" in patch) setBool(r, "scrollX", patch.scrollX);
     if ("scrollY" in patch) setBool(r, "scrollY", patch.scrollY);
+    if ("flexGrow" in patch) setFiniteInt(r, "flexGrow", patch.flexGrow);
+    for (const k of ["gridCol", "gridRow", "gridColSpan", "gridRowSpan"] as const) {
+        if (k in patch) setFiniteInt(r, k, patch[k]);
+    }
+    for (const k of ["gridCellXAlign", "gridCellYAlign"] as const) {
+        if (k in patch && typeof patch[k] === "string") {
+            const v = (patch[k] as string).trim();
+            if (v === "") delete r[k];
+            else if (/^(start|end|center|stretch)$/.test(v)) r[k] = v;
+        }
+    }
 
     switch (comp.type) {
         case "label":
-            if ("text" in patch) setStr(r, "text", patch.text);
+            if ("text" in patch) patchWidgetTextField(r, "text", patch.text);
             if ("longMode" in patch) {
                 const lm = patch.longMode;
                 if (typeof lm === "string" && lm.trim() === "") {
@@ -426,7 +467,7 @@ export function applyComponentPatch(comp: Component, patch: Record<string, unkno
             }
             break;
         case "button":
-            if ("label" in patch) setStr(r, "label", patch.label);
+            if ("label" in patch) patchWidgetTextField(r, "label", patch.label);
             break;
         case "image":
             if ("src" in patch) setStr(r, "src", patch.src);
@@ -461,7 +502,7 @@ export function applyComponentPatch(comp: Component, patch: Record<string, unkno
         case "switch":
         case "checkbox":
             if ("checked" in patch) setBool(r, "checked", patch.checked);
-            if (comp.type === "checkbox" && "text" in patch) setStr(r, "text", patch.text);
+            if (comp.type === "checkbox" && "text" in patch) patchWidgetTextField(r, "text", patch.text);
             break;
         case "dropdown":
         case "roller":
@@ -513,6 +554,7 @@ export function applyComponentPatch(comp: Component, patch: Record<string, unkno
                         (comp as ContainerComponent).flexFlow = ff as NonNullable<ContainerComponent["flexFlow"]>;
                 }
             }
+            patchContainerFlexGrid(comp as ContainerComponent, patch);
             break;
         default:
             break;
@@ -622,6 +664,18 @@ export function applyPageInspectorPatch(
             delete project.project.outputPath;
         } else if (typeof op === "string" && op.trim()) {
             project.project.outputPath = op.trim();
+        }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(patch, "projStringsPath")) {
+        const sp = patch.projStringsPath;
+        if (sp === null || sp === "") {
+            delete project.project.stringsPath;
+        } else if (typeof sp === "string") {
+            const trimmed = sp.trim();
+            if (trimmed && isStringsResPath(trimmed)) {
+                project.project.stringsPath = trimmed;
+            }
         }
     }
 

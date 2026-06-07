@@ -20,6 +20,12 @@ import {
 } from "./stringsGen";
 import { projectUsesNavStack, generateNavStackHeader, generateNavStackSource } from "./navStackGen";
 import { projectNeedsRtl } from "../i18n/textDirection";
+import {
+    generateRtlFontsHeader,
+    generateRtlFontsSource,
+    LATIN1_FONT_SIZES,
+    readLatin1FontSourceForProject
+} from "./rtlFontsGen";
 import { convertProjectImages } from "../resources";
 
 export { resolveCodegenOutputDir } from "./outputDir";
@@ -128,10 +134,21 @@ export function generateCode(
             includeStyles: stylesHeader !== null,
             includeBindings: bindingsHeader !== null,
             includeStrings: stringsApi,
-            includeNav: navStack
+            includeNav: navStack,
+            includeRtlFonts: needsRtl
         })
     );
-    files.set(path.join(dir, "ui.c"), generateRootSource(project, { includeStrings: stringsApi }));
+    if (needsRtl) {
+        files.set(path.join(dir, "ui_rtl_fonts.h"), generateRtlFontsHeader());
+        files.set(path.join(dir, "ui_rtl_fonts.c"), generateRtlFontsSource());
+        for (const size of LATIN1_FONT_SIZES) {
+            files.set(
+                path.join(dir, `embf_font_latin1_${size}.c`),
+                readLatin1FontSourceForProject(size, project)
+            );
+        }
+    }
+    files.set(path.join(dir, "ui.c"), generateRootSource(project, { includeStrings: stringsApi, needsRtl }));
     files.set(path.join(dir, "lv_conf.h"), generateLvConf(project, stringsRes));
 
     for (const [relPath, content] of imageResult.files) {

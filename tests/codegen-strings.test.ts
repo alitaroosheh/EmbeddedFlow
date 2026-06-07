@@ -20,6 +20,15 @@ describe("strings X-Macro codegen (I18n9–11)", () => {
             height: 24,
             text: { ref: "app_title" }
         });
+        raw.pages[0].components.push({
+            id: "btn_ok",
+            type: "button",
+            x: 0,
+            y: 28,
+            width: 80,
+            height: 32,
+            label: { ref: "app_title" }
+        });
         const project = parseEmbfSource(JSON.stringify(raw));
         const strings = {
             defaultLocale: "en",
@@ -37,9 +46,17 @@ describe("strings X-Macro codegen (I18n9–11)", () => {
         expect(bundle!.header).toContain("ui_set_locale");
         expect(bundle!.source).toContain("ui_strings_table_en");
         expect(bundle!.source).toContain("ui_strings_table_de");
-        expect(bundle!.refreshSource).toContain("ui_refresh_localized_text");
+        expect(bundle!.source).toContain("ui_strings_init");
+        expect(bundle!.source).not.toMatch(/void ui_strings_init\(void\)\s*\{[^}]*ui_set_locale/s);
+        expect(bundle!.refreshSource).toContain("ui_set_button_label(ui_page_main_btn_ok");
+        expect(bundle!.refreshSource).not.toContain("ui_page_main_btn_ok_lbl");
         expect(bundle!.localeDefs.get("en")).toContain('X(UI_STR_APP_TITLE, "Hello")');
         expect(bundle!.localeDefs.get("de")).toContain('X(UI_STR_APP_TITLE, "Hallo")');
+        expect(bundle!.localeDefs.get("en")).toContain("#define UI_STRING_LIST_EN");
+        expect(bundle!.localeDefs.get("de")).toContain("#define UI_STRING_LIST_DE");
+        expect(bundle!.source).toContain("UI_STRING_LIST_EN");
+        expect(bundle!.source).toContain("UI_STRING_LIST_DE");
+        expect(bundle!.source).not.toContain("    UI_STRING_LIST\n");
     });
 
     it("generateCode writes string resource files when .res exists", () => {
@@ -141,6 +158,13 @@ describe("widget / action string refs (I18n10, I18n12)", () => {
         const result = generateCode(project, embfPath, path.join(dir, "out"));
         const pageC = result.files.get(path.join(dir, "out", "ui_page_main.c")) ?? "";
         expect(pageC).toContain('ui_set_locale("de")');
-        expect(pageC).toContain("ui_refresh_localized_text()");
+        expect(pageC).not.toContain("ui_set_locale(\"de\"); ui_refresh_localized_text()");
+        const uiC = result.files.get(path.join(dir, "out", "ui.c")) ?? "";
+        const initIdx = uiC.indexOf("ui_page_main_init");
+        const rtlIdx = uiC.indexOf("ui_apply_text_direction");
+        if (rtlIdx >= 0) {
+            expect(initIdx).toBeGreaterThanOrEqual(0);
+            expect(initIdx).toBeLessThan(rtlIdx);
+        }
     });
 });

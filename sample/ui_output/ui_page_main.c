@@ -3,25 +3,86 @@
  * To regenerate: VSCode → Command Palette → "EmbeddedFlow: Generate C Code"
  */
 
-#include "ui_page_main.h"
+/* ui.h includes every ui_<page>.h so navigate handlers can reference other screens. */
+#include "ui.h"
 
 /* Screen variable */
 lv_obj_t *ui_page_main = NULL;
 
 /* Widget variables */
-lv_obj_t *ui_page_main_lbl_hello = NULL;
+lv_obj_t *ui_page_main_sw_1 = NULL;
+lv_obj_t *ui_page_main_rol_1 = NULL;
+lv_obj_t *ui_page_main_ta_1 = NULL;
+lv_obj_t *ui_page_main_spin_1 = NULL;
+lv_obj_t *ui_page_main_knob_1 = NULL;
+lv_obj_t *ui_page_main_bar_1 = NULL;
+lv_obj_t *ui_page_main_sld_1 = NULL;
+
+/* Event callback forward declarations */
+static void ui_page_main_on_swipe(lv_event_t *e);
+
+/* Event callback implementations */
+static void ui_page_main_on_swipe(lv_event_t *e)
+{
+    if (lv_event_get_code(e) != LV_EVENT_GESTURE) {
+        return;
+    }
+    lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_active());
+    if (dir == LV_DIR_BOTTOM) {
+        lv_screen_load_anim(ui_page_station, LV_SCR_LOAD_ANIM_MOVE_TOP, 300, 0, false);
+    }
+    if (dir == LV_DIR_RIGHT) {
+        lv_screen_load_anim(ui_page_settings, LV_SCR_LOAD_ANIM_OUT_RIGHT, 300, 0, false);
+    }
+}
 
 void ui_page_main_screen_init(void)
 {
     ui_page_main = lv_obj_create(NULL);
-    lv_obj_set_style_bg_color(ui_page_main, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(ui_page_main, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_base_dir(ui_page_main, LV_BASE_DIR_LTR, LV_PART_MAIN);
 
-    lv_obj_t *ui_page_main_lbl_hello = lv_label_create(ui_page_main);
-    lv_label_set_text(ui_page_main_lbl_hello, "Hello, EmbeddedFlow!");
-    lv_obj_set_pos(ui_page_main_lbl_hello, 10, 10);
-    lv_obj_set_size(ui_page_main_lbl_hello, 600, 30);
-    lv_obj_set_style_text_color(ui_page_main_lbl_hello, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(ui_page_main_lbl_hello, &lv_font_montserrat_16, LV_PART_MAIN | LV_STATE_DEFAULT);
+    ui_page_main_sw_1 = lv_switch_create(ui_page_main);
+    lv_obj_set_pos(ui_page_main_sw_1, 435, 174);
+    lv_obj_set_size(ui_page_main_sw_1, 52, 28);
 
+    ui_page_main_rol_1 = lv_roller_create(ui_page_main);
+    lv_roller_set_options(ui_page_main_rol_1, "A\nB\nC", LV_ROLLER_MODE_NORMAL);
+    lv_roller_set_selected(ui_page_main_rol_1, 0, LV_ANIM_OFF);
+    lv_obj_set_pos(ui_page_main_rol_1, 277, 196);
+    lv_obj_set_size(ui_page_main_rol_1, 100, 120);
+
+    ui_page_main_ta_1 = lv_textarea_create(ui_page_main);
+    lv_obj_set_pos(ui_page_main_ta_1, 397, 248);
+    lv_obj_set_size(ui_page_main_ta_1, 160, 72);
+
+    ui_page_main_spin_1 = lv_spinner_create(ui_page_main);
+    lv_spinner_set_anim_params(ui_page_main_spin_1, 1000, 60);
+    lv_obj_set_pos(ui_page_main_spin_1, 429, 319);
+    lv_obj_set_size(ui_page_main_spin_1, 48, 48);
+
+    ui_page_main_knob_1 = lv_arc_create(ui_page_main);
+    lv_arc_set_range(ui_page_main_knob_1, 0, 100);
+    lv_arc_set_value(ui_page_main_knob_1, 50);
+    lv_arc_set_bg_angles(ui_page_main_knob_1, 135, 45);
+    lv_obj_remove_style(ui_page_main_knob_1, NULL, LV_PART_KNOB);
+    lv_obj_set_style_arc_width(ui_page_main_knob_1, 8, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(ui_page_main_knob_1, 8, LV_PART_INDICATOR);
+    lv_obj_add_flag(ui_page_main_knob_1, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_pos(ui_page_main_knob_1, 330, 93);
+    lv_obj_set_size(ui_page_main_knob_1, 80, 80);
+
+    ui_page_main_bar_1 = lv_bar_create(ui_page_main);
+    lv_bar_set_range(ui_page_main_bar_1, 0, 100);
+    lv_bar_set_value(ui_page_main_bar_1, 40, LV_ANIM_OFF);
+    lv_obj_set_pos(ui_page_main_bar_1, 500, 88);
+    lv_obj_set_size(ui_page_main_bar_1, 140, 20);
+
+    ui_page_main_sld_1 = lv_slider_create(ui_page_main);
+    lv_slider_set_range(ui_page_main_sld_1, 0, 100);
+    lv_slider_set_value(ui_page_main_sld_1, 50, LV_ANIM_OFF);
+    lv_obj_set_pos(ui_page_main_sld_1, 592, 198);
+    lv_obj_set_size(ui_page_main_sld_1, 140, 24);
+
+    /* Event registrations */
+    lv_obj_add_event_cb(ui_page_main, ui_page_main_on_swipe, LV_EVENT_GESTURE, NULL);
 }

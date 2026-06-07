@@ -332,7 +332,7 @@ function emitAction(
         case "set_locale": {
             const loc = action.locale.trim().replace(/\\/g, "\\\\").replace(/"/g, '\\"');
             if (stringsApi) {
-                return `{ ui_set_locale("${loc}"); ui_refresh_localized_text(); }`;
+                return `{ ui_set_locale("${loc}"); }`;
             }
             return `/* set_locale "${loc}": string resources not linked — add strings.res and regenerate */`;
         }

@@ -1,9 +1,12 @@
 import type { FontDef, StyleProps } from "../types/embf";
+import { uiFontLocalizedCall } from "./rtlFontsGen";
 
 /** Optional context passed to {@link emitStyleCalls} for project-aware lookups. */
 export interface StyleEmitContext {
     /** Project-declared fonts; enables `fontFamily` → `UI_FONT_*` resolution. */
     fonts?: FontDef[];
+    /** When true, use DejaVu Arabic/Persian font for widget text (RTL projects). */
+    useRtlFontFallback?: boolean;
 }
 
 /**
@@ -62,7 +65,7 @@ export function emitStyleCalls(
     if (fontExpr) {
         lines.push(s("text_font", fontExpr));
     } else if (styles.fontSize !== undefined) {
-        lines.push(s("text_font", builtinFont(styles.fontSize)));
+        lines.push(s("text_font", builtinFont(styles.fontSize, ctx)));
     }
     if (styles.align !== undefined) {
         const alignMap: Record<string, string> = {
@@ -137,10 +140,13 @@ function resolveFontExpr(styles: StyleProps, fonts: FontDef[] | undefined): stri
  * Map a font size (px) to the nearest available Montserrat built-in font.
  * Falls back to `LV_FONT_DEFAULT` for unknown sizes.
  */
-export function builtinFont(size: number): string {
+export function builtinFont(size: number, ctx?: StyleEmitContext): string {
     const available = [8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48];
     const nearest = available.reduce((prev, cur) =>
         Math.abs(cur - size) < Math.abs(prev - size) ? cur : prev
     );
+    if (ctx?.useRtlFontFallback) {
+        return uiFontLocalizedCall(size);
+    }
     return `&lv_font_montserrat_${nearest}`;
 }

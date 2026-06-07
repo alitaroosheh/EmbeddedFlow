@@ -1,16 +1,14 @@
 import type { EmbfProject, TextDirection } from "../types/embf";
 import type { StringsResFile } from "../i18n/stringsResParser";
-import { RTL_LOCALE_IDS, isRtlLocaleId, resolveTextDirection } from "../i18n/textDirection";
-import { screenVar } from "./naming";
-
+import { RTL_LOCALE_IDS, resolveTextDirection } from "../i18n/textDirection";
 /** C base-dir constant for resolved direction. */
 export function baseDirCConstant(dir: TextDirection): string {
     return dir === "rtl" ? "LV_BASE_DIR_RTL" : "LV_BASE_DIR_LTR";
 }
 
-/** Lines emitted at page screen creation (RTL6). */
+/** Lines emitted at page screen creation — layout stays LTR; RTL applies to text widgets only. */
 export function emitPageInitBaseDir(scrVar: string): string {
-    return `    lv_obj_set_style_base_dir(${scrVar}, ui_resolve_base_dir(), LV_PART_MAIN);`;
+    return `    lv_obj_set_style_base_dir(${scrVar}, LV_BASE_DIR_LTR, LV_PART_MAIN);`;
 }
 
 function escapeCString(text: string): string {
@@ -33,13 +31,8 @@ export function emitDirectionHelpers(project: EmbfProject, strings: StringsResFi
     }
 
     const rtlBases = [...RTL_LOCALE_IDS].sort();
-    const applyLines = project.pages.map(
-        p =>
-            `    if (${screenVar(p.id)}) lv_obj_set_style_base_dir(${screenVar(p.id)}, dir, LV_PART_MAIN);`
-    );
 
-    const metaBlock =
-        metaEntries.length > 0
+    const metaBlock =        metaEntries.length > 0
             ? [
                   `typedef struct {`,
                   `    const char *id;`,
@@ -104,8 +97,8 @@ export function emitDirectionHelpers(project: EmbfProject, strings: StringsResFi
         ``,
         `void ui_apply_text_direction(void)`,
         `{`,
-        `    lv_base_dir_t dir = ui_resolve_base_dir();`,
-        ...applyLines,
+        `    /* Absolute-position layouts stay LTR; localized labels get dir in ui_refresh_localized_text(). */`,
+        `    ui_refresh_localized_text();`,
         `}`,
         ``
     ];

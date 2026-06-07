@@ -137,147 +137,6 @@
           ],
           "children": [
             {
-              "id": "cont_header",
-              "type": "container",
-              "x": 24,
-              "y": 18,
-              "width": 976,
-              "height": 64,
-              "layout": "none",
-              "styleRefs": [
-                "header_card"
-              ],
-              "children": [
-                {
-                  "id": "lbl_app_title",
-                  "type": "label",
-                  "x": 14,
-                  "y": 10,
-                  "width": 340,
-                  "height": 32,
-                  "text": {
-                    "ref": "string_app_title"
-                  },
-                  "styles": {
-                    "fontSize": 26,
-                    "textColor": "#e5e7eb"
-                  },
-                  "events": []
-                },
-                {
-                  "id": "btn_open_settings",
-                  "type": "button",
-                  "x": 300,
-                  "y": 12,
-                  "width": 118,
-                  "height": 40,
-                  "styles": {
-                    "textColor": "#e5e7eb",
-                    "bgColor": "#0f172a",
-                    "indicatorColor": "#2dd4ff",
-                    "borderColor": "#1f2a44",
-                    "borderWidth": 2,
-                    "borderRadius": 12
-                  },
-                  "events": [
-                    {
-                      "trigger": "clicked",
-                      "actions": [
-                        {
-                          "type": "navigate",
-                          "target": "page_settings",
-                          "anim": "move_left",
-                          "time": 300
-                        }
-                      ]
-                    }
-                  ],
-                  "hidden": false,
-                  "animations": [],
-                  "label": {
-                    "ref": "string_settings"
-                  }
-                },
-                {
-                  "id": "lbl_clock",
-                  "type": "label",
-                  "x": 720,
-                  "y": 12,
-                  "width": 210,
-                  "height": 32,
-                  "text": "08:41",
-                  "styles": {
-                    "fontSize": 26,
-                    "textColor": "#e5e7eb",
-                    "align": "right"
-                  },
-                  "animations": [
-                    {
-                      "property": "opacity",
-                      "from": 180,
-                      "to": 255,
-                      "duration": 700,
-                      "easing": "ease_in_out",
-                      "repeat": -1
-                    }
-                  ]
-                },
-                {
-                  "id": "spn_refresh",
-                  "type": "spinner",
-                  "x": 668,
-                  "y": 14,
-                  "width": 38,
-                  "height": 38,
-                  "speed": 900,
-                  "arcLength": 62,
-                  "styles": {
-                    "indicatorColor": "#a78bfa",
-                    "bgColor": "#0f172a",
-                    "borderColor": "#1f2a44",
-                    "textColor": "#94a3b8"
-                  },
-                  "hidden": false,
-                  "events": []
-                },
-                {
-                  "id": "sw_night",
-                  "type": "switch",
-                  "x": 660,
-                  "y": 16,
-                  "width": 48,
-                  "height": 28,
-                  "checked": true,
-                  "events": [
-                    {
-                      "trigger": "value_changed",
-                      "actions": [
-                        {
-                          "type": "set_theme"
-                        }
-                      ]
-                    }
-                  ]
-                },
-                {
-                  "id": "lbl_night",
-                  "type": "label",
-                  "x": 604,
-                  "y": 18,
-                  "width": 80,
-                  "height": 28,
-                  "text": {
-                    "ref": "string_night"
-                  },
-                  "styles": {
-                    "fontSize": 18,
-                    "textColor": "#94a3b8",
-                    "align": "left"
-                  }
-                }
-              ]
-            },
-            {
               "id": "ln_header_sep",
               "type": "line",
               "x": 0,
@@ -897,6 +756,147 @@
                     "fontSize": 18,
                     "textColor": "#94a3b8",
                     "align": "right"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "cont_header",
+              "type": "container",
+              "x": 24,
+              "y": 18,
+              "width": 976,
+              "height": 64,
+              "layout": "none",
+              "styleRefs": [
+                "header_card"
+              ],
+              "children": [
+                {
+                  "id": "lbl_app_title",
+                  "type": "label",
+                  "x": 14,
+                  "y": 10,
+                  "width": 340,
+                  "height": 32,
+                  "text": {
+                    "ref": "string_app_title"
+                  },
+                  "styles": {
+                    "fontSize": 26,
+                    "textColor": "#e5e7eb"
+                  },
+                  "events": []
+                },
+                {
+                  "id": "btn_open_settings",
+                  "type": "button",
+                  "x": 300,
+                  "y": 12,
+                  "width": 118,
+                  "height": 40,
+                  "styles": {
+                    "textColor": "#e5e7eb",
+                    "bgColor": "#0f172a",
+                    "indicatorColor": "#2dd4ff",
+                    "borderColor": "#1f2a44",
+                    "borderWidth": 2,
+                    "borderRadius": 12
+                  },
+                  "events": [
+                    {
+                      "trigger": "clicked",
+                      "actions": [
+                        {
+                          "type": "navigate",
+                          "target": "page_settings",
+                          "anim": "move_left",
+                          "time": 300
+                        }
+                      ]
+                    }
+                  ],
+                  "hidden": false,
+                  "animations": [],
+                  "label": {
+                    "ref": "string_settings"
+                  }
+                },
+                {
+                  "id": "lbl_clock",
+                  "type": "label",
+                  "x": 720,
+                  "y": 12,
+                  "width": 210,
+                  "height": 32,
+                  "text": "08:41",
+                  "styles": {
+                    "fontSize": 26,
+                    "textColor": "#e5e7eb",
+                    "align": "right"
+                  },
+                  "animations": [
+                    {
+                      "property": "opacity",
+                      "from": 180,
+                      "to": 255,
+                      "duration": 700,
+                      "easing": "ease_in_out",
+                      "repeat": -1
+                    }
+                  ]
+                },
+                {
+                  "id": "spn_refresh",
+                  "type": "spinner",
+                  "x": 792,
+                  "y": 8,
+                  "width": 38,
+                  "height": 38,
+                  "speed": 900,
+                  "arcLength": 62,
+                  "styles": {
+                    "indicatorColor": "#a78bfa",
+                    "bgColor": "#0f172a",
+                    "borderColor": "#1f2a44",
+                    "textColor": "#94a3b8"
+                  },
+                  "hidden": false,
+                  "events": []
+                },
+                {
+                  "id": "sw_night",
+                  "type": "switch",
+                  "x": 662,
+                  "y": 18,
+                  "width": 48,
+                  "height": 28,
+                  "checked": true,
+                  "events": [
+                    {
+                      "trigger": "value_changed",
+                      "actions": [
+                        {
+                          "type": "set_theme"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "id": "lbl_night",
+                  "type": "label",
+                  "x": 548,
+                  "y": 18,
+                  "width": 108,
+                  "height": 28,
+                  "text": {
+                    "ref": "string_night"
+                  },
+                  "styles": {
+                    "fontSize": 18,
+                    "textColor": "#94a3b8",
+                    "align": "left"
                   }
                 }
               ]

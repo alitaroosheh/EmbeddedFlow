@@ -11,8 +11,8 @@
 
 #include <stdint.h>
 
-/* Color depth — matches project display.bitDepth */
-#define LV_COLOR_DEPTH 16
+/* Color depth — matches project display.bitDepth (ARGB8888) */
+#define LV_COLOR_DEPTH 32
 
 /* Memory */
 #define LV_USE_STDLIB_MALLOC  LV_STDLIB_BUILTIN
@@ -20,7 +20,7 @@
 
 /* HAL */
 #define LV_DEF_REFR_PERIOD  33
-#define LV_DPI_DEF          100
+#define LV_DPI_DEF          120
 
 /* OS */
 #define LV_USE_OS   LV_OS_NONE
@@ -59,9 +59,24 @@
 #define LV_USE_FLEX           1
 #define LV_USE_GRID           1
 
+/* Bidirectional + Arabic/Persian shaping (project uses RTL locales) */
+#define LV_USE_BIDI  1
+#define LV_USE_ARABIC_PERSIAN_CHARS  1
+#define LV_FONT_DEJAVU_16_PERSIAN_HEBREW  1
+/* RTL / bidi (required when using ar/fa/he locales):
+ *   #define LV_USE_BIDI  1
+/* Required for joined Persian/Arabic letters (not just RTL order). */
+ *   #define LV_USE_ARABIC_PERSIAN_CHARS  1
+ */
+
 #define LV_USE_LOG  0
 #define LV_USE_ASSERT_NULL    1
 #define LV_USE_ASSERT_MALLOC  1
+
+/* Hide FPS / CPU overlay labels on the UI screen */
+#define LV_USE_SYSMON         0
+#define LV_USE_PERF_MONITOR   0
+#define LV_USE_MEM_MONITOR    0
 
 #endif /* LV_CONF_H */
 #endif /* enable */

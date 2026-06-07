@@ -3,22 +3,38 @@
  * To regenerate: VSCode → Command Palette → "EmbeddedFlow: Generate C Code"
  */
 
+/* Target LVGL 9.5.0 — project.lvglVersion in .embf must match the LVGL library linked in your firmware. */
 #include "ui.h"
 
 void ui_init(void)
 {
+    /* Montserrat + DejaVu fallback for en/de/fa mixed strings */
+    ui_rtl_fonts_init();
+
     lv_theme_t *theme = lv_theme_default_init(
         lv_display_get_default(),
-        lv_color_hex(0x2196F3),
-        lv_color_hex(0x0D47A1),
+        lv_color_hex(0x2DD4FF),
+        lv_color_hex(0xA78BFA),
         false,
-        LV_FONT_DEFAULT
+        ui_font_montserrat_nearest(14)
     );
     lv_display_set_theme(lv_display_get_default(), theme);
 
+    /* String resources (strings.res) — active table defaults to strings.res defaultLocale */
+    ui_strings_init();
+
+    /* Initialise named lv_style_t objects (ui_styles.c) */
+    ui_styles_init();
+
     /* Create all screens */
+    ui_page_station_screen_init();
+    ui_page_settings_screen_init();
     ui_page_main_screen_init();
 
     /* Load initial screen */
-    lv_screen_load(ui_page_main);
+    lv_screen_load(ui_page_station);
+
+    /* RTL: re-apply base_dir now that all screens exist */
+    ui_apply_text_direction();
+
 }

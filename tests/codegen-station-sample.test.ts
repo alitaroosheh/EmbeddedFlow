@@ -38,6 +38,20 @@ describe("temperature station sample codegen", () => {
         expect(pageC).toContain('lv_label_set_text(ui_page_station_lbl_clock, "08:41")');
         expect(pageC).toContain("ui_get_string(UI_STR_STRING_COMFORT)");
         expect(pageC).toContain("ui_get_string(UI_STR_STRING_APP_TITLE)");
+        expect(hasFileNamed(r.files, "ui_rtl_fonts.h")).toBe(true);
+        expect(hasFileNamed(r.files, "ui_rtl_fonts.c")).toBe(true);
+        expect(getFile(r.files, "ui.c")).toContain("ui_font_montserrat_nearest(14)");
+        expect(getFile(r.files, "ui.c")).toContain("ui_rtl_fonts_init()");
+        expect(pageC).toContain("ui_font_montserrat_nearest(22)");
+        expect(pageC).not.toContain("lv_obj_set_style_text_font(ui_page_station_lbl_temp_title, UI_FONT_BIDI");
+        expect(pageC).toContain("ui_page_station_lbl_night");
+        expect(getFile(r.files, "ui_strings_refresh.c")).toContain(
+            "ui_apply_localized_label_style(ui_page_station_lbl_night"
+        );
+        expect(getFile(r.files, "ui_strings_refresh.c")).toContain("LV_TEXT_ALIGN_LEFT");
+        expect(getFile(r.files, "ui_strings_refresh.c")).toContain("ui_font_montserrat_nearest");
+        expect(getFile(r.files, "embf_font_latin1_14.c")).toContain('#include "lvgl.h"');
+        expect(pageC).not.toMatch(/lv_obj_t \*ui_page_station_arc_temp_gauge = lv_arc_create/);
         expect(pageC).toContain("lv_arc_set_value(ui_page_station_arc_temp_gauge, 24)");
         expect(pageC).toContain("lv_bar_set_value(ui_page_station_bar_hum, 56");
 

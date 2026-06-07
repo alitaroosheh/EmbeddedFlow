@@ -9,6 +9,7 @@ import {
     listAllStringKeys
 } from "../i18n/widgetText";
 import { toIdentifier, widgetVar } from "./naming";
+import { uiFontLocalizedCall, nearestMontserratSize } from "./rtlFontsGen";
 import { emitDirectionHelpers } from "./directionGen";
 
 const AUTOGEN_BANNER = `/*
@@ -30,6 +31,11 @@ export function localeToDefBasename(localeId: string): string {
 /** C macro token selecting a locale at compile time, e.g. `en` → `UI_LOCALE_en`. */
 export function localeToSelectMacro(localeId: string): string {
     return `UI_LOCALE_${localeToDefBasename(localeId)}`;
+}
+
+/** Per-locale X-Macro list name — unique so multiple `.def` files can be included in one `.c`. */
+export function localeToStringListMacro(localeId: string): string {
+    return `UI_STRING_LIST_${localeToDefBasename(localeId).toUpperCase()}`;
 }
 
 function escapeCString(text: string): string {
@@ -118,6 +124,33 @@ export interface LocalizedWidgetBinding {
     componentId: string;
     kind: "label" | "button" | "checkbox";
     key: string;
+    /** Nearest Montserrat px from widget styles (for locale refresh font). */
+    fontPx: number;
+    /** Label/checkbox text align from widget styles (fixed-layout RTL keeps designer align). */
+    textAlignC: string;
+}
+
+function lvTextAlignC(align: string | undefined): string {
+    switch (align) {
+        case "left":
+            return "LV_TEXT_ALIGN_LEFT";
+        case "center":
+            return "LV_TEXT_ALIGN_CENTER";
+        case "right":
+            return "LV_TEXT_ALIGN_RIGHT";
+        default:
+            return "LV_TEXT_ALIGN_AUTO";
+    }
+}
+
+function localizedTextAlign(c: import("../types/embf").Component): string {
+    const styles = (c as { styles?: { align?: string } }).styles;
+    return lvTextAlignC(styles?.align);
+}
+
+function localizedFontPx(c: import("../types/embf").Component): number {
+    const styles = (c as { styles?: { fontSize?: number } }).styles;
+    return nearestMontserratSize(styles?.fontSize ?? 14);
 }
 
 /** Widgets whose text/label uses `{ ref }` — targets for ui_refresh_localized_text(). */
@@ -125,29 +158,96 @@ export function collectLocalizedWidgets(project: EmbfProject): LocalizedWidgetBi
     const out: LocalizedWidgetBinding[] = [];
     for (const page of project.pages) {
         walkComponents(page.components, c => {
+            if (c.hidden) {
+                return;
+            }
+            const fontPx = localizedFontPx(c);
+            const textAlignC = localizedTextAlign(c);
             if (c.type === "label" && isStringResourceRef(c.text)) {
-                out.push({ pageId: page.id, componentId: c.id, kind: "label", key: c.text.ref });
+                out.push({ pageId: page.id, componentId: c.id, kind: "label", key: c.text.ref, fontPx, textAlignC });
             } else if (c.type === "button" && c.label !== undefined && isStringResourceRef(c.label)) {
-                out.push({ pageId: page.id, componentId: c.id, kind: "button", key: c.label.ref });
+                out.push({ pageId: page.id, componentId: c.id, kind: "button", key: c.label.ref, fontPx, textAlignC });
             } else if (c.type === "checkbox" && c.text !== undefined && isStringResourceRef(c.text)) {
-                out.push({ pageId: page.id, componentId: c.id, kind: "checkbox", key: c.text.ref });
+                out.push({ pageId: page.id, componentId: c.id, kind: "checkbox", key: c.text.ref, fontPx, textAlignC });
             }
         }, page.id);
     }
     return out;
 }
 
-function emitRefreshLine(binding: LocalizedWidgetBinding): string {
+function emitRefreshLine(binding: LocalizedWidgetBinding, needsRtl: boolean): string {
     const v = widgetVar(binding.pageId, binding.componentId);
     const expr = `ui_get_string(${stringKeyToEnumSymbol(binding.key)})`;
     switch (binding.kind) {
         case "label":
-            return `    lv_label_set_text(${v}, ${expr});`;
+            return needsRtl
+                ? `    if (${v}) { lv_label_set_text(${v}, ${expr}); ui_apply_localized_label_style(${v}, ${binding.fontPx}, ${binding.textAlignC}); }`
+                : `    if (${v}) lv_label_set_text(${v}, ${expr});`;
         case "button":
-            return `    lv_label_set_text(lv_obj_get_child(${v}, 0), ${expr});`;
+            return `    ui_set_button_label(${v}, ${expr}, ${binding.fontPx});`;
         case "checkbox":
-            return `    lv_checkbox_set_text(${v}, ${expr});`;
+            return needsRtl
+                ? `    if (${v}) { lv_checkbox_set_text(${v}, ${expr}); ui_apply_localized_label_style(${v}, ${binding.fontPx}, ${binding.textAlignC}); }`
+                : `    if (${v}) lv_checkbox_set_text(${v}, ${expr});`;
     }
+}
+
+const LOCALIZED_LABEL_STYLE_HELPER = [
+    `/** Text direction on the widget only — screen layout stays LTR (absolute positions). */`,
+    `static void ui_apply_localized_label_style(lv_obj_t *obj, uint8_t font_px, lv_text_align_t align_hint)`,
+    `{`,
+    `    if (obj == NULL) {`,
+    `        return;`,
+    `    }`,
+    `    lv_base_dir_t dir = ui_resolve_base_dir();`,
+    `    lv_obj_set_style_base_dir(obj, dir, LV_PART_MAIN);`,
+    `    lv_text_align_t align = align_hint;`,
+    `    if (align_hint == LV_TEXT_ALIGN_AUTO) {`,
+    `        align = (dir == LV_BASE_DIR_RTL) ? LV_TEXT_ALIGN_RIGHT : LV_TEXT_ALIGN_LEFT;`,
+    `    }`,
+    `    lv_obj_set_style_text_align(obj, align, LV_PART_MAIN);`,
+    `    lv_obj_set_style_text_font(obj, ui_font_montserrat_nearest(font_px), LV_PART_MAIN);`,
+    `    if (lv_obj_check_type(obj, &lv_label_class)) {`,
+    `        lv_label_set_long_mode(obj, LV_LABEL_LONG_WRAP);`,
+    `    }`,
+    `}`,
+    ``,
+    `static void ui_apply_localized_button_label_style(lv_obj_t *child, uint8_t font_px)`,
+    `{`,
+    `    if (child == NULL) {`,
+    `        return;`,
+    `    }`,
+    `    lv_base_dir_t dir = ui_resolve_base_dir();`,
+    `    lv_obj_set_style_base_dir(child, dir, LV_PART_MAIN);`,
+    `    lv_obj_set_style_text_font(child, ui_font_montserrat_nearest(font_px), LV_PART_MAIN);`,
+    `}`,
+    ``
+].join("\n");
+
+function buildButtonLabelHelper(needsRtl: boolean): string {
+    const styleLine = needsRtl
+        ? `            ui_apply_localized_button_label_style(child, font_px);`
+        : "";
+    return [
+        `/** Button labels are created as child lv_label objects in page init (not file-scope globals). */`,
+        `static void ui_set_button_label(lv_obj_t *btn, const char *text, uint8_t font_px)`,
+        `{`,
+        `    if (btn == NULL || text == NULL) {`,
+        `        return;`,
+        `    }`,
+        `    const uint32_t n = lv_obj_get_child_cnt(btn);`,
+        `    for (uint32_t i = 0; i < n; i++) {`,
+        `        lv_obj_t *child = lv_obj_get_child(btn, i);`,
+        `        if (child != NULL && lv_obj_check_type(child, &lv_label_class)) {`,
+        `            lv_label_set_text(child, text);`,
+        styleLine,
+        `            lv_obj_center(child);`,
+        `            return;`,
+        `        }`,
+        `    }`,
+        `}`,
+        ``
+    ].filter(l => l !== "").join("\n");
 }
 
 export function generateStringsCodegen(
@@ -213,7 +313,7 @@ export function generateStringsCodegen(
                   `/** Resolve base text direction for the active locale (RTL6). */`,
                   `lv_base_dir_t ui_resolve_base_dir(void);`,
                   ``,
-                  `/** Apply ui_resolve_base_dir() to every screen root. */`,
+                  `/** Apply ui_resolve_base_dir() to localized text widgets (layout stays LTR). */`,
                   `void ui_apply_text_direction(void);`
               ]
             : []),
@@ -235,6 +335,7 @@ export function generateStringsCodegen(
             })
             .join(" \\\n");
         const base = localeToDefBasename(localeId);
+        const listMacro = localeToStringListMacro(localeId);
         localeDefs.set(
             localeId,
             [
@@ -242,7 +343,7 @@ export function generateStringsCodegen(
                 `#ifndef UI_STRINGS_${base.toUpperCase()}_DEF`,
                 `#define UI_STRINGS_${base.toUpperCase()}_DEF`,
                 ``,
-                `#define UI_STRING_LIST \\`,
+                `#define ${listMacro} \\`,
                 listLines,
                 ``,
                 `#endif /* UI_STRINGS_${base.toUpperCase()}_DEF */`,
@@ -257,11 +358,12 @@ export function generateStringsCodegen(
     const tableBlocks = localeIdsSorted
         .map(loc => {
             const base = localeToDefBasename(loc);
+            const listMacro = localeToStringListMacro(loc);
             return [
                 `#include "ui_strings_${base}.def"`,
                 `static const char *const ui_strings_table_${base}[UI_STR_COUNT] = {`,
                 `#define X(id, text) text,`,
-                `    UI_STRING_LIST`,
+                `    ${listMacro}`,
                 `#undef X`,
                 `};`
             ].join("\n");
@@ -275,11 +377,15 @@ export function generateStringsCodegen(
         })
         .join(",\n");
 
-    const refreshLines = collectLocalizedWidgets(project).map(emitRefreshLine);
+    const localizedWidgets = collectLocalizedWidgets(project);
+    const refreshLines = localizedWidgets.map(w => emitRefreshLine(w, needsRtl));
     const refreshBody =
         refreshLines.length > 0
             ? refreshLines.join("\n")
             : "    /* no localized widgets */";
+    const buttonHelper =
+        localizedWidgets.some(b => b.kind === "button") ? [buildButtonLabelHelper(needsRtl)] : [];
+    const localizedStyleHelper = needsRtl ? [LOCALIZED_LABEL_STYLE_HELPER] : [];
 
     const refreshSource = [
         AUTOGEN_BANNER,
@@ -287,21 +393,28 @@ export function generateStringsCodegen(
         `#include "ui.h"`,
         `#include "ui_strings.h"`,
         ``,
+        ...localizedStyleHelper,
+        ...buttonHelper,
         `void ui_refresh_localized_text(void)`,
         `{`,
         refreshBody,
+        ...(needsRtl ? [`    lv_obj_invalidate(lv_screen_active());`] : []),
         `}`,
         ``
     ].join("\n");
 
     const directionLines = needsRtl ? emitDirectionHelpers(project, locales) : [];
 
-    const setLocaleTail = needsRtl
-        ? [
-              `            ui_refresh_localized_text();`,
-              `            ui_apply_text_direction();`
-          ]
-        : [`            ui_refresh_localized_text();`];
+    const setLocaleTail = [`            lv_async_call(ui_locale_apply_async_cb, NULL);`];
+
+    const localeApplyAsyncFn = [
+        `static void ui_locale_apply_async_cb(void *user_data)`,
+        `{`,
+        `    (void)user_data;`,
+        `    ui_refresh_localized_text();`,
+        `}`,
+        ``
+    ];
 
     const source = [
         AUTOGEN_BANNER,
@@ -310,6 +423,7 @@ export function generateStringsCodegen(
         `#include <string.h>`,
         ``,
         ...directionLines,
+        ...localeApplyAsyncFn,
         tableBlocks,
         ``,
         `typedef struct {`,
@@ -326,7 +440,8 @@ export function generateStringsCodegen(
         ``,
         `void ui_strings_init(void)`,
         `{`,
-        `    ui_set_locale("${escapeCString(defaultLocale)}");`,
+        `    /* Default locale table is selected by static initializers; do not refresh here —`,
+        `     * widgets are not created until after ui_strings_init() returns from ui_init(). */`,
         `}`,
         ``,
         `void ui_set_locale(const char *locale_id)`,

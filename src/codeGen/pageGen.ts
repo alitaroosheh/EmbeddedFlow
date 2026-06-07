@@ -7,6 +7,7 @@ import { collectPageSwipes } from "./swipeGen";
 import { collectPageGridDescriptors } from "./layoutGen";
 import { emitPageInitBaseDir, lvConfRtlCommentBlock } from "./directionGen";
 import { projectNeedsRtl } from "../i18n/textDirection";
+import { uiFontLocalizedCall } from "./rtlFontsGen";
 import { lvglIncludeDirective } from "./lvglInclude";
 import { generateImageExternLines } from "../resources/imageCodegen";
 import { emitOpacityHelperLines, anyOpacityAnimation } from "./animationGen";
@@ -90,7 +91,12 @@ export function generatePageSource(
         `lv_obj_t *${widgetVar(page.id, w.id)} = NULL;`
     );
 
-    const widgetCtx = { fonts: project.fonts, styles: project.styles, stringsApi };
+    const widgetCtx = {
+        fonts: project.fonts,
+        styles: project.styles,
+        stringsApi,
+        useRtlFontFallback: textDirection
+    };
     const bodyLines: string[] = [];
     for (const comp of page.components) {
         bodyLines.push(...emitComponent(page.id, comp, scrVar, v9, widgetCtx));
@@ -210,6 +216,8 @@ export interface GenerateRootHeaderOptions {
     includeStrings?: boolean;
     /** When true, `ui.h` will `#include "ui_nav.h"` for stack navigation. */
     includeNav?: boolean;
+    /** When true, `ui.h` will `#include "ui_rtl_fonts.h"` for Arabic/Persian font fallbacks. */
+    includeRtlFonts?: boolean;
 }
 
 export function generateRootHeader(
@@ -228,6 +236,7 @@ export function generateRootHeader(
     const bindingsInclude = opts?.includeBindings ? [`#include "ui_bindings.h"`] : [];
     const stringsInclude  = opts?.includeStrings  ? [`#include "ui_strings.h"`]  : [];
     const navInclude      = opts?.includeNav      ? [`#include "ui_nav.h"`]      : [];
+    const rtlFontsInclude = opts?.includeRtlFonts ? [`#include "ui_rtl_fonts.h"`] : [];
 
     return [
         AUTOGEN_BANNER,
@@ -245,6 +254,7 @@ export function generateRootHeader(
         ...bindingsInclude,
         ...stringsInclude,
         ...navInclude,
+        ...rtlFontsInclude,
         ``,
         ...imageLines,
         ...includes,
@@ -264,7 +274,10 @@ export function generateRootHeader(
     ].join("\n");
 }
 
-export function generateRootSource(project: EmbfProject, opts?: { includeStrings?: boolean }): string {
+export function generateRootSource(
+    project: EmbfProject,
+    opts?: { includeStrings?: boolean; needsRtl?: boolean }
+): string {
     const v9          = isLvglV9(project);
     const dark        = project.theme?.dark ? "true" : "false";
     const primaryHex  = project.theme?.primaryColor  ? hexToRaw(project.theme.primaryColor)  : "2196F3";
@@ -281,6 +294,8 @@ export function generateRootSource(project: EmbfProject, opts?: { includeStrings
         ? `    lv_screen_load(${screenVar(firstScreen.id)});`
         : `    lv_scr_load(${screenVar(firstScreen.id)});`;
 
+    const themeFont = opts?.needsRtl ? uiFontLocalizedCall(14) : `LV_FONT_DEFAULT`;
+
     const themeInit = v9
         ? [
             `    lv_theme_t *theme = lv_theme_default_init(`,
@@ -288,7 +303,7 @@ export function generateRootSource(project: EmbfProject, opts?: { includeStrings
             `        lv_color_hex(0x${primaryHex}),`,
             `        lv_color_hex(0x${secondaryHex}),`,
             `        ${dark},`,
-            `        LV_FONT_DEFAULT`,
+            `        ${themeFont}`,
             `    );`,
             `    lv_display_set_theme(lv_display_get_default(), theme);`
           ]
@@ -298,14 +313,21 @@ export function generateRootSource(project: EmbfProject, opts?: { includeStrings
             `        lv_color_hex(0x${primaryHex}),`,
             `        lv_color_hex(0x${secondaryHex}),`,
             `        ${dark},`,
-            `        LV_FONT_DEFAULT`,
+            `        ${themeFont}`,
             `    );`,
             `    lv_disp_set_theme(lv_disp_get_default(), theme);`
           ];
 
+    const rtlFontsInit = opts?.needsRtl === true
+        ? [`    /* Montserrat + DejaVu fallback for en/de/fa mixed strings */`, `    ui_rtl_fonts_init();`, ``]
+        : [];
     const stringsInit =
         opts?.includeStrings === true
-            ? [`    /* String resources (strings.res) — default locale + runtime ui_set_locale() */`, `    ui_strings_init();`, ``]
+            ? [`    /* String resources (strings.res) — active table defaults to strings.res defaultLocale */`, `    ui_strings_init();`, ``]
+            : [];
+    const rtlAfterScreens =
+        opts?.includeStrings === true && opts?.needsRtl === true
+            ? [`    /* RTL: re-apply base_dir now that all screens exist */`, `    ui_apply_text_direction();`, ``]
             : [];
     const stylesInit = (project.styles?.length ?? 0) > 0
         ? [`    /* Initialise named lv_style_t objects (ui_styles.c) */`, `    ui_styles_init();`, ``]
@@ -327,6 +349,7 @@ export function generateRootSource(project: EmbfProject, opts?: { includeStrings
         ``,
         `void ui_init(void)`,
         `{`,
+        ...rtlFontsInit,
         ...themeInit,
         ``,
         ...stringsInit,
@@ -339,6 +362,7 @@ export function generateRootSource(project: EmbfProject, opts?: { includeStrings
         loadCall,
         ``,
         ...bindingsAfterLoad,
+        ...rtlAfterScreens,
         `}`,
         ``
     ].join("\n");

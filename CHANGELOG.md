@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.3.0
+
+- **String resources (i18n)** — link a `strings.res` file from your `.embf` (`project.stringsPath`); edit locales in the **String Resources** custom editor; widget text can reference keys via `{ "ref": "key" }`.
+- **Codegen: `ui_strings.*`** — emits per-locale `.def` tables, `ui_get_string()` / `ui_set_locale()`, and `ui_refresh_localized_text()` for labels, buttons, and checkboxes; **`set_locale`** flow action switches language at runtime.
+- **RTL locales** — Persian/Arabic/Hebrew direction from `localeMeta` or inferred locale id; BiDi and Arabic/Persian shaping hints in generated `lv_conf.h`; text direction applied on localized widgets while **absolute layout stays LTR** (no mirrored screen positions).
+- **Mixed-script fonts** — codegen emits `ui_rtl_fonts.c/h` plus `embf_font_latin1_*.c` with a **Montserrat → Latin-1 (umlauts) → DejaVu (Persian/Arabic)** fallback chain; Latin-1 includes respect `project.lvglInclude` (e.g. `lvgl.h` on ESP-IDF).
+- **Preview** — locale selector in the preview toolbar when `strings.res` is linked; RTL string preview in WASM.
+- **Sample** — `sample/temperature_humidity_station_1024x600_lvgl9.embf` with **en / de / fa** locales and a settings language page.
+- **Fix:** codegen assigns widget globals correctly (no NULL deref on arc/bar updates after navigation).
+- **Fix:** language switch refreshes all localized widgets including button labels (e.g. **فارسی** readable in every locale).
+
 ## 1.2.0 (pre-release)
 
 Published to the Marketplace **pre-release** channel as version **1.2.0** (tags may use `v1.2.0-beta.*`; the VSIX version is always `x.y.z`).

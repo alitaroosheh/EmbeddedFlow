@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.4.0
+
+- **Flow actions:** **`select_button_group`** — exclusive button highlight (temp presets, language picker, humidity modes); works in preview and generated firmware.
+- **Flow actions:** **`play_animations`** — restart all widget `animations[]` on the current page from a button (sample: **Play anims (toolbar)**).
+- **Sample** — temperature/humidity station uses button groups and play-animations; language and preset buttons update highlight correctly.
+- **Codegen:** page `.c` files emit **forward declarations** for static helpers (`ui_anim_opa_cb`, button-group selectors, `play_animations`) before use — fixes ESP-IDF build errors.
+- **Fix:** button groups no longer leave the design-time default (e.g. Hot / English) highlighted when another member is selected.
+- **Fix:** `embf_font_latin1_*.c` includes match `project.lvglInclude` (`lvgl.h` on ESP-IDF, not `lvgl/lvgl.h`).
+
 ## 1.3.0
 
 - **String resources (i18n)** — link a `strings.res` file from your `.embf` (`project.stringsPath`); edit locales in the **String Resources** custom editor; widget text can reference keys via `{ "ref": "key" }`.

@@ -579,6 +579,30 @@ function validateEventActionShape(action: Record<string, unknown>, ap: string): 
             }
             break;
         }
+        case "select_button_group": {
+            const members = action["members"];
+            const active = action["active"];
+            if (!Array.isArray(members) || members.length < 2) {
+                throw new EmbfParseError(`${ap}: select_button_group requires "members" array with at least 2 button ids`);
+            }
+            for (let i = 0; i < members.length; i++) {
+                if (typeof members[i] !== "string" || !members[i].trim()) {
+                    throw new EmbfParseError(`${ap}: select_button_group members[${i}] must be a non-empty string`);
+                }
+            }
+            if (typeof active !== "string" || !active.trim()) {
+                throw new EmbfParseError(`${ap}: select_button_group requires non-empty string "active"`);
+            }
+            if (!members.includes(active)) {
+                throw new EmbfParseError(`${ap}: select_button_group "active" must be one of members`);
+            }
+            if (action["selectedStyles"] !== undefined) {
+                validateOptionalStyles({ styles: action["selectedStyles"] }, `${ap}.selectedStyles`);
+            }
+            break;
+        }
+        case "play_animations":
+            break;
         default:
             throw new EmbfParseError(`${ap}: unknown action type "${ty}"`);
     }

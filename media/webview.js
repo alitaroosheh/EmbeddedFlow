@@ -212,6 +212,8 @@ let stringsResLoadError = "";
 let previewLocale = "";
 /** Avoid stacking locale refresh work on the main thread (prevents UI freeze). */
 let previewLocaleRefreshScheduled = false;
+/** @type {Map<string, string>} groupKey → active button id */
+const previewButtonGroupState = new Map();
 /** Navigation stack for nav_push / nav_pop preview (N5). */
 const previewNavStack = [];
 /** Keep grid descriptor WASM buffers alive per container id. */
@@ -1304,6 +1306,8 @@ function applyPageSwitch(project, pageIndex, navOpts) {
     wasm._embf_load_screen(entry.screenPtr);
     applyEmbfThemeFromProject(project);
     refreshPreviewBindings(page);
+    registerPreviewButtonGroups(page);
+    reapplyPreviewButtonGroups();
     pumpPreviewRedraw(6);
 }
 
@@ -1501,6 +1505,164 @@ const ANIM_EASING_ID = {
  * Run all `animations[]` on the current page via WASM `embf_anim_start`.
  * Requires a rebuilt preview runtime (wasm-src/build.ps1) exporting `_embf_anim_start`.
  */
+function buttonGroupKey(members) {
+    return [...members].sort().join("\0");
+}
+
+function normalizeStyleHex(hex) {
+    return (hex ?? "").replace(/^#/, "").toLowerCase();
+}
+
+function stylesLookSelected(styles, selectedStyles) {
+    if (!styles?.bgColor) {
+        return false;
+    }
+    const bg = normalizeStyleHex(styles.bgColor);
+    const selBg = normalizeStyleHex(selectedStyles?.bgColor);
+    const primary = normalizeStyleHex(currentProject?.theme?.primaryColor ?? "#2dd4ff");
+    const secondary = normalizeStyleHex(currentProject?.theme?.secondaryColor ?? "#a78bfa");
+    return bg === selBg || bg === primary || bg === secondary;
+}
+
+function templateUnselectedStyles(page, members, selectedStyles) {
+    for (const id of members) {
+        const comp = findComponentById(page.components, id);
+        if (comp?.styles && !stylesLookSelected(comp.styles, selectedStyles)) {
+            return comp.styles;
+        }
+    }
+    return {
+        textColor: "#e5e7eb",
+        bgColor: "#0f172a",
+        borderColor: "#1f2a44",
+        borderWidth: 2,
+        borderRadius: 12
+    };
+}
+
+function inactiveStylesForMember(page, memberId, members, selectedStyles) {
+    const comp = findComponentById(page.components, memberId);
+    const styles = comp?.styles;
+    if (styles && !stylesLookSelected(styles, selectedStyles)) {
+        return styles;
+    }
+    return templateUnselectedStyles(page, members, selectedStyles);
+}
+
+function defaultActiveMemberId(page, members, selectedStyles) {
+    for (const id of members) {
+        const comp = findComponentById(page.components, id);
+        if (comp?.styles && stylesLookSelected(comp.styles, selectedStyles)) {
+            return id;
+        }
+    }
+    return members[0] ?? null;
+}
+
+function collectUniqueButtonGroupActions(page) {
+    const seen = new Map();
+    for (const action of collectPageActions(page)) {
+        if (action.type !== "select_button_group") {
+            continue;
+        }
+        const key = buttonGroupKey(action.members);
+        if (!seen.has(key)) {
+            seen.set(key, action);
+        }
+    }
+    return [...seen.values()];
+}
+
+function defaultSelectedButtonStyles() {
+    const primary = currentProject?.theme?.primaryColor ?? "#2dd4ff";
+    return { bgColor: primary, textColor: "#0f172a", borderColor: primary };
+}
+
+function applyButtonGroupSelection(members, activeId, selectedStyles) {
+    const wasm = WasmModule;
+    const page = currentProject?.pages?.[currentPageIndex];
+    if (!wasm || !page || !wasmReady) {
+        return;
+    }
+    const sel = selectedStyles ?? defaultSelectedButtonStyles();
+    previewButtonGroupState.set(buttonGroupKey(members), activeId);
+    for (const id of members) {
+        const ptr = idToObjPtr.get(id);
+        if (!ptr) {
+            continue;
+        }
+        const styles =
+            id === activeId ? sel : inactiveStylesForMember(page, id, members, sel);
+        applyStylesEmbf(wasm, ptr, styles);
+    }
+    pumpPreviewRedraw(2);
+}
+
+function reapplyPreviewButtonGroups() {
+    const page = currentProject?.pages?.[currentPageIndex];
+    if (!page) {
+        return;
+    }
+    for (const action of collectUniqueButtonGroupActions(page)) {
+        const members = action.members;
+        const sel = action.selectedStyles ?? defaultSelectedButtonStyles();
+        const key = buttonGroupKey(members);
+        const activeId =
+            previewButtonGroupState.get(key) ?? defaultActiveMemberId(page, members, sel);
+        if (activeId) {
+            applyButtonGroupSelection(members, activeId, action.selectedStyles);
+        }
+    }
+}
+
+function collectPageActions(page) {
+    const out = [];
+    function walk(comps) {
+        for (const c of comps ?? []) {
+            for (const evt of c.events ?? []) {
+                for (const a of evt.actions ?? []) {
+                    out.push(a);
+                }
+            }
+            if (Array.isArray(c.children)) {
+                walk(c.children);
+            }
+        }
+    }
+    walk(page.components);
+    return out;
+}
+
+function inferDefaultActiveButton(members) {
+    const page = currentProject?.pages?.[currentPageIndex];
+    if (!page) {
+        return members[0];
+    }
+    const primary = (currentProject?.theme?.primaryColor ?? "#2dd4ff").toLowerCase();
+    const secondary = (currentProject?.theme?.secondaryColor ?? "#a78bfa").toLowerCase();
+    for (const id of members) {
+        const comp = findComponentById(page.components, id);
+        const bg = (comp?.styles?.bgColor ?? "").toLowerCase();
+        if (bg && (bg === primary || bg === secondary)) {
+            return id;
+        }
+    }
+    return members[0];
+}
+
+function registerPreviewButtonGroups(page) {
+    for (const action of collectUniqueButtonGroupActions(page)) {
+        const key = buttonGroupKey(action.members);
+        if (!previewButtonGroupState.has(key)) {
+            const sel = action.selectedStyles ?? defaultSelectedButtonStyles();
+            previewButtonGroupState.set(
+                key,
+                defaultActiveMemberId(page, action.members, sel)
+            );
+        }
+    }
+}
+
 function playWidgetAnimationsOnCurrentPage() {
     if (!wasmReady || !WasmModule || !currentProject) {
         return { ok: false, reason: "Preview not ready." };
@@ -1822,6 +1984,7 @@ function refreshPreviewLocaleTextNow() {
     refreshPageLocalizedStrings(wasm, page, entry.idToObjPtr);
     wasm._embf_load_screen(entry.screenPtr);
     refreshPreviewBindings(page);
+    reapplyPreviewButtonGroups();
     pumpPreviewRedraw(2);
     drawDesignOverlay();
 }
@@ -2538,6 +2701,24 @@ function dispatchAction(action, eventValue, currentPage) {
                 previewLocaleSelect.value = loc;
             }
             refreshPreviewLocaleText();
+            break;
+        }
+        case "select_button_group": {
+            const members = Array.isArray(action.members) ? action.members.filter(Boolean) : [];
+            const active = typeof action.active === "string" ? action.active : "";
+            if (members.length < 2 || !active) {
+                return;
+            }
+            applyButtonGroupSelection(members, active, action.selectedStyles);
+            break;
+        }
+        case "play_animations": {
+            const r = playWidgetAnimationsOnCurrentPage();
+            if (!r.ok && r.reason && statusEl) {
+                statusEl.textContent = r.reason;
+            } else if (statusEl && r.started) {
+                statusEl.textContent = `Playing ${r.started} animation(s)…`;
+            }
             break;
         }
     }

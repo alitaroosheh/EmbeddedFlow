@@ -1,4 +1,5 @@
-import type { AnimationDef, AnimationEasing, AnimationProperty } from "../types/embf";
+import type { AnimationDef, AnimationEasing, AnimationProperty, Component, Page } from "../types/embf";
+import { widgetVar } from "./naming";
 
 /** LVGL setter name and cast for each animatable property. */
 const PROPERTY_MAP: Record<AnimationProperty, { setter: string; cast: string }> = {
@@ -83,4 +84,39 @@ export function emitAnimationCalls(varName: string, animations: AnimationDef[] |
         lines.push(`    }`);
     });
     return lines;
+}
+
+function walkComponents(comps: Component[], fn: (c: Component) => void): void {
+    for (const c of comps) {
+        fn(c);
+        if ("children" in c && Array.isArray((c as { children?: Component[] }).children)) {
+            walkComponents((c as { children: Component[] }).children, fn);
+        }
+    }
+}
+
+/** Emit `ui_<page>_play_animations()` when the page has widget animations. */
+export function emitPagePlayAnimationsFn(page: Page): string | null {
+    const blocks: string[] = [];
+    walkComponents(page.components, c => {
+        if (!c.animations?.length) {
+            return;
+        }
+        const v = widgetVar(page.id, c.id);
+        blocks.push(...emitAnimationCalls(v, c.animations).map(l => l.replace(/^    /, "    ")));
+    });
+    if (!blocks.length) {
+        return null;
+    }
+    const fn = `ui_${page.id}_play_animations`;
+    return [
+        `static void ${fn}(void)`,
+        `{`,
+        ...blocks,
+        `}`
+    ].join("\n");
+}
+
+export function pagePlayAnimationsCall(pageId: string): string {
+    return `ui_${pageId}_play_animations();`;
 }

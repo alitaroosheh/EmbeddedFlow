@@ -17,6 +17,8 @@ import { dataSetterName } from "./bindingsGen";
 import { emitWidgetTextExpr } from "./stringsGen";
 import { getWidgetTextRef } from "../i18n/widgetText";
 import { emitNavStackAction } from "./navStackGen";
+import { buttonGroupHelperCall, collectButtonGroups, findButtonGroupForActive } from "./buttonGroupGen";
+import { pagePlayAnimationsCall } from "./animationGen";
 
 const BINDING_RE = /\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g;
 
@@ -336,6 +338,15 @@ function emitAction(
             }
             return `/* set_locale "${loc}": string resources not linked — add strings.res and regenerate */`;
         }
+        case "select_button_group": {
+            const group = findButtonGroupForActive(page, project, action.active);
+            if (!group) {
+                return `/* select_button_group: unknown group for "${action.active}" */`;
+            }
+            return `{ ${buttonGroupHelperCall(page.id, group, action.active)} }`;
+        }
+        case "play_animations":
+            return `{ ${pagePlayAnimationsCall(page.id)} }`;
         default:
             return `/* unsupported action: ${(action as any).type} */`;
     }

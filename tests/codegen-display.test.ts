@@ -3,19 +3,19 @@ import { generateDisplayHeader } from "../src/codeGen/pageGen";
 import { minimalProject } from "./fixtures";
 
 describe("generateDisplayHeader", () => {
-    it("uses effective H×V for portrait when JSON width > height", () => {
+    it("swaps H×V when JSON is wide but orientation is portrait", () => {
         const p = minimalProject({
             display: {
                 orientation: "portrait",
-                width: 600,
-                height: 320
+                width: 1024,
+                height: 600
             }
         });
         const h = generateDisplayHeader(p);
-        expect(h).toMatch(/EMBF_DISPLAY_JSON_WIDTH\s+\(600U\)/);
-        expect(h).toMatch(/EMBF_DISPLAY_JSON_HEIGHT\s+\(320U\)/);
-        expect(h).toMatch(/EMBF_DISPLAY_HOR_RES\s+\(320U\)/);
-        expect(h).toMatch(/EMBF_DISPLAY_VER_RES\s+\(600U\)/);
+        expect(h).toMatch(/EMBF_DISPLAY_JSON_WIDTH\s+\(1024U\)/);
+        expect(h).toMatch(/EMBF_DISPLAY_JSON_HEIGHT\s+\(600U\)/);
+        expect(h).toMatch(/EMBF_DISPLAY_HOR_RES\s+\(600U\)/);
+        expect(h).toMatch(/EMBF_DISPLAY_VER_RES\s+\(1024U\)/);
         expect(h).toContain("orientation=portrait");
     });
 

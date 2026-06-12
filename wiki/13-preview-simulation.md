@@ -6,7 +6,7 @@
 - [x] Emscripten WASM module loaded inside the webview
 - [x] `requestAnimationFrame` loop ticks LVGL and reads RGBA buffer
 - [x] `putImageData` blits RGBA pixels to HTML `<canvas>`
-- [x] Display width and height read from `.embf` `display` section (effective size respects orientation — see [`embfParser.getEffectiveDisplaySize`](../src/embfParser.ts))
+- [x] Display width and height from `.embf` `display` section; effective preview/codegen size applies orientation when JSON is wide but orientation is portrait (see [`embfParser.getEffectiveDisplaySize`](../src/embfParser.ts))
 - [x] When `display.round` is true, preview clips `#display-wrapper` to an inscribed circle (diameter = min(width, height) in CSS pixels); see §13.13
 - [x] Loading overlay shown while WASM initialises
 - [x] Error overlay shown on parse/runtime errors

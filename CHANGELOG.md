@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Fix:** preview/codegen size rules — tall JSON (e.g. 128×160) is never swapped; wide JSON (e.g. 1024×600) swaps when orientation is portrait so mounted panels work; display Width/Height commit on blur/Enter; clamp 1–4096; WASM ignores invalid resize while typing.
+
 ## 1.4.0
 
 - **Flow actions:** **`select_button_group`** — exclusive button highlight (temp presets, language picker, humidity modes); works in preview and generated firmware.

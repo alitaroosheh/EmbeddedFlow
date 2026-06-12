@@ -281,9 +281,25 @@ let previewDarkOverride = null;
 let lastWasmInitWidth = 0;
 let lastWasmInitHeight = 0;
 
+/** Max display width/height (matches embf.schema.json and preview WASM limits). */
+const DISPLAY_DIMENSION_MAX = 4096;
+
 /** Tear down LVGL and re-init the display (safe resize without reloading the WASM module). */
 function resizeWasmPreview(width, height, darkTheme) {
     if (!WasmModule || !wasmReady) {
+        return;
+    }
+    const w = Math.round(Number(width));
+    const h = Math.round(Number(height));
+    if (
+        !Number.isFinite(w) ||
+        !Number.isFinite(h) ||
+        w < 1 ||
+        h < 1 ||
+        w > DISPLAY_DIMENSION_MAX ||
+        h > DISPLAY_DIMENSION_MAX
+    ) {
+        log("warn", `resizeWasmPreview: ignored invalid size ${width}×${height}`);
         return;
     }
     stopLoop();
@@ -301,9 +317,9 @@ function resizeWasmPreview(width, height, darkTheme) {
     if (typeof WasmModule._embf_deinit === "function") {
         WasmModule._embf_deinit();
     }
-    WasmModule._embf_init(width, height, darkTheme ? 1 : 0, primaryArgb, secondaryArgb);
-    lastWasmInitWidth = width;
-    lastWasmInitHeight = height;
+    WasmModule._embf_init(w, h, darkTheme ? 1 : 0, primaryArgb, secondaryArgb);
+    lastWasmInitWidth = w;
+    lastWasmInitHeight = h;
     if (previewZoomMode === "auto") {
         updatePreviewZoom();
     }
@@ -6055,8 +6071,8 @@ function renderPageInspectorHtml(page, project) {
         `</p></div>` +
         `<div class="inspector-group-title">Display</div>` +
         `<div class="row2">` +
-        fieldNum("disp_width", "Width", project.display.width) +
-        fieldNum("disp_height", "Height", project.display.height) +
+        fieldNum("disp_width", "Width", project.display.width, 1, DISPLAY_DIMENSION_MAX) +
+        fieldNum("disp_height", "Height", project.display.height, 1, DISPLAY_DIMENSION_MAX) +
         `</div>` +
         fieldSelect(
             "disp_bitDepth",
@@ -6522,8 +6538,14 @@ function tryParseCssHex(text) {
 
 const INSPECTOR_COLOR_PICKER_FALLBACK = "#5a6570";
 
-function fieldNum(name, label, value) {
-    return `<div class="field"><label>${esc(label)}</label><input type="number" name="${esc(name)}" value="${Number(value)}" step="1" /></div>`;
+function fieldNum(name, label, value, min, max) {
+    const minAttr = min !== undefined ? ` min="${min}"` : "";
+    const maxAttr = max !== undefined ? ` max="${max}"` : "";
+    const commitAttr =
+        name === "disp_width" || name === "disp_height" || name === "disp_dpi"
+            ? ` data-inspector-commit="blur"`
+            : "";
+    return `<div class="field"><label>${esc(label)}</label><input type="number" name="${esc(name)}" value="${Number(value)}" step="1"${minAttr}${maxAttr}${commitAttr} /></div>`;
 }
 
 function fieldText(name, label, value) {
@@ -7834,6 +7856,23 @@ function readInspectorPatch() {
     return patch;
 }
 
+/** Parse a display dimension from an inspector number input (1…4096). Returns undefined if invalid or empty. */
+function parseDisplayDimensionInput(input) {
+    if (!(input instanceof HTMLInputElement) || input.value.trim() === "") {
+        return undefined;
+    }
+    const n = Number(input.value);
+    if (!Number.isFinite(n) || n < 1 || n > DISPLAY_DIMENSION_MAX) {
+        return undefined;
+    }
+    return Math.round(n);
+}
+
+/** True for inspector controls that should commit on blur/change, not on each input keystroke. */
+function inspectorCommitOnBlur(el) {
+    return el instanceof HTMLElement && el.dataset.inspectorCommit === "blur";
+}
+
 /** Build patch object for page / project / display / theme inspector. */
 function readPageInspectorPatch() {
     if (!inspectorForm || !inspectorShowingPage || !currentProject) {
@@ -7905,12 +7944,18 @@ function readPageInspectorPatch() {
     }
 
     const dw = inspectorForm.elements.namedItem("disp_width");
-    if (dw instanceof HTMLInputElement && dw.value !== "") {
-        patch.dispWidth = Number(dw.value);
+    if (dw instanceof HTMLInputElement) {
+        const n = parseDisplayDimensionInput(dw);
+        if (n !== undefined) {
+            patch.dispWidth = n;
+        }
     }
     const dh = inspectorForm.elements.namedItem("disp_height");
-    if (dh instanceof HTMLInputElement && dh.value !== "") {
-        patch.dispHeight = Number(dh.value);
+    if (dh instanceof HTMLInputElement) {
+        const n = parseDisplayDimensionInput(dh);
+        if (n !== undefined) {
+            patch.dispHeight = n;
+        }
     }
     const bd = inspectorForm.elements.namedItem("disp_bitDepth");
     if (bd instanceof HTMLSelectElement && bd.value) {
@@ -8161,6 +8206,9 @@ if (inspectorForm) {
         ) {
             syncInspectorColorRowFromPicker(e.target);
             scheduleCommitAfterColorPick();
+            return;
+        }
+        if (inspectorCommitOnBlur(e.target)) {
             return;
         }
         if (inspectorDebounce) {

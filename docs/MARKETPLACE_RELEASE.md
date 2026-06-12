@@ -62,5 +62,5 @@ If you prefer not to use CI:
 ```bash
 npm run compile
 npx @vscode/vsce login <publisher>   # one-time
-npx @vscode/vsce publish --no-dependencies
+npx @vscode/vsce publish
 ```

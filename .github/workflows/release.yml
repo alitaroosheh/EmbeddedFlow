@@ -62,7 +62,7 @@ jobs:
         run: npm test
 
       - name: Package VSIX
-        run: npx --yes @vscode/vsce@latest package --no-dependencies
+        run: npx --yes @vscode/vsce@latest package
 
       - uses: actions/upload-artifact@v4
         with:
@@ -137,13 +137,13 @@ jobs:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: |
           if [ "$PRE_RELEASE" = "true" ]; then
-            npx --yes @vscode/vsce@latest publish --pre-release --no-dependencies -p "$VSCE_PAT"
+            npx --yes @vscode/vsce@latest publish --pre-release -p "$VSCE_PAT"
           else
-            npx --yes @vscode/vsce@latest publish --no-dependencies -p "$VSCE_PAT"
+            npx --yes @vscode/vsce@latest publish -p "$VSCE_PAT"
           fi
 
       - name: Package VSIX for GitHub Release
-        run: npx --yes @vscode/vsce@latest package --no-dependencies
+        run: npx --yes @vscode/vsce@latest package
 
       - uses: softprops/action-gh-release@v2
         with:

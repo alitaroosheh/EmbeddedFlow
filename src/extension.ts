@@ -40,6 +40,9 @@ const liveGenTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const previewRefreshDebounceMs = 400;
 const previewRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+/** Set in activate(); refreshed before each codegen run (font bundle path). */
+let extensionInstallPath: string | undefined;
+
 export function activate(context: vscode.ExtensionContext): void {
     const embfOutput = vscode.window.createOutputChannel("embeddedflow");
     context.subscriptions.push(embfOutput);
@@ -51,6 +54,7 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(StringsResEditorProvider.register(context));
 
     embeddedFlowLog("extension", "info", `activate (${context.extensionPath})`);
+    extensionInstallPath = context.extensionPath;
     setLatin1FontsExtensionRoot(context.extensionPath);
 
     // Register commands first — if later setup throws, palette commands still work.
@@ -599,11 +603,7 @@ async function runCodeGen(filePath: string): Promise<void> {
     }
     project = setup.project;
     const outputDir = setup.outputDir;
-    const { generateCode, writeGeneratedFiles } = await loadCodeGenModule();
-    const result = generateCode(project, filePath, outputDir);
-    logCodegenImageWarnings(result, project);
 
-    // Confirm if output directory already exists and has files
     if (fs.existsSync(outputDir) && fs.readdirSync(outputDir).some(f => f.endsWith(".c") || f.endsWith(".h"))) {
         const choice = await vscode.window.showWarningMessage(
             `Output folder already exists:\n${outputDir}\n\nOverwrite generated files?`,
@@ -611,8 +611,38 @@ async function runCodeGen(filePath: string): Promise<void> {
             "Overwrite",
             "Cancel"
         );
-        if (choice !== "Overwrite") return;
+        if (choice !== "Overwrite") {
+            return;
+        }
     }
+
+    if (extensionInstallPath) {
+        setLatin1FontsExtensionRoot(extensionInstallPath);
+    }
+
+    let generateCode: typeof import("./codeGen/index").generateCode;
+    let writeGeneratedFiles: typeof import("./codeGen/index").writeGeneratedFiles;
+    try {
+        ({ generateCode, writeGeneratedFiles } = await loadCodeGenModule());
+    } catch (e: any) {
+        const msg = e?.message ?? String(e);
+        embeddedFlowLog("codegen", "error", `load codegen module: ${msg}`);
+        vscode.window.showErrorMessage(
+            `EmbeddedFlow: Could not load code generator (${msg}). Reinstall the extension (VSIX must include npm dependencies).`
+        );
+        return;
+    }
+
+    let result: CodeGenResult;
+    try {
+        result = generateCode(project, filePath, outputDir);
+    } catch (e: any) {
+        const msg = e?.message ?? String(e);
+        embeddedFlowLog("codegen", "error", msg);
+        vscode.window.showErrorMessage(`EmbeddedFlow: Code generation failed: ${msg}`);
+        return;
+    }
+    logCodegenImageWarnings(result, project);
 
     let written: string[];
     try {

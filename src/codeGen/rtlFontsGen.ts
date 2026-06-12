@@ -41,13 +41,28 @@ export function setLatin1FontsExtensionRoot(extensionPath: string): void {
 }
 
 function resolveLatin1FontDir(): string {
+    const candidates: string[] = [];
     if (extensionRootForFonts) {
-        const packaged = path.join(extensionRootForFonts, "wasm-src");
-        if (fs.existsSync(path.join(packaged, "embf_font_latin1_12.c"))) {
-            return packaged;
+        candidates.push(path.join(extensionRootForFonts, "wasm-src"));
+    }
+    candidates.push(WASM_SRC_DIR);
+    for (const dir of candidates) {
+        if (fs.existsSync(path.join(dir, "embf_font_latin1_12.c"))) {
+            return dir;
         }
     }
-    return WASM_SRC_DIR;
+    return candidates[0] ?? WASM_SRC_DIR;
+}
+
+function readLatin1FontFile(size: number): string {
+    const dir = resolveLatin1FontDir();
+    const filePath = path.join(dir, `embf_font_latin1_${size}.c`);
+    if (!fs.existsSync(filePath)) {
+        throw new Error(
+            `Missing ${path.basename(filePath)} (searched: ${dir}). Reinstall EmbeddedFlow or rebuild the VSIX with npm dependencies included.`
+        );
+    }
+    return fs.readFileSync(filePath, "utf8");
 }
 
 const LVGL_FONT_INCLUDE_BLOCK =
@@ -55,8 +70,7 @@ const LVGL_FONT_INCLUDE_BLOCK =
 
 /** Read an `embf_font_latin1_<size>.c` source file for device codegen output. */
 export function readLatin1FontSource(size: number, lvglInclude: LvglIncludePath): string {
-    const filePath = path.join(resolveLatin1FontDir(), `embf_font_latin1_${size}.c`);
-    let content = fs.readFileSync(filePath, "utf8");
+    let content = readLatin1FontFile(size);
     content = content.replace(LVGL_FONT_INCLUDE_BLOCK, `#include "${lvglInclude}"`);
     return content;
 }

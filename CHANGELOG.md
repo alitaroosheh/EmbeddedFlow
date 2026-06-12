@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.4.3
+
+- **Fix:** Generate C Code failed in installed VSIX — `pngjs` / `jpeg-js` are now bundled (removed `--no-dependencies` from VSIX packaging).
+- **Fix:** clearer error dialogs when codegen module load or generation fails; overwrite prompt appears before generation runs.
+
 ## 1.4.2
 
 - **Fix:** Generate C Code failed in the packaged VSIX for i18n/RTL projects — Latin-1 font sources (`embf_font_latin1_*.c`) are now included in the extension bundle.

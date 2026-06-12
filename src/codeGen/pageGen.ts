@@ -199,7 +199,7 @@ export function generatePageSource(
 // Display resolution (matches EmbeddedFlow preview)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Defines horizontal/vertical resolution after applying `display.orientation` to JSON width/height. */
+/** Defines horizontal/vertical resolution from JSON `display.width` × `display.height`. */
 export function generateDisplayHeader(project: EmbfProject): string {
     const { width: hor, height: ver } = getEffectiveDisplaySize(project);
     const { width: jsonW, height: jsonH, orientation } = project.display;

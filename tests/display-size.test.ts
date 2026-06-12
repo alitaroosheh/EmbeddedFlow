@@ -10,18 +10,18 @@ describe("getEffectiveDisplaySize", () => {
         expect(getEffectiveDisplaySize(p)).toEqual({ width: 800, height: 600 });
     });
 
-    it("swaps landscape when height exceeds width (panel stored as portrait pixels)", () => {
+    it("does not swap tall JSON when orientation is still landscape (128×160 portrait UI)", () => {
         const p = minimalProject({
-            display: { orientation: "landscape", width: 480, height: 800 }
+            display: { orientation: "landscape", width: 128, height: 160 }
         });
-        expect(getEffectiveDisplaySize(p)).toEqual({ width: 800, height: 480 });
+        expect(getEffectiveDisplaySize(p)).toEqual({ width: 128, height: 160 });
     });
 
-    it("swaps portrait when width exceeds height", () => {
+    it("swaps wide JSON when orientation is portrait (1024×600 panel mounted portrait)", () => {
         const p = minimalProject({
-            display: { orientation: "portrait", width: 600, height: 320 }
+            display: { orientation: "portrait", width: 1024, height: 600 }
         });
-        expect(getEffectiveDisplaySize(p)).toEqual({ width: 320, height: 600 });
+        expect(getEffectiveDisplaySize(p)).toEqual({ width: 600, height: 1024 });
     });
 
     it("keeps portrait when height already exceeds width", () => {
@@ -31,16 +31,16 @@ describe("getEffectiveDisplaySize", () => {
         expect(getEffectiveDisplaySize(p)).toEqual({ width: 320, height: 480 });
     });
 
-    it("treats landscape_flipped like landscape for sizing", () => {
+    it("swaps wide JSON under portrait_flipped", () => {
         const p = minimalProject({
-            display: { orientation: "landscape_flipped", width: 100, height: 200 }
+            display: { orientation: "portrait_flipped", width: 600, height: 320 }
         });
-        expect(getEffectiveDisplaySize(p)).toEqual({ width: 200, height: 100 });
+        expect(getEffectiveDisplaySize(p)).toEqual({ width: 320, height: 600 });
     });
 
-    it("treats portrait_flipped like portrait for sizing", () => {
+    it("keeps tall JSON under landscape_flipped", () => {
         const p = minimalProject({
-            display: { orientation: "portrait_flipped", width: 200, height: 100 }
+            display: { orientation: "landscape_flipped", width: 100, height: 200 }
         });
         expect(getEffectiveDisplaySize(p)).toEqual({ width: 100, height: 200 });
     });

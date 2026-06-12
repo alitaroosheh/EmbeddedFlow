@@ -690,13 +690,13 @@ export function applyPageInspectorPatch(
 
     if (patch.dispWidth !== undefined) {
         const n = Number(patch.dispWidth);
-        if (Number.isFinite(n) && n >= 1) {
+        if (Number.isFinite(n) && n >= 1 && n <= 4096) {
             disp.width = Math.round(n);
         }
     }
     if (patch.dispHeight !== undefined) {
         const n = Number(patch.dispHeight);
-        if (Number.isFinite(n) && n >= 1) {
+        if (Number.isFinite(n) && n >= 1 && n <= 4096) {
             disp.height = Math.round(n);
         }
     }

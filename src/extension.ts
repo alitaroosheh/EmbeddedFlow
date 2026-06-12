@@ -16,6 +16,7 @@ import type { CodeGenResult } from "./codeGen/index";
 async function loadCodeGenModule() {
     return import("./codeGen/index");
 }
+import { setLatin1FontsExtensionRoot } from "./codeGen/rtlFontsGen";
 import { ensureCodegenOutputPath } from "./embfCodegenSetup";
 import { registerEmbeddedFlowOutput, embeddedFlowLog } from "./outputLog";
 import { resolveEmbfForPreview } from "./embfPreviewResolve";
@@ -50,6 +51,7 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(StringsResEditorProvider.register(context));
 
     embeddedFlowLog("extension", "info", `activate (${context.extensionPath})`);
+    setLatin1FontsExtensionRoot(context.extensionPath);
 
     // Register commands first — if later setup throws, palette commands still work.
     const runNewProjectCmd = async () => {

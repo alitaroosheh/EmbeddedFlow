@@ -1263,22 +1263,28 @@ export function resolveWasmVersion(lvglVersion: LvglVersion): string {
     return mapping[lvglVersion];
 }
 
+/** Maximum display width/height accepted by the schema and preview WASM allocator. */
+export const DISPLAY_DIMENSION_MAX = 4096;
+
 /**
- * Logical framebuffer size for preview (and any tooling that needs physical aspect).
- * - **Landscape** modes: wider than tall — swap JSON width/height when height > width.
- * - **Portrait** modes: taller than wide — swap when width > height.
- * JSON may still list the panel’s row/column resolution in either order.
+ * Logical framebuffer size for preview and codegen (`EMBF_DISPLAY_HOR_RES` × `EMBF_DISPLAY_VER_RES`).
+ *
+ * - **Tall JSON** (height > width): always used as-is — the designer entered a portrait canvas
+ *   (fixes 128×160 with orientation still on landscape default).
+ * - **Wide JSON** (width > height) + **portrait** orientation: swap to portrait logical size
+ *   (e.g. panel native 1024×600 mounted portrait → 600×1024 UI).
+ * - **Wide JSON** + landscape: no swap.
  */
 export function getEffectiveDisplaySize(
     project: EmbfProject
 ): { width: number; height: number } {
     const { width: w, height: h, orientation } = project.display;
-    const landscape = orientation === "landscape" || orientation === "landscape_flipped";
-    const portrait = orientation === "portrait" || orientation === "portrait_flipped";
-    if (landscape && h > w) {
-        return { width: h, height: w };
+    if (w === h) {
+        return { width: w, height: h };
     }
-    if (portrait && w > h) {
+    const portrait =
+        orientation === "portrait" || orientation === "portrait_flipped";
+    if (w > h && portrait) {
         return { width: h, height: w };
     }
     return { width: w, height: h };

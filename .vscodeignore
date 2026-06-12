@@ -4,6 +4,7 @@ src/**
 tests/**
 wiki/**
 wasm-src/**
+!wasm-src/embf_font_latin1_*.c
 .git/**
 **/*.map
 **/*.ts

@@ -137,6 +137,32 @@ function lintAction(
         }
         case "set_theme":
             break;
+        case "set_locale":
+        case "play_animations":
+            break;
+        case "select_button_group": {
+            const members = action.members ?? [];
+            const active = action.active;
+            for (const memberId of members) {
+                if (!onPage.has(memberId)) {
+                    issues.push({
+                        message:
+                            `Event on "${compId}": select_button_group member "${memberId}" ` +
+                            `is not on page "${page.id}"`,
+                        range: firstTargetSpan(text, memberId)
+                    });
+                }
+            }
+            if (active && !onPage.has(active)) {
+                issues.push({
+                    message:
+                        `Event on "${compId}": select_button_group active "${active}" ` +
+                        `is not on page "${page.id}"`,
+                    range: firstTargetSpan(text, active)
+                });
+            }
+            break;
+        }
         default: {
             const a = action as { type?: string };
             issues.push({

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.4.2
+
+- **Fix:** Generate C Code failed in the packaged VSIX for i18n/RTL projects — Latin-1 font sources (`embf_font_latin1_*.c`) are now included in the extension bundle.
+- **Fix:** semantic linter recognizes `set_locale`, `select_button_group`, and `play_animations` (live codegen on save no longer skipped for those actions).
+
 ## 1.4.1
 
 - **Fix:** preview/codegen size rules — tall JSON (e.g. 128×160) is never swapped; wide JSON (e.g. 1024×600) swaps when orientation is portrait so mounted panels work; display Width/Height commit on blur/Enter; clamp 1–4096; WASM ignores invalid resize while typing.

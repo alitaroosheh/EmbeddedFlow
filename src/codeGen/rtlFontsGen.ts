@@ -33,12 +33,29 @@ export const UI_FONT_BIDI_EXPR = "UI_FONT_BIDI";
 
 const WASM_SRC_DIR = path.join(__dirname, "..", "..", "wasm-src");
 
+/** Set from `extension.ts` activate so packaged VSIX resolves bundled font sources. */
+let extensionRootForFonts: string | undefined;
+
+export function setLatin1FontsExtensionRoot(extensionPath: string): void {
+    extensionRootForFonts = extensionPath;
+}
+
+function resolveLatin1FontDir(): string {
+    if (extensionRootForFonts) {
+        const packaged = path.join(extensionRootForFonts, "wasm-src");
+        if (fs.existsSync(path.join(packaged, "embf_font_latin1_12.c"))) {
+            return packaged;
+        }
+    }
+    return WASM_SRC_DIR;
+}
+
 const LVGL_FONT_INCLUDE_BLOCK =
     /#ifdef LV_LVGL_H_INCLUDE_SIMPLE\r?\n#include "lvgl\.h"\r?\n#else\r?\n#include "lvgl\/lvgl\.h"\r?\n#endif/;
 
 /** Read an `embf_font_latin1_<size>.c` source file for device codegen output. */
 export function readLatin1FontSource(size: number, lvglInclude: LvglIncludePath): string {
-    const filePath = path.join(WASM_SRC_DIR, `embf_font_latin1_${size}.c`);
+    const filePath = path.join(resolveLatin1FontDir(), `embf_font_latin1_${size}.c`);
     let content = fs.readFileSync(filePath, "utf8");
     content = content.replace(LVGL_FONT_INCLUDE_BLOCK, `#include "${lvglInclude}"`);
     return content;

@@ -529,11 +529,11 @@ function postRedo() {
 
 if (btnUndo) {
     btnUndo.addEventListener("click", () => postUndo());
-    if (btnGenerateCode) {
-        btnGenerateCode.addEventListener("click", () => {
-            vscode.postMessage({ type: "generateCode" });
-        });
-    }
+}
+if (btnGenerateCode) {
+    btnGenerateCode.addEventListener("click", () => {
+        vscode.postMessage({ type: "generateCode" });
+    });
 }
 if (btnNewProject) {
     btnNewProject.addEventListener("click", () => {

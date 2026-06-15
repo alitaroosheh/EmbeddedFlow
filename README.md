@@ -2,13 +2,17 @@
 
 Design touch UIs for embedded devices without leaving your editor. **embeddedflow** lets you lay out screens in a visual preview, wire navigation and interactions, and export ready-to-build **C** code for **LVGL**.
 
+## Introduction
+
 <p align="center">
-  <a href="https://youtu.be/c0BiBdthhYo">
-    <img src="https://img.youtube.com/vi/c0BiBdthhYo/hqdefault.jpg" alt="EmbeddedFlow introduction — watch on YouTube" width="900" />
+  <a href="https://youtu.be/c0BiBdthhYo" title="EmbeddedFlow introduction on YouTube">
+    <img src="media/intro-poster.jpg" alt="EmbeddedFlow introduction — click to play on YouTube" width="900" />
   </a>
 </p>
 
-<p align="center"><strong><a href="https://youtu.be/c0BiBdthhYo">▶ Watch the introduction on YouTube</a></strong></p>
+<p align="center">
+  <strong><a href="https://youtu.be/c0BiBdthhYo">▶ Watch on YouTube</a></strong>
+</p>
 
 <p align="center"><em>Design visually in VS Code, preview with real LVGL, and generate firmware-ready C code.</em></p>
 

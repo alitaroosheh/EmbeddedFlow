@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.5
+
+- **Docs:** README uses a high-resolution intro poster (`media/intro-poster.jpg`, 1280×720) linked to the [YouTube introduction](https://youtu.be/c0BiBdthhYo) — no large video file in the repo.
+
 ## 1.4.4
 
 - **Docs:** README and Marketplace listing use the [introduction video on YouTube](https://youtu.be/c0BiBdthhYo) instead of `demo.png`.

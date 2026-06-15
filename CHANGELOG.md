@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.4
+
+- **Docs:** README and Marketplace listing use the [introduction video on YouTube](https://youtu.be/c0BiBdthhYo) instead of `demo.png`.
+
 ## 1.4.3
 
 - **Fix:** Generate C Code failed in installed VSIX — `pngjs` / `jpeg-js` are now bundled (removed `--no-dependencies` from VSIX packaging).

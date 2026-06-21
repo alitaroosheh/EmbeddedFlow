@@ -3,7 +3,7 @@
   "publisher": "erminity",
   "displayName": "embeddedflow (Beyond an LVGL Design Tool)",
   "description": "Design LVGL UIs in .embf projects with a live WASM preview (intro: https://youtu.be/c0BiBdthhYo), named styles, bindings, animations, and C codegen for LVGL 8/9.",
-  "version": "1.4.5",
+  "version": "1.5.0",
   "license": "GPL-3.0-or-later",
   "repository": {
     "type": "git",
@@ -38,6 +38,7 @@
     "onCommand:embeddedflow.showOutput",
     "onCommand:embeddedflow.addFont",
     "onCommand:embeddedflow.openStringResources",
+    "onCommand:embeddedflow.refreshSymbolIndex",
     "onCustomEditor:embeddedflow.stringsRes"
   ],
   "main": "./out/extension.js",
@@ -95,6 +96,11 @@
         "command": "embeddedflow.openStringResources",
         "title": "embeddedflow: Open String Resources",
         "icon": "$(globe)"
+      },
+      {
+        "command": "embeddedflow.refreshSymbolIndex",
+        "title": "embeddedflow: Refresh Symbol Index",
+        "icon": "$(symbol-class)"
       }
     ],
     "customEditors": [
@@ -128,6 +134,9 @@
         },
         {
           "command": "embeddedflow.openStringResources"
+        },
+        {
+          "command": "embeddedflow.refreshSymbolIndex"
         }
       ],
       "editor/title": [
@@ -218,6 +227,11 @@
           "type": "boolean",
           "default": false,
           "description": "When true, saving a .embf file regenerates C code after a short delay. Overwrites output files without confirmation. Skipped if the project has parse or semantic errors."
+        },
+        "embeddedflow.clangdPath": {
+          "type": "string",
+          "default": "clangd",
+          "description": "Path to the clangd executable used for firmware symbol discovery (Phase 2). Must be on PATH or an absolute path."
         }
       }
     }

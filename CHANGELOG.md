@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.5.0
+
+- **Phase 2 Milestone 1 — Symbol discovery:** EmbeddedFlow spawns a dedicated **clangd** instance per firmware project, pointed at `build/compile_commands.json` (headless — no C/C++ extension required).
+- **`.embf` `project.firmwarePath`:** configure in the page inspector (text field + Browse); sample station project links the ESP32-P4 LVGL demo tree.
+- **Symbol index:** background indexing when preview opens with firmware path set; **Refresh Symbol Index** command and inspector button; graph cached per session and invalidated when `compile_commands.json` changes.
+- **LSP coverage (M1):** document symbols (globals, structs, fields), workspace symbol search, hover for function signatures, completion for struct members.
+- **Setting:** `embeddedflow.clangdPath` (default `clangd`).
+
 ## 1.4.5
 
 - **Docs:** README uses a high-resolution intro poster (`media/intro-poster.jpg`, 1280×720) linked to the [YouTube introduction](https://youtu.be/c0BiBdthhYo) — no large video file in the repo.

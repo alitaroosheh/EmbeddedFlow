@@ -513,7 +513,7 @@ Where LVGL 9 `lv_subject` fits, prefer generating thin observer wrappers in Phas
 2. Per-page vs global `ui_bindings.c` for linker granularity?
 3. Allow bindings to **generated** widget globals (`ui_main_lbl_title`) vs only abstract widget ids?
 4. How to handle **FreeRTOS** queue updates → `lv_async_call` wrapper in generated code?
-5. Licensing: is clangd redistributable/documented as user prerequisite only?
+5. Licensing: clangd (Apache-2.0) — see [docs/DECISIONS-clangd-setup.md](../docs/DECISIONS-clangd-setup.md); generated code license still open (Q5 in OPEN_QUESTIONS).
 
 ---
 

@@ -11,6 +11,7 @@ Planning documents for pre-release strategy. These define **what EmbeddedFlow is
 | **[REQUIREMENTS.md](./REQUIREMENTS.md)** | Requirements by pillar (P0/P1/P2) |
 | **[ROADMAP.md](./ROADMAP.md)** | Phased delivery and release honesty |
 | **[OPEN_QUESTIONS.md](./OPEN_QUESTIONS.md)** | Decisions needed before positioning |
+| **[DECISIONS-clangd-setup.md](./DECISIONS-clangd-setup.md)** | Optional requirements wizard (clangd install UX) |
 
 ## Implementation wiki
 

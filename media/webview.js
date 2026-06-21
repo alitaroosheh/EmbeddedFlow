@@ -159,6 +159,13 @@ let inspectorDebounce = null;
 let inspectorSyncing = false;
 /** Absolute codegen output dir from host (project.outputPath / workspace / ui_output). */
 let codegenOutputResolved = "";
+/** Absolute firmware root from host. */
+let firmwarePathResolved = "";
+/** compile_commands.json path when linked. */
+let compileCommandsPath = "";
+/** Symbol index status from clangd (Phase 2 M1). */
+let symbolIndexStatus = "idle";
+let symbolIndexSummary = "";
 
 // ── Runtime state ─────────────────────────────────────────────────────────────
 /** @type {any} Current Emscripten module instance */
@@ -467,6 +474,12 @@ window.addEventListener("message", event => {
         showError(msg.message);
     } else if (msg.type === "historyState") {
         updateHistoryButtons(!!msg.canUndo, !!msg.canRedo);
+    } else if (msg.type === "symbolIndexUpdate") {
+        symbolIndexStatus = typeof msg.status === "string" ? msg.status : "idle";
+        symbolIndexSummary = typeof msg.summary === "string" ? msg.summary : "";
+        if (inspectorShowingPage) {
+            renderInspector();
+        }
     }
 });
 
@@ -576,6 +589,14 @@ async function handleLoad(payload, generation = loadGeneration) {
     );
     codegenOutputResolved =
         typeof payload.codegenOutputResolved === "string" ? payload.codegenOutputResolved : "";
+    firmwarePathResolved =
+        typeof payload.firmwarePathResolved === "string" ? payload.firmwarePathResolved : "";
+    compileCommandsPath =
+        typeof payload.compileCommandsPath === "string" ? payload.compileCommandsPath : "";
+    symbolIndexStatus =
+        typeof payload.symbolIndexStatus === "string" ? payload.symbolIndexStatus : "idle";
+    symbolIndexSummary =
+        typeof payload.symbolIndexSummary === "string" ? payload.symbolIndexSummary : "";
     displayRound = !!(currentProject?.display && currentProject.display.round === true);
     syncPreviewBezel();
     displayWidth = payload.displayWidth;
@@ -5662,6 +5683,28 @@ function wirePageInspectorActions() {
             });
         });
     }
+    const firmwareBtn = document.getElementById("btn-browse-firmware");
+    if (firmwareBtn && !firmwareBtn.dataset.wired) {
+        firmwareBtn.dataset.wired = "1";
+        firmwareBtn.addEventListener("click", e => {
+            e.preventDefault();
+            vscode.postMessage({
+                type: "pickFirmwareFolder",
+                pageIndex: currentPageIndex
+            });
+        });
+    }
+    const symBtn = document.getElementById("btn-refresh-symbol-index");
+    if (symBtn && !symBtn.dataset.wired) {
+        symBtn.dataset.wired = "1";
+        symBtn.addEventListener("click", e => {
+            e.preventDefault();
+            symbolIndexStatus = "indexing";
+            symbolIndexSummary = "Symbol index in progress…";
+            renderInspector();
+            vscode.postMessage({ type: "refreshSymbolIndex" });
+        });
+    }
     const stringsBtn = document.getElementById("btn-open-strings-res");
     if (stringsBtn && !stringsBtn.dataset.wired) {
         stringsBtn.dataset.wired = "1";
@@ -6036,6 +6079,23 @@ function renderPageInspectorHtml(page, project) {
             "Description",
             (project.project && project.project.description) || ""
         ) +
+        `<div class="inspector-group-title">Firmware / symbols</div>` +
+        fieldText(
+            "proj_firmwarePath",
+            "Firmware project path",
+            (project.project && project.project.firmwarePath) || ""
+        ) +
+        `<button type="button" class="tb-btn-small" id="btn-browse-firmware">Browse…</button>` +
+        `<button type="button" class="tb-btn-small" id="btn-refresh-symbol-index">Refresh symbol index</button>` +
+        `<div class="field"><p style="font-size:11px;color:#888;margin:0 0 8px;line-height:1.35;">` +
+        `Resolved: <code>${esc(firmwarePathResolved || "(not set)")}</code><br/>` +
+        (compileCommandsPath
+            ? `compile_commands: <code>${esc(compileCommandsPath)}</code><br/>`
+            : "") +
+        `Symbol index: <code>${esc(symbolIndexStatus)}</code>` +
+        (symbolIndexSummary ? ` — ${esc(symbolIndexSummary)}` : "") +
+        `<br/>Relative to the .embf file, or absolute. Requires <code>clangd</code> on PATH and a built firmware tree.` +
+        `</p></div>` +
         `<div class="inspector-group-title">Code generation</div>` +
         fieldSelect(
             "proj_lvglInclude",
@@ -7926,6 +7986,11 @@ function readPageInspectorPatch() {
     const outPath = inspectorForm.elements.namedItem("proj_outputPath");
     if (outPath instanceof HTMLInputElement) {
         patch.projOutputPath = outPath.value.trim() === "" ? null : outPath.value.trim();
+    }
+
+    const firmwarePath = inspectorForm.elements.namedItem("proj_firmwarePath");
+    if (firmwarePath instanceof HTMLInputElement) {
+        patch.projFirmwarePath = firmwarePath.value.trim() === "" ? null : firmwarePath.value.trim();
     }
 
     const stringsPath = inspectorForm.elements.namedItem("proj_stringsPath");

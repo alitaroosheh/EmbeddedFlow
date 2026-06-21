@@ -6,7 +6,8 @@
     "lvglInclude": "lvgl.h",
     "description": "Fancy LVGL 9.5 preview: temperature & humidity with a clock and interactive demo buttons",
     "outputPath": "main",
-    "stringsPath": "strings.res"
+    "stringsPath": "strings.res",
+    "firmwarePath": "../../../ESP32-P4-WIFI6-Touch-LCD-7B/examples/ESP-IDF/10_lvgl_demo_v9"
   },
   "display": {
     "width": 1024,

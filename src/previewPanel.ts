@@ -31,6 +31,14 @@ import { supportedImageExtensions } from "./resources/imageFormats";
 import { readEmbfProject } from "./embfProjectWrite";
 import { runCreateNewProjectFlow } from "./embfNewProject";
 import { formatOutputPathForStorage, resolveCodegenOutputDir } from "./codeGen/outputDir";
+import {
+    formatFirmwarePathForStorage,
+    linkFirmwareProject,
+    resolveFirmwareRootDisplay,
+    symbolDiscovery,
+    symbolIndexSummary,
+    type SymbolIndexStatus
+} from "./symbolDiscovery";
 import { undoEmbfEdit, redoEmbfEdit, getEmbfHistoryState } from "./embfUndoRedo";
 import { appendWidgetToEmbfFile } from "./embfWidgetInsert";
 import { addPageInEmbfFile, removePageInEmbfFile, renamePageInEmbfFile } from "./embfPageEdit";
@@ -46,7 +54,13 @@ import { openStringsResForEmbf } from "./stringsResEditorProvider";
 export type HostToWebviewMessage =
     | { type: "load"; payload: WebviewLoadPayload }
     | { type: "error"; message: string }
-    | { type: "historyState"; canUndo: boolean; canRedo: boolean };
+    | { type: "historyState"; canUndo: boolean; canRedo: boolean }
+    | {
+          type: "symbolIndexUpdate";
+          status: SymbolIndexStatus;
+          summary: string;
+          symbolCount?: number;
+      };
 
 // Messages sent from webview → extension host
 export type WebviewToHostMessage =
@@ -79,6 +93,8 @@ export type WebviewToHostMessage =
       }
     | { type: "updatePage"; pageIndex: number; patch: Record<string, unknown> }
     | { type: "pickCodegenOutputFolder"; pageIndex: number }
+    | { type: "pickFirmwareFolder"; pageIndex: number }
+    | { type: "refreshSymbolIndex" }
     | { type: "pickImageSource"; pageIndex: number; componentId: string }
     | { type: "deleteWidget"; pageIndex: number; componentId: string }
     | { type: "bulkDeleteWidgets"; pageIndex: number; componentIds: string[] }
@@ -161,6 +177,12 @@ export interface WebviewLoadPayload {
     suppressLoadingSpinner?: boolean;
     /** Absolute path where Generate C Code writes files (from project.outputPath / settings). */
     codegenOutputResolved?: string;
+    /** Absolute firmware root (from project.firmwarePath). */
+    firmwarePathResolved?: string;
+    /** compile_commands.json path when firmware link resolves. */
+    compileCommandsPath?: string;
+    symbolIndexStatus?: SymbolIndexStatus;
+    symbolIndexSummary?: string;
     /** Resolved image files for preview overlays (`id` → webview URI). */
     imageAssets?: { id: string; uri: string; path: string }[];
     /** Parsed string resources for preview text resolution (I18n6/I18n7). */
@@ -242,6 +264,10 @@ export class EmbfPreviewPanel {
 
     static getPanel(filePath: string): EmbfPreviewPanel | undefined {
         return EmbfPreviewPanel._panels.get(filePath);
+    }
+
+    static refreshEmbfIfOpen(filePath: string): void {
+        EmbfPreviewPanel.getPanel(filePath)?.refreshFromEmbfSource();
     }
 
     /** Open preview paths (for codegen / commands when the preview has focus). */
@@ -358,6 +384,16 @@ export class EmbfPreviewPanel {
             this._filePath,
             workspaceCodegenOutputSetting()
         );
+        payload.firmwarePathResolved = resolveFirmwareRootDisplay(project, this._filePath);
+        const wsFolders = workspaceFolderPaths();
+        const link = linkFirmwareProject(project, this._filePath, wsFolders);
+        if (link.ok) {
+            payload.compileCommandsPath = link.compileCommandsPath;
+        }
+        const symPeek = symbolDiscovery.peekState(project, this._filePath, wsFolders);
+        payload.symbolIndexStatus = symPeek.status;
+        payload.symbolIndexSummary = symbolIndexSummary(symPeek);
+
         const imageAssets = buildImagePreviewAssets(project, this._filePath, {
             workspaceOutputDirectory: workspaceCodegenOutputSetting(),
             extraSearchRoots: (vscode.workspace.workspaceFolders ?? []).map(f => f.uri.fsPath),
@@ -389,6 +425,25 @@ export class EmbfPreviewPanel {
         this.postToWebview({
             type: "load",
             payload
+        });
+
+        if (project.project.firmwarePath?.trim() || link.ok) {
+            void this.scheduleSymbolIndex(project, { force: symPeek.status === "idle" });
+        }
+    }
+
+    private scheduleSymbolIndex(project: EmbfProject, opts?: { force?: boolean }): void {
+        const wsFolders = workspaceFolderPaths();
+        void symbolDiscovery.indexProject(project, this._filePath, wsFolders, opts).then(state => {
+            this.postToWebview({
+                type: "symbolIndexUpdate",
+                status: state.status,
+                summary: symbolIndexSummary(state),
+                symbolCount:
+                    state.graph !== undefined
+                        ? state.graph.symbols.length
+                        : undefined
+            });
         });
     }
 
@@ -618,6 +673,14 @@ export class EmbfPreviewPanel {
             }
             void updatePageInEmbfFile(this._filePath, pageIndex, patch).then(ok => {
                 if (ok) {
+                    if (Object.prototype.hasOwnProperty.call(patch, "projFirmwarePath")) {
+                        try {
+                            const updated = readEmbfProject(this._filePath);
+                            symbolDiscovery.onFirmwarePathChanged(this._filePath, updated);
+                        } catch {
+                            /* ignore parse errors during patch */
+                        }
+                    }
                     this.markInspectorDrivenFileWrite();
                     this.scheduleReloadPreviewAfterInspectorEdit(pageIndex);
                     this.sendHistoryState();
@@ -629,6 +692,20 @@ export class EmbfPreviewPanel {
                 return;
             }
             void this._pickCodegenOutputFolder(pageIndex);
+        } else if (msg.type === "pickFirmwareFolder") {
+            const pageIndex = Number(msg.pageIndex);
+            if (!Number.isInteger(pageIndex) || pageIndex < 0) {
+                return;
+            }
+            void this._pickFirmwareFolder(pageIndex);
+        } else if (msg.type === "refreshSymbolIndex") {
+            try {
+                const project = readEmbfProject(this._filePath);
+                void this.scheduleSymbolIndex(project, { force: true });
+            } catch (e) {
+                const m = e instanceof EmbfParseError ? e.message : String(e);
+                vscode.window.showErrorMessage(`EmbeddedFlow: ${m}`);
+            }
         } else if (msg.type === "pickImageSource") {
             const pageIndex = Number(msg.pageIndex);
             const componentId = String(msg.componentId ?? "").trim();
@@ -966,6 +1043,36 @@ export class EmbfPreviewPanel {
             this.sendHistoryState();
         } else {
             vscode.window.showErrorMessage("embeddedflow: could not save output folder to the .embf file.");
+        }
+    }
+
+    private async _pickFirmwareFolder(pageIndex: number): Promise<void> {
+        const defaultUri = vscode.Uri.file(path.dirname(this._filePath));
+        const picked = await vscode.window.showOpenDialog({
+            canSelectFolders: true,
+            canSelectFiles: false,
+            canSelectMany: false,
+            defaultUri,
+            title: "Select firmware project root (folder with compile_commands.json)",
+            openLabel: "Select firmware folder"
+        });
+        if (!picked?.length) {
+            return;
+        }
+
+        const stored = formatFirmwarePathForStorage(this._filePath, picked[0].fsPath);
+        const ok = await updatePageInEmbfFile(this._filePath, pageIndex, { projFirmwarePath: stored });
+        if (ok) {
+            try {
+                const project = readEmbfProject(this._filePath);
+                symbolDiscovery.onFirmwarePathChanged(this._filePath, project);
+            } catch {
+                /* ignore */
+            }
+            this.reloadPreviewNow(pageIndex);
+            this.sendHistoryState();
+        } else {
+            vscode.window.showErrorMessage("embeddedflow: could not save firmware path to the .embf file.");
         }
     }
 
@@ -2900,6 +3007,10 @@ export class EmbfPreviewPanel {
 
 function workspaceCodegenOutputSetting(): string {
     return vscode.workspace.getConfiguration("embeddedflow").get<string>("outputDirectory", "") ?? "";
+}
+
+function workspaceFolderPaths(): string[] {
+    return (vscode.workspace.workspaceFolders ?? []).map(f => f.uri.fsPath);
 }
 
 function getNonce(): string {

@@ -246,11 +246,11 @@ If `localeMeta` is omitted, infer `rtl` for known RTL locale ids (`ar`, `fa`, `h
 
 ### Symbol discovery
 
-- [ ] **SD1** EmbeddedFlow spawns dedicated clangd instance per project
-- [ ] **SD2** Firmware project path configured in `.embf` `project.firmwarePath`
-- [ ] **SD3** clangd pointed at `compile_commands.json` — headless, no user IDE dependency
-- [ ] **SD4** LSP queries: globals, struct members, function signatures
-- [ ] **SD5** Symbol graph built and cached per session
+- [x] **SD1** EmbeddedFlow spawns dedicated clangd instance per project
+- [x] **SD2** Firmware project path configured in `.embf` `project.firmwarePath`
+- [x] **SD3** clangd pointed at `compile_commands.json` — headless, no user IDE dependency
+- [x] **SD4** LSP queries: globals, struct members, function signatures
+- [x] **SD5** Symbol graph built and cached per session
 
 ### Binding UX
 

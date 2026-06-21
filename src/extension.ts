@@ -27,6 +27,13 @@ import { resolveStringsResPath } from "./i18n/stringsResPath";
 import { readStringsResFile, parseStringsResSource } from "./i18n/stringsResParser";
 import { lintStringResourceRefs } from "./i18n/stringsResLint";
 import { collectStringRefsInProject } from "./i18n/widgetText";
+import {
+    formatFirmwarePathForStorage,
+    findFirmwareRootFromWorkspace,
+    symbolDiscovery,
+    symbolIndexSummary
+} from "./symbolDiscovery";
+import { updatePageInEmbfFile } from "./embfComponentEdit";
 
 // Map from .embf file path → file watcher
 const watchers = new Map<string, fs.FSWatcher>();
@@ -108,6 +115,22 @@ export function activate(context: vscode.ExtensionContext): void {
             } catch (e) {
                 const msg = e instanceof Error ? e.message : String(e);
                 vscode.window.showErrorMessage(`EmbeddedFlow: ${msg}`);
+            }
+        }),
+        vscode.commands.registerCommand("embeddedflow.refreshSymbolIndex", async (uri?: vscode.Uri) => {
+            await runRefreshSymbolIndex(uri);
+        })
+    );
+
+    symbolDiscovery.setClangdPath(
+        vscode.workspace.getConfiguration("embeddedflow").get<string>("clangdPath")
+    );
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeConfiguration(ev => {
+            if (ev.affectsConfiguration("embeddedflow.clangdPath")) {
+                symbolDiscovery.setClangdPath(
+                    vscode.workspace.getConfiguration("embeddedflow").get<string>("clangdPath")
+                );
             }
         })
     );
@@ -378,6 +401,7 @@ function updateEmbfDiagnostics(doc: vscode.TextDocument): void {
 }
 
 export function deactivate(): void {
+    symbolDiscovery.dispose();
     for (const watcher of watchers.values()) {
         watcher.close();
     }
@@ -416,6 +440,72 @@ async function resolveCodegenEmbfPath(uri?: vscode.Uri): Promise<string | undefi
         return fromUriOrEditor;
     }
     return EmbfPreviewPanel.resolveEmbfPathForCodegen();
+}
+
+async function runRefreshSymbolIndex(uri?: vscode.Uri): Promise<void> {
+    const filePath = await resolveCodegenEmbfPath(uri);
+    if (!filePath) {
+        vscode.window.showErrorMessage(
+            "EmbeddedFlow: Open a .embf file or UI preview, then run Refresh Symbol Index."
+        );
+        return;
+    }
+
+    let project: EmbfProject;
+    try {
+        project = parseEmbfSource(readEmbfText(filePath));
+    } catch (e) {
+        const msg = e instanceof EmbfParseError ? e.message : String(e);
+        vscode.window.showErrorMessage(`EmbeddedFlow: ${msg}`);
+        return;
+    }
+
+    const wsFolders = (vscode.workspace.workspaceFolders ?? []).map(f => f.uri.fsPath);
+
+    if (!project.project.firmwarePath?.trim()) {
+        const fromWs = findFirmwareRootFromWorkspace(wsFolders);
+        if (fromWs) {
+            const stored = formatFirmwarePathForStorage(filePath, fromWs);
+            await updatePageInEmbfFile(filePath, 0, { projFirmwarePath: stored });
+            project = parseEmbfSource(readEmbfText(filePath));
+            symbolDiscovery.onFirmwarePathChanged(filePath, project);
+            embeddedFlowLog("symbols", "info", `Using firmware root from workspace: ${fromWs}`);
+        } else {
+            const picked = await vscode.window.showOpenDialog({
+                canSelectFolders: true,
+                canSelectFiles: false,
+                canSelectMany: false,
+                defaultUri: vscode.Uri.file(path.dirname(filePath)),
+                title: "Select firmware project root (folder with compile_commands.json)",
+                openLabel: "Select firmware folder"
+            });
+            if (!picked?.length) {
+                return;
+            }
+            const stored = formatFirmwarePathForStorage(filePath, picked[0].fsPath);
+            await updatePageInEmbfFile(filePath, 0, { projFirmwarePath: stored });
+            project = parseEmbfSource(readEmbfText(filePath));
+            symbolDiscovery.onFirmwarePathChanged(filePath, project);
+        }
+    }
+
+    await vscode.window.withProgress(
+        {
+            location: vscode.ProgressLocation.Notification,
+            title: "EmbeddedFlow: indexing firmware symbols…",
+            cancellable: false
+        },
+        async () => symbolDiscovery.indexProject(project, filePath, wsFolders, { force: true })
+    ).then(state => {
+        if (state.status === "ready") {
+            void vscode.window.showInformationMessage(`EmbeddedFlow: ${symbolIndexSummary(state)}`);
+            EmbfPreviewPanel.refreshEmbfIfOpen(filePath);
+        } else {
+            void vscode.window.showErrorMessage(
+                `EmbeddedFlow: symbol index failed — ${state.message ?? state.status}`
+            );
+        }
+    });
 }
 
 async function openPreviewResolved(extensionUri: vscode.Uri, uri?: vscode.Uri): Promise<void> {

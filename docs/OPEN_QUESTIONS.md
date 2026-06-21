@@ -35,9 +35,13 @@ When a developer adds a property without specifying direction:
 
 ### Q3 — clangd session lifecycle
 
-- When is the clangd instance started? (on project open, on first bind action, on demand)
-- What happens if `compile_commands.json` is missing? (fallback to header-only, or error)
-- How is the firmware path configured? (`.embf` `project.firmwarePath` field, or separate config)
+✔ **Decision (2026-06-04):** clangd starts **lazily** on the first symbol-index request — when the preview loads with `project.firmwarePath` set, or when the user runs **Refresh Symbol Index** / clicks refresh in the page inspector. One dedicated clangd process per resolved firmware root (SD1). If `compile_commands.json` is missing, show a clear error (build firmware first); no header-only fallback in M1. Firmware path: `project.firmwarePath` in `.embf` (SD2), with workspace auto-discovery (FR-LINK-02) and folder picker when unset.
+
+### Q8 — clangd installation UX (requirements wizard)
+
+✔ **Decision (2026-06-04):** Do **not** require users to install clangd manually. Provide an **optional setup wizard** (ESP-IDF–style) that downloads and caches official clangd when the user chooses. Preview and codegen work without it; symbol/binding features use managed clangd after setup. User must be **informed and consent** before download. Full spec: **[DECISIONS-clangd-setup.md](./DECISIONS-clangd-setup.md)**.
+
+**Status:** Decided — implementation planned (post–M1).
 
 ### Q4 — Binding transforms design
 

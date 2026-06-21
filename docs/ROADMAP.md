@@ -129,6 +129,7 @@
 | 2026-06-04 | Property System = IR metadata only in Phase 1; no codegen until Phase 2 |
 | 2026-06-04 | Navigation Graph = integrated overlay on designer; static calls only in Phase 1–2 |
 | 2026-06-04 | Symbol discovery = EmbeddedFlow-owned clangd instance; headless, not user-IDE-dependent |
+| 2026-06-04 | clangd delivery = optional **Install requirements** wizard; download official clangd (not in VSIX); user consent required — [DECISIONS-clangd-setup.md](./DECISIONS-clangd-setup.md) |
 | 2026-06-04 | Binding direction = compiler decision from IR field; push → setter, pull → extern+apply |
 | 2026-06-04 | State = two strict layers: FSM (modes) + Derived (conditions); never merged |
 | 2026-06-04 | Actions = typed IR nodes; sequential composition flattened to one C function at compile time |

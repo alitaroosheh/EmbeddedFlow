@@ -679,6 +679,15 @@ export function applyPageInspectorPatch(
         }
     }
 
+    if (Object.prototype.hasOwnProperty.call(patch, "projFirmwarePath")) {
+        const fp = patch.projFirmwarePath;
+        if (fp === null || fp === "") {
+            delete project.project.firmwarePath;
+        } else if (typeof fp === "string" && fp.trim()) {
+            project.project.firmwarePath = fp.trim();
+        }
+    }
+
     if (patch.projLvglInclude !== undefined && typeof patch.projLvglInclude === "string") {
         const inc = patch.projLvglInclude.trim();
         if (inc === "lvgl.h" || inc === "lvgl/lvgl.h") {

@@ -2,7 +2,6 @@ import * as fs from "fs";
 import * as path from "path";
 import type { EmbfProject } from "../types/embf";
 import { embeddedFlowLog } from "../outputLog";
-import { listIndexSourceFiles } from "./compileCommandsIndex";
 import { ClangdSession } from "./clangdSession";
 import { resolveClangdPath } from "./clangdBootstrap";
 import {
@@ -10,28 +9,22 @@ import {
     linkFirmwareProject,
     resolveFirmwareRootFromProject
 } from "./firmwarePath";
-import { buildSymbolGraph, countSymbolsByKind, flattenSymbolGraph } from "./symbolGraph";
-import type { SymbolGraph, SymbolIndexState, SymbolNode } from "./types";
-
-interface CacheEntry {
-    mtime: number;
-    graph: SymbolGraph;
-}
+import { fetchSymbolMembers, liveWorkspaceSearch } from "./symbolGraph";
+import type { EmbfSymbolKind, SymbolIndexState, SymbolNode } from "./types";
 
 interface SessionEntry {
     session: ClangdSession;
-    refCount: number;
+    compileCommandsMtime: number;
 }
 
 /**
- * SD1 + SD5 + FR-SYM-08: one clangd session per firmware root; graph cached until compile_commands changes.
- * Q3 decision: clangd starts lazily on first index request (preview load with firmwarePath, or Refresh command).
+ * SD1: dedicated clangd per firmware root.
+ * Search is live via LSP as the user types (workspace/symbol + documentSymbol for members).
  */
 export class SymbolDiscoveryService {
-    private readonly graphs = new Map<string, CacheEntry>();
     private readonly sessions = new Map<string, SessionEntry>();
     private readonly watchers = new Map<string, fs.FSWatcher>();
-    private readonly inflight = new Map<string, Promise<SymbolIndexState>>();
+    private readonly sessionStarts = new Map<string, Promise<ClangdSession>>();
     private clangdPath: string | undefined;
     private globalStoragePath: string | undefined;
     private configuredClangdOverride: string | undefined;
@@ -62,25 +55,21 @@ export class SymbolDiscoveryService {
             entry.session.dispose();
         }
         this.sessions.clear();
-        this.graphs.clear();
-        this.inflight.clear();
+        this.sessionStarts.clear();
     }
 
+    /** Drop clangd session for a firmware tree (e.g. after rebuild). */
     invalidate(firmwareRoot?: string): void {
         if (firmwareRoot) {
             const key = path.normalize(firmwareRoot);
-            this.graphs.delete(key);
+            this.disposeSession(key);
             return;
         }
-        this.graphs.clear();
+        for (const key of [...this.sessions.keys()]) {
+            this.disposeSession(key);
+        }
     }
 
-    getCachedGraph(firmwareRoot: string): SymbolGraph | undefined {
-        const key = path.normalize(firmwareRoot);
-        return this.graphs.get(key)?.graph;
-    }
-
-    /** Current index state without starting a new index. */
     peekState(project: EmbfProject, embfPath: string, workspaceFolders: string[] = []): SymbolIndexState {
         const link = linkFirmwareProject(project, embfPath, workspaceFolders);
         if (!link.ok) {
@@ -89,26 +78,27 @@ export class SymbolDiscoveryService {
                 message: link.message
             };
         }
-        const key = path.normalize(link.firmwareRoot);
-        const mtime = compileCommandsMtime(link.compileCommandsPath);
-        const cached = this.graphs.get(key);
-        if (cached && cached.mtime === mtime) {
-            return { status: "ready", graph: cached.graph };
+        if (!this.clangdPath) {
+            this.refreshClangdResolution();
         }
-        if (this.inflight.has(key)) {
-            return { status: "indexing", message: "Symbol index in progress…" };
+        if (!this.clangdPath) {
+            return {
+                status: "missing_clangd",
+                message:
+                    "clangd is not available. Run **EmbeddedFlow: Install requirements** to download it."
+            };
         }
         return {
-            status: "idle",
-            message: "Symbol index not built yet. Use Refresh Symbol Index or open preview with firmware path set."
+            status: "ready",
+            message: "Type in the search box — results come from clangd as you type."
         };
     }
 
-    async indexProject(
+    /** Restart clangd for the linked firmware project (after rebuild / toolchain change). */
+    async restartClangd(
         project: EmbfProject,
         embfPath: string,
-        workspaceFolders: string[] = [],
-        opts?: { force?: boolean }
+        workspaceFolders: string[] = []
     ): Promise<SymbolIndexState> {
         const link = linkFirmwareProject(project, embfPath, workspaceFolders);
         if (!link.ok) {
@@ -117,126 +107,199 @@ export class SymbolDiscoveryService {
                 message: link.message
             };
         }
+        const key = path.normalize(link.firmwareRoot);
+        this.disposeSession(key);
+        embeddedFlowLog("symbols", "info", `clangd session cleared for ${link.firmwareRoot}`);
+        return this.peekState(project, embfPath, workspaceFolders);
+    }
 
+    /** @deprecated Use restartClangd — kept for command compatibility. */
+    async indexProject(
+        project: EmbfProject,
+        embfPath: string,
+        workspaceFolders: string[] = [],
+        _opts?: { force?: boolean }
+    ): Promise<SymbolIndexState> {
+        return this.restartClangd(project, embfPath, workspaceFolders);
+    }
+
+    /** Live LSP symbol search (IntelliSense-style) as the user types. */
+    async searchSymbols(
+        project: EmbfProject,
+        embfPath: string,
+        query: string,
+        workspaceFolders: string[] = [],
+        opts?: { limit?: number; kinds?: EmbfSymbolKind[] }
+    ): Promise<{ nodes: SymbolNode[]; state: SymbolIndexState }> {
+        const link = linkFirmwareProject(project, embfPath, workspaceFolders);
+        if (!link.ok) {
+            return {
+                nodes: [],
+                state: {
+                    status: link.code === "missing_firmware" ? "missing_firmware" : "error",
+                    message: link.message
+                }
+            };
+        }
+
+        const q = query.trim();
+        if (!q) {
+            return { nodes: [], state: this.peekState(project, embfPath, workspaceFolders) };
+        }
+
+        const sessionResult = await this.ensureSession(link);
+        if (sessionResult.state.status !== "ready" || !sessionResult.session) {
+            return { nodes: [], state: sessionResult.state };
+        }
+
+        try {
+            const limit = opts?.limit ?? 50;
+            const nodes = await liveWorkspaceSearch(sessionResult.session, q, {
+                limit,
+                kinds: opts?.kinds,
+                firmwareRoot: link.firmwareRoot
+            });
+            return { nodes, state: { status: "ready" } };
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            embeddedFlowLog("symbols", "error", `searchSymbols: ${msg}`);
+            return { nodes: [], state: { status: "error", message: msg } };
+        }
+    }
+
+    /** Struct / union / class members for a picked symbol (documentSymbol + completion). */
+    async getSymbolMembers(
+        project: EmbfProject,
+        embfPath: string,
+        target: { name: string; filePath?: string; line?: number },
+        workspaceFolders: string[] = []
+    ): Promise<{ members: SymbolNode[]; state: SymbolIndexState }> {
+        const link = linkFirmwareProject(project, embfPath, workspaceFolders);
+        if (!link.ok) {
+            return {
+                members: [],
+                state: {
+                    status: link.code === "missing_firmware" ? "missing_firmware" : "error",
+                    message: link.message
+                }
+            };
+        }
+        if (!target.filePath || target.line === undefined) {
+            return {
+                members: [],
+                state: { status: "error", message: "Symbol has no source location for member lookup." }
+            };
+        }
+
+        const sessionResult = await this.ensureSession(link);
+        if (sessionResult.state.status !== "ready" || !sessionResult.session) {
+            return { members: [], state: sessionResult.state };
+        }
+
+        try {
+            const members = await fetchSymbolMembers(
+                sessionResult.session,
+                target.filePath,
+                target.line,
+                target.name
+            );
+            return { members, state: { status: "ready" } };
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            return { members: [], state: { status: "error", message: msg } };
+        }
+    }
+
+    onFirmwarePathChanged(embfPath: string, project: EmbfProject): void {
+        const root = resolveFirmwareRootFromProject(project, embfPath);
+        if (root) {
+            this.invalidate(root);
+        }
+    }
+
+    private disposeSession(key: string): void {
+        const entry = this.sessions.get(key);
+        if (entry) {
+            entry.session.dispose();
+            this.sessions.delete(key);
+        }
+        this.sessionStarts.delete(key);
+        const watcher = this.watchers.get(key);
+        if (watcher) {
+            watcher.close();
+            this.watchers.delete(key);
+        }
+    }
+
+    private async ensureSession(
+        link: Extract<ReturnType<typeof linkFirmwareProject>, { ok: true }>
+    ): Promise<{ session?: ClangdSession; state: SymbolIndexState }> {
         if (!this.clangdPath) {
             this.refreshClangdResolution();
         }
         if (!this.clangdPath) {
             return {
-                status: "missing_clangd",
-                message:
-                    "clangd is not available. Run **EmbeddedFlow: Install requirements** to download it, " +
-                    "or set embeddedflow.clangdPath / embeddedflow.clangd.useSystem in settings."
+                state: {
+                    status: "missing_clangd",
+                    message:
+                        "clangd is not available. Run **EmbeddedFlow: Install requirements** to download it."
+                }
             };
         }
 
         const key = path.normalize(link.firmwareRoot);
         const mtime = compileCommandsMtime(link.compileCommandsPath);
-        const cached = this.graphs.get(key);
-        if (!opts?.force && cached && cached.mtime === mtime) {
-            return { status: "ready", graph: cached.graph };
+        const existing = this.sessions.get(key);
+        if (existing && existing.compileCommandsMtime === mtime) {
+            return { session: existing.session, state: { status: "ready" } };
         }
-
-        const existing = this.inflight.get(key);
         if (existing) {
-            return existing;
+            this.disposeSession(key);
         }
 
-        const task = this.runIndex(link, key, mtime);
-        this.inflight.set(key, task);
-        try {
-            return await task;
-        } finally {
-            this.inflight.delete(key);
-        }
-    }
-
-    async searchSymbols(
-        project: EmbfProject,
-        embfPath: string,
-        query: string,
-        workspaceFolders: string[] = []
-    ): Promise<{ nodes: SymbolNode[]; state: SymbolIndexState }> {
-        const state = await this.indexProject(project, embfPath, workspaceFolders);
-        if (state.status !== "ready" || !state.graph) {
-            return { nodes: [], state };
-        }
-        const q = query.trim().toLowerCase();
-        const all = flattenSymbolGraph(state.graph);
-        const nodes = q
-            ? all.filter(n => n.name.toLowerCase().includes(q)).slice(0, 50)
-            : all.slice(0, 50);
-        return { nodes, state };
-    }
-
-    private async runIndex(
-        link: Extract<ReturnType<typeof linkFirmwareProject>, { ok: true }>,
-        key: string,
-        mtime: number
-    ): Promise<SymbolIndexState> {
-        try {
-            embeddedFlowLog("symbols", "info", `Indexing ${link.firmwareRoot}`);
-            const session = await this.acquireSession(key, link.firmwareRoot, link.compileCommandsDir);
-            const sourceFiles = listIndexSourceFiles(link.compileCommandsPath, link.firmwareRoot);
-            if (sourceFiles.length === 0) {
-                return {
-                    status: "error",
-                    message: `No indexable source files found in ${link.compileCommandsPath}`
-                };
-            }
-            const graph = await buildSymbolGraph(session, link, sourceFiles);
-            this.graphs.set(key, { mtime, graph });
-            this.ensureCompileCommandsWatcher(key, link.compileCommandsPath);
-            const counts = countSymbolsByKind(graph);
-            embeddedFlowLog(
-                "symbols",
-                "info",
-                `Indexed ${flattenSymbolGraph(graph).length} symbols from ${sourceFiles.length} files ` +
-                    `(fn=${counts.function}, var=${counts.variable}, struct=${counts.struct}, field=${counts.field})`
+        let pending = this.sessionStarts.get(key);
+        if (!pending) {
+            pending = ClangdSession.start(link.firmwareRoot, link.compileCommandsDir, this.clangdPath).then(
+                session => {
+                    this.sessions.set(key, { session, compileCommandsMtime: mtime });
+                    this.sessionStarts.delete(key);
+                    this.ensureCompileCommandsWatcher(key, link.compileCommandsPath, mtime);
+                    embeddedFlowLog("symbols", "info", `clangd ready for ${link.firmwareRoot}`);
+                    return session;
+                }
             );
-            return { status: "ready", graph };
+            this.sessionStarts.set(key, pending);
+        }
+
+        try {
+            const session = await pending;
+            return { session, state: { status: "ready" } };
         } catch (e) {
+            this.sessionStarts.delete(key);
             const msg = e instanceof Error ? e.message : String(e);
-            embeddedFlowLog("symbols", "error", `Index failed: ${msg}`);
-            return { status: "error", message: msg };
+            return { state: { status: "error", message: msg } };
         }
     }
 
-    private async acquireSession(
-        key: string,
-        firmwareRoot: string,
-        compileCommandsDir: string
-    ): Promise<ClangdSession> {
-        let entry = this.sessions.get(key);
-        if (!entry) {
-            const session = await ClangdSession.start(firmwareRoot, compileCommandsDir, this.clangdPath!);
-            entry = { session, refCount: 0 };
-            this.sessions.set(key, entry);
-        }
-        entry.refCount++;
-        return entry.session;
-    }
-
-    private ensureCompileCommandsWatcher(cacheKey: string, compileCommandsPath: string): void {
+    private ensureCompileCommandsWatcher(
+        cacheKey: string,
+        compileCommandsPath: string,
+        mtime: number
+    ): void {
         if (this.watchers.has(cacheKey)) {
             return;
         }
         try {
             const watcher = fs.watch(compileCommandsPath, () => {
-                embeddedFlowLog("symbols", "info", `compile_commands.json changed — invalidating cache`);
-                this.graphs.delete(cacheKey);
+                const next = compileCommandsMtime(compileCommandsPath);
+                if (next !== mtime) {
+                    embeddedFlowLog("symbols", "info", "compile_commands.json changed — restarting clangd");
+                    this.disposeSession(cacheKey);
+                }
             });
             this.watchers.set(cacheKey, watcher);
         } catch (e) {
             embeddedFlowLog("symbols", "warn", `Could not watch compile_commands.json: ${String(e)}`);
-        }
-    }
-
-    /** Invalidate when .embf firmwarePath changes. */
-    onFirmwarePathChanged(embfPath: string, project: EmbfProject): void {
-        const root = resolveFirmwareRootFromProject(project, embfPath);
-        if (root) {
-            this.invalidate(root);
         }
     }
 }
@@ -244,9 +307,8 @@ export class SymbolDiscoveryService {
 export const symbolDiscovery = new SymbolDiscoveryService();
 
 export function symbolIndexSummary(state: SymbolIndexState): string {
-    if (state.status === "ready" && state.graph) {
-        const n = flattenSymbolGraph(state.graph).length;
-        return `${n} symbols indexed`;
+    if (state.status === "ready") {
+        return state.message ?? "clangd ready";
     }
     return state.message ?? state.status;
 }

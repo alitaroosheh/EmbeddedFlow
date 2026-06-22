@@ -54,7 +54,39 @@ export interface StyleDef {
 
 /** App-side data fields. Phase-1 binding emits `extern <type> ui_data_<id>;` + setters. */
 export interface DataModel {
-    fields: DataField[];
+    /** Forward-compatible schema version (FR-SCH-04). */
+    version?: number;
+    /** Legacy preview fields (Phase 1). Optional when only C symbol bindings are used. */
+    fields?: DataField[];
+    /** External C symbols declared for binding (FR-SCH-01). */
+    sources?: DataSource[];
+    /** Widget property bindings to firmware symbols (FR-SCH-02). */
+    bindings?: DataBinding[];
+}
+
+/** External firmware symbol referenced by bindings. */
+export type DataSourceKind = "global" | "function";
+
+export interface DataSource {
+    id: string;
+    kind: DataSourceKind;
+    /** Root C symbol (e.g. `app_data`, `wifi_get_scan_results`). */
+    symbol: string;
+    /** C type hint when known (e.g. `app_state_t`). */
+    type?: string;
+    headers?: string[];
+}
+
+/** Binds a widget property to a member path on a declared source. */
+export interface DataBinding {
+    id?: string;
+    /** Target `widgetId.property` (e.g. `lbl_temp.text`). */
+    target: string;
+    sourceId: string;
+    /** Member chain on the source symbol; empty string for the root scalar/struct. */
+    path: string;
+    /** printf-style format for text bindings (FR-XF-01). */
+    format?: string;
 }
 
 export type DataFieldType = "string" | "int" | "float" | "bool";

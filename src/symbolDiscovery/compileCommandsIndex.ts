@@ -26,23 +26,48 @@ function isPathWithinRoot(filePath: string, root: string): boolean {
 
 /**
  * List source files from compile_commands.json for symbol indexing.
- * Prefers files under `<firmwareRoot>/main/` then other project sources; skips IDF tree paths when possible.
+ * Prefers files under `<firmwareRoot>/main/` then other project sources.
  */
 export function listIndexSourceFiles(
     compileCommandsPath: string,
     firmwareRoot: string,
-    opts?: { maxFiles?: number }
+    opts?: { maxFiles?: number; mainOnly?: boolean }
 ): string[] {
     const maxFiles = opts?.maxFiles ?? 64;
+    const mainOnly = opts?.mainOnly ?? false;
+    const { mainFiles, projectFiles } = collectIndexSourceFiles(compileCommandsPath, firmwareRoot);
+    const pool = mainOnly ? mainFiles : [...mainFiles, ...projectFiles];
+    if (maxFiles <= 0) {
+        return pool;
+    }
+    return pool.slice(0, maxFiles);
+}
+
+/** Count indexable sources under firmware root (before maxFiles cap). */
+export function countIndexableSourceFiles(
+    compileCommandsPath: string,
+    firmwareRoot: string,
+    opts?: { mainOnly?: boolean }
+): { main: number; project: number; total: number } {
+    const { mainFiles, projectFiles } = collectIndexSourceFiles(compileCommandsPath, firmwareRoot);
+    const mainOnly = opts?.mainOnly ?? false;
+    const total = mainOnly ? mainFiles.length : mainFiles.length + projectFiles.length;
+    return { main: mainFiles.length, project: projectFiles.length, total };
+}
+
+function collectIndexSourceFiles(
+    compileCommandsPath: string,
+    firmwareRoot: string
+): { mainFiles: string[]; projectFiles: string[] } {
     const root = path.normalize(firmwareRoot);
     let entries: CompileCommandEntry[];
     try {
         entries = JSON.parse(fs.readFileSync(compileCommandsPath, "utf8")) as CompileCommandEntry[];
     } catch {
-        return [];
+        return { mainFiles: [], projectFiles: [] };
     }
     if (!Array.isArray(entries)) {
-        return [];
+        return { mainFiles: [], projectFiles: [] };
     }
 
     const mainDir = path.join(root, "main");
@@ -76,5 +101,5 @@ export function listIndexSourceFiles(
 
     mainFiles.sort();
     projectFiles.sort();
-    return [...mainFiles, ...projectFiles].slice(0, maxFiles);
+    return { mainFiles, projectFiles };
 }

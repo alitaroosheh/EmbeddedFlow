@@ -148,6 +148,82 @@ function isInterestingWorkspaceKind(kind: number): boolean {
     );
 }
 
+/** Live `workspace/symbol` query — IntelliSense-style as the user types. */
+export async function liveWorkspaceSearch(
+    session: ClangdSession,
+    query: string,
+    opts?: { limit?: number; kinds?: EmbfSymbolKind[]; firmwareRoot?: string }
+): Promise<SymbolNode[]> {
+    const q = query.trim().toLowerCase();
+    if (!q) {
+        return [];
+    }
+    const ws = await session.workspaceSymbol(query.trim());
+    const kinds = opts?.kinds?.length ? new Set(opts.kinds) : undefined;
+    const limit = opts?.limit ?? 50;
+
+    let nodes = ws
+        .filter(s => isInterestingWorkspaceKind(s.kind))
+        .map(s => workspaceSymbolToNode(s, session))
+        .filter(n => {
+            const leaf = n.name.split(".").pop()!.toLowerCase();
+            return leaf.startsWith(q) || n.name.toLowerCase().includes(q);
+        });
+
+    if (kinds) {
+        nodes = nodes.filter(n => kinds.has(n.kind));
+    }
+
+    nodes.sort((a, b) => {
+        const ra = symbolDisplayRank(a, opts?.firmwareRoot);
+        const rb = symbolDisplayRank(b, opts?.firmwareRoot);
+        if (ra !== rb) {
+            return ra - rb;
+        }
+        return a.name.localeCompare(b.name);
+    });
+
+    const top = nodes.slice(0, limit);
+    await enrichFunctionSignatures(session, top.slice(0, 8));
+    return top;
+}
+
+function findDocumentSymbol(
+    symbols: LspDocumentSymbol[],
+    line: number,
+    name: string
+): LspDocumentSymbol | undefined {
+    for (const s of symbols) {
+        const symLine = s.selectionRange?.start.line ?? s.range.start.line;
+        if (s.name === name && symLine === line) {
+            return s;
+        }
+        if (s.children?.length) {
+            const nested = findDocumentSymbol(s.children, line, name);
+            if (nested) {
+                return nested;
+            }
+        }
+    }
+    return undefined;
+}
+
+/** Members of a struct / union / class at a source location. */
+export async function fetchSymbolMembers(
+    session: ClangdSession,
+    filePath: string,
+    line: number,
+    symbolName: string
+): Promise<SymbolNode[]> {
+    const base = symbolName.includes(".") ? symbolName.split(".").pop()! : symbolName;
+    const docSyms = await session.documentSymbol(filePath);
+    const found = findDocumentSymbol(docSyms, line, base);
+    if (found?.children?.length) {
+        return documentSymbolsToNodes(found.children, filePath, base);
+    }
+    return queryStructMembers(session, filePath, line, base);
+}
+
 /** Flatten graph for search / counts. */
 export function flattenSymbolGraph(graph: SymbolGraph): SymbolNode[] {
     const out: SymbolNode[] = [];
@@ -179,15 +255,70 @@ export function countSymbolsByKind(graph: SymbolGraph): Record<EmbfSymbolKind, n
     return counts;
 }
 
-/** Search symbol graph by prefix (case-insensitive). */
-export function searchSymbolGraph(graph: SymbolGraph, query: string, limit = 50): SymbolNode[] {
+/** Search symbol graph by substring (case-insensitive). Prefers `main/` sources when browsing. */
+export function searchSymbolGraph(
+    graph: SymbolGraph,
+    query: string,
+    limit = 50,
+    opts?: { kinds?: EmbfSymbolKind[]; firmwareRoot?: string }
+): SymbolNode[] {
     const q = query.trim().toLowerCase();
-    if (!q) {
-        return flattenSymbolGraph(graph).slice(0, limit);
+    const kinds = opts?.kinds?.length ? new Set(opts.kinds) : undefined;
+    let pool = flattenSymbolGraph(graph);
+    if (kinds) {
+        pool = pool.filter(n => kinds.has(n.kind));
     }
-    return flattenSymbolGraph(graph)
-        .filter(n => n.name.toLowerCase().includes(q))
-        .slice(0, limit);
+    if (q) {
+        pool = pool.filter(n => n.name.toLowerCase().includes(q));
+    }
+    pool.sort((a, b) => {
+        const ra = symbolDisplayRank(a, opts?.firmwareRoot);
+        const rb = symbolDisplayRank(b, opts?.firmwareRoot);
+        if (ra !== rb) {
+            return ra - rb;
+        }
+        return a.name.localeCompare(b.name);
+    });
+    return pool.slice(0, limit);
+}
+
+/** Count symbols matching query (and optional kind filter) without applying limit. */
+export function countSymbolGraphMatches(
+    graph: SymbolGraph,
+    query: string,
+    kinds?: EmbfSymbolKind[]
+): number {
+    const q = query.trim().toLowerCase();
+    const kindSet = kinds?.length ? new Set(kinds) : undefined;
+    let n = 0;
+    for (const sym of flattenSymbolGraph(graph)) {
+        if (kindSet && !kindSet.has(sym.kind)) {
+            continue;
+        }
+        if (q && !sym.name.toLowerCase().includes(q)) {
+            continue;
+        }
+        n++;
+    }
+    return n;
+}
+
+function symbolDisplayRank(node: SymbolNode, firmwareRoot?: string): number {
+    const fp = (node.filePath ?? "").replace(/\\/g, "/").toLowerCase();
+    if (!fp) {
+        return 2;
+    }
+    const root = (firmwareRoot ?? "").replace(/\\/g, "/").toLowerCase();
+    if (root && fp.startsWith(`${root}/main/`)) {
+        return 0;
+    }
+    if (fp.includes("/main/")) {
+        return 1;
+    }
+    if (fp.includes("managed_components") || fp.includes("/lvgl/") || fp.includes("lvgl__lvgl")) {
+        return 4;
+    }
+    return 2;
 }
 
 /** Resolve struct member children via LSP completion at `varName.` in a source file. */

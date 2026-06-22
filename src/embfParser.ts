@@ -257,18 +257,56 @@ function validateEmbf(data: unknown): EmbfProject {
             throw new EmbfParseError("'dataModel' must be an object when present");
         }
         const dm = dataModel as Record<string, unknown>;
-        if (!Array.isArray(dm["fields"])) {
-            throw new EmbfParseError("dataModel.fields must be an array");
-        }
-        (dm["fields"] as unknown[]).forEach((entry, i) => {
-            const p = `dataModel.fields[${i}]`;
-            validateDataFieldDeep(entry, p);
-            const id = (entry as Record<string, unknown>)["id"] as string;
-            if (fieldIds.has(id)) {
-                throw new EmbfParseError(`${p}.id "${id}" duplicates an earlier property id`);
+        const fieldsRaw = dm["fields"];
+        if (fieldsRaw !== undefined) {
+            if (!Array.isArray(fieldsRaw)) {
+                throw new EmbfParseError("dataModel.fields must be an array when present");
             }
-            fieldIds.add(id);
-        });
+            (fieldsRaw as unknown[]).forEach((entry, i) => {
+                const p = `dataModel.fields[${i}]`;
+                validateDataFieldDeep(entry, p);
+                const id = (entry as Record<string, unknown>)["id"] as string;
+                if (fieldIds.has(id)) {
+                    throw new EmbfParseError(`${p}.id "${id}" duplicates an earlier property id`);
+                }
+                fieldIds.add(id);
+            });
+        }
+        const sourceIds = new Set<string>();
+        const sourcesRaw = dm["sources"];
+        if (sourcesRaw !== undefined) {
+            if (!Array.isArray(sourcesRaw)) {
+                throw new EmbfParseError("dataModel.sources must be an array when present");
+            }
+            (sourcesRaw as unknown[]).forEach((entry, i) => {
+                const p = `dataModel.sources[${i}]`;
+                validateDataSourceDeep(entry, p);
+                const id = (entry as Record<string, unknown>)["id"] as string;
+                if (sourceIds.has(id)) {
+                    throw new EmbfParseError(`${p}.id "${id}" duplicates an earlier dataModel.sources id`);
+                }
+                sourceIds.add(id);
+            });
+        }
+        const bindingsRaw = dm["bindings"];
+        if (bindingsRaw !== undefined) {
+            if (!Array.isArray(bindingsRaw)) {
+                throw new EmbfParseError("dataModel.bindings must be an array when present");
+            }
+            (bindingsRaw as unknown[]).forEach((entry, i) => {
+                validateDataBindingDeep(entry, `dataModel.bindings[${i}]`, sourceIds);
+            });
+        }
+        if (
+            fieldsRaw === undefined &&
+            sourcesRaw === undefined &&
+            bindingsRaw === undefined &&
+            dm["version"] === undefined
+        ) {
+            throw new EmbfParseError(
+                "dataModel must include at least one of: fields, sources, bindings, version"
+            );
+        }
     }
 
     const model = obj["model"];
@@ -978,6 +1016,67 @@ function validateOptionalAnimations(o: Record<string, unknown>, path: string): v
 }
 
 const BINDING_TEMPLATE = /\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g;
+
+const DATA_SOURCE_KINDS = new Set(["global", "function"]);
+const C_BINDING_TARGET = /^[a-zA-Z_][a-zA-Z0-9_]*\.(text|value)$/;
+
+function validateDataSourceDeep(entry: unknown, path: string): void {
+    if (typeof entry !== "object" || entry === null) {
+        throw new EmbfParseError(`${path} must be an object`);
+    }
+    const o = entry as Record<string, unknown>;
+    if (typeof o["id"] !== "string" || !o["id"].trim()) {
+        throw new EmbfParseError(`${path}.id must be a non-empty string`);
+    }
+    if (typeof o["kind"] !== "string" || !DATA_SOURCE_KINDS.has(o["kind"])) {
+        throw new EmbfParseError(`${path}.kind must be "global" or "function"`);
+    }
+    if (typeof o["symbol"] !== "string" || !o["symbol"].trim()) {
+        throw new EmbfParseError(`${path}.symbol must be a non-empty string`);
+    }
+    if (o["type"] !== undefined && (typeof o["type"] !== "string" || !o["type"].trim())) {
+        throw new EmbfParseError(`${path}.type must be a non-empty string when set`);
+    }
+    if (o["headers"] !== undefined) {
+        if (!Array.isArray(o["headers"])) {
+            throw new EmbfParseError(`${path}.headers must be an array when set`);
+        }
+        for (const [i, h] of (o["headers"] as unknown[]).entries()) {
+            if (typeof h !== "string" || !h.trim()) {
+                throw new EmbfParseError(`${path}.headers[${i}] must be a non-empty string`);
+            }
+        }
+    }
+}
+
+function validateDataBindingDeep(entry: unknown, path: string, sourceIds: Set<string>): void {
+    if (typeof entry !== "object" || entry === null) {
+        throw new EmbfParseError(`${path} must be an object`);
+    }
+    const o = entry as Record<string, unknown>;
+    if (o["id"] !== undefined && (typeof o["id"] !== "string" || !o["id"].trim())) {
+        throw new EmbfParseError(`${path}.id must be a non-empty string when set`);
+    }
+    if (typeof o["target"] !== "string" || !C_BINDING_TARGET.test(o["target"])) {
+        throw new EmbfParseError(
+            `${path}.target must be "widgetId.text" or "widgetId.value" (widget id + property)`
+        );
+    }
+    if (typeof o["sourceId"] !== "string" || !o["sourceId"].trim()) {
+        throw new EmbfParseError(`${path}.sourceId must be a non-empty string`);
+    }
+    if (sourceIds.size > 0 && !sourceIds.has(o["sourceId"])) {
+        throw new EmbfParseError(
+            `${path}.sourceId "${o["sourceId"]}" is not declared in dataModel.sources`
+        );
+    }
+    if (typeof o["path"] !== "string") {
+        throw new EmbfParseError(`${path}.path must be a string (use "" for root symbol)`);
+    }
+    if (o["format"] !== undefined && (typeof o["format"] !== "string" || !o["format"].trim())) {
+        throw new EmbfParseError(`${path}.format must be a non-empty string when set`);
+    }
+}
 
 /** Widget property → required dataField type for numeric bindings. */
 const NUMERIC_BINDING_PROPS: Record<string, Set<string>> = {

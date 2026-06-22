@@ -5,4 +5,5 @@ export * from "./clangdInstall";
 export * from "./clangdBootstrap";
 export * from "./clangdSession";
 export * from "./symbolGraph";
+export * from "./symbolWebview";
 export * from "./symbolDiscoveryService";

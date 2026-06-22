@@ -12,8 +12,14 @@
  *       — optional selectedComponentIds: string[] (or legacy selectedComponentId) to restore overlay selection after reload
  *   { type: "error", message: string }
  *   { type: "historyState", canUndo: boolean, canRedo: boolean }
+ *   { type: "symbolIndexUpdate", status, summary }
+ *   { type: "symbolSearchResult", requestId, status, summary, message?, nodes[] }
+ *   { type: "symbolMembersResult", requestId, status, summary, message?, members[] }
  *
  * Communication protocol (webview → host):
+ *   …
+ *   { type: "searchSymbols", requestId, query?, limit? }
+ *   { type: "getSymbolMembers", requestId, name, filePath?, line? }
  *   { type: "ready" }
  *   { type: "log", level: "info"|"warn"|"error", text: string }
  *   { type: "addWidget", pageIndex: number, widgetType: string }
@@ -163,9 +169,82 @@ let codegenOutputResolved = "";
 let firmwarePathResolved = "";
 /** compile_commands.json path when linked. */
 let compileCommandsPath = "";
-/** Symbol index status from clangd (Phase 2 M1). */
+/** clangd connection status for firmware symbol search (Phase 2). */
 let symbolIndexStatus = "idle";
 let symbolIndexSummary = "";
+/** Pending symbol search / member requests (requestId → resolver). */
+let symbolRequestSeq = 0;
+/** @type {Map<string, (msg: object) => void>} */
+const symbolRequestWaiters = new Map();
+
+/**
+ * Search firmware symbols via extension host (clangd index). Phase 2 step 3.1.
+ * @param {string} query
+ * @param {{ limit?: number; kinds?: string[] }} [opts]
+ * @returns {Promise<{ nodes: object[]; status: string; summary: string; message?: string }>}
+ */
+function searchFirmwareSymbols(query, opts = {}) {
+    const requestId = String(++symbolRequestSeq);
+    const limit = opts.limit ?? 80;
+    const kinds = Array.isArray(opts.kinds) && opts.kinds.length ? opts.kinds : undefined;
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+            symbolRequestWaiters.delete(requestId);
+            reject(new Error("Symbol search timed out"));
+        }, 60_000);
+        symbolRequestWaiters.set(requestId, msg => {
+            clearTimeout(timer);
+            resolve({
+                nodes: Array.isArray(msg.nodes) ? msg.nodes : [],
+                status: typeof msg.status === "string" ? msg.status : "error",
+                summary: typeof msg.summary === "string" ? msg.summary : "",
+                message: typeof msg.message === "string" ? msg.message : undefined
+            });
+        });
+        vscode.postMessage({ type: "searchSymbols", requestId, query, limit, kinds });
+    });
+}
+
+/**
+ * Struct / union / class members for a symbol (clangd documentSymbol + completion).
+ * @param {{ name: string; filePath?: string; line?: number }} target
+ * @returns {Promise<{ members: object[]; status: string; summary: string; message?: string }>}
+ */
+function fetchFirmwareSymbolMembers(target) {
+    const requestId = String(++symbolRequestSeq);
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+            symbolRequestWaiters.delete(requestId);
+            reject(new Error("Symbol members timed out"));
+        }, 60_000);
+        symbolRequestWaiters.set(requestId, msg => {
+            clearTimeout(timer);
+            resolve({
+                members: Array.isArray(msg.members) ? msg.members : [],
+                status: typeof msg.status === "string" ? msg.status : "error",
+                summary: typeof msg.summary === "string" ? msg.summary : "",
+                message: typeof msg.message === "string" ? msg.message : undefined
+            });
+        });
+        vscode.postMessage({
+            type: "getSymbolMembers",
+            requestId,
+            name: target.name,
+            filePath: target.filePath,
+            line: target.line
+        });
+    });
+}
+
+function dispatchSymbolRequestResult(msg) {
+    const requestId = typeof msg.requestId === "string" ? msg.requestId : "";
+    const waiter = symbolRequestWaiters.get(requestId);
+    if (!waiter) {
+        return;
+    }
+    symbolRequestWaiters.delete(requestId);
+    waiter(msg);
+}
 
 // ── Runtime state ─────────────────────────────────────────────────────────────
 /** @type {any} Current Emscripten module instance */
@@ -480,6 +559,8 @@ window.addEventListener("message", event => {
         if (inspectorShowingPage) {
             renderInspector();
         }
+    } else if (msg.type === "symbolSearchResult" || msg.type === "symbolMembersResult") {
+        dispatchSymbolRequestResult(msg);
     }
 });
 
@@ -5707,12 +5788,12 @@ function wirePageInspectorActions() {
         symBtn.dataset.wired = "1";
         symBtn.addEventListener("click", e => {
             e.preventDefault();
-            symbolIndexStatus = "indexing";
-            symbolIndexSummary = "Symbol index in progress…";
+            symbolIndexSummary = "Reconnecting clangd…";
             renderInspector();
             vscode.postMessage({ type: "refreshSymbolIndex" });
         });
     }
+    wireSymbolSearchInspector();
     const stringsBtn = document.getElementById("btn-open-strings-res");
     if (stringsBtn && !stringsBtn.dataset.wired) {
         stringsBtn.dataset.wired = "1";
@@ -5723,6 +5804,281 @@ function wirePageInspectorActions() {
     }
     wireProjectStylesAndFieldsActions();
     wireWidgetTextModeToggles();
+}
+
+let symbolSearchDebounceTimer = null;
+
+/** Kinds that may expose members when clicked (struct instance, typedef, etc.). */
+const SYMBOL_MEMBER_KINDS = new Set(["struct", "variable", "typedef", "enum"]);
+
+function symbolMayHaveMembers(node) {
+    return (
+        SYMBOL_MEMBER_KINDS.has(node.kind) &&
+        typeof node.filePath === "string" &&
+        typeof node.line === "number"
+    );
+}
+
+function appendSymbolResultRow(parent, node, depth = 0, opts = {}) {
+    const pickMode = typeof opts.onPick === "function";
+    const rootSymbol = depth === 0 ? node.name : opts.rootSymbol || node.name;
+    const pathParts = Array.isArray(opts.pathParts) ? opts.pathParts : [];
+
+    const li = document.createElement("li");
+    if (depth > 0) {
+        li.className = "sym-member";
+        li.style.paddingLeft = `${8 + depth * 12}px`;
+    }
+    const expandable = symbolMayHaveMembers(node);
+    if (expandable) {
+        li.classList.add("sym-expandable");
+        li.tabIndex = 0;
+    }
+    if (pickMode) {
+        li.classList.add("sym-pickable");
+        li.title = expandable
+            ? "Click to bind; chevron expands members"
+            : "Click to bind to this symbol";
+    } else if (expandable) {
+        li.title = "Click to show members";
+    }
+    const kind = document.createElement("span");
+    kind.className = "sym-kind";
+    kind.textContent = symbolKindLabel(node.kind);
+    kind.title = node.kind || "";
+    li.appendChild(kind);
+    const nameEl = document.createElement("span");
+    nameEl.className = "sym-name";
+    nameEl.textContent = node.name || "";
+    li.appendChild(nameEl);
+    let chev = null;
+    if (expandable) {
+        chev = document.createElement("span");
+        chev.className = "sym-chevron";
+        chev.textContent = "▸";
+        chev.setAttribute("aria-hidden", "true");
+        chev.title = "Show members";
+        li.appendChild(chev);
+    }
+    if (pickMode) {
+        const pickBtn = document.createElement("button");
+        pickBtn.type = "button";
+        pickBtn.className = "tb-btn-small sym-pick-btn";
+        pickBtn.textContent = "Bind";
+        pickBtn.title = "Use this symbol";
+        li.appendChild(pickBtn);
+    }
+    const detail = node.signature || node.typeHint;
+    if (detail) {
+        const d = document.createElement("div");
+        d.className = "sym-detail";
+        d.textContent = detail;
+        li.appendChild(d);
+    }
+    const fp = formatSymbolFilePath(node.filePath);
+    if (fp) {
+        const loc = document.createElement("div");
+        loc.className = "sym-file";
+        loc.textContent = fp + (typeof node.line === "number" ? `:${node.line + 1}` : "");
+        li.appendChild(loc);
+    }
+    parent.appendChild(li);
+
+    const memberPath = pathParts.join(".");
+    const displayPath = memberPath ? `${rootSymbol}.${memberPath}` : rootSymbol;
+
+    const firePick = () => {
+        opts.onPick({
+            rootSymbol,
+            memberPath,
+            displayPath,
+            kind: node.kind,
+            typeHint: node.typeHint || node.signature || ""
+        });
+    };
+
+    if (pickMode) {
+        const pickBtn = li.querySelector(".sym-pick-btn");
+        if (pickBtn) {
+            pickBtn.addEventListener("click", e => {
+                e.preventDefault();
+                e.stopPropagation();
+                firePick();
+            });
+        }
+        li.addEventListener("click", e => {
+            if (e.target instanceof Element && e.target.closest(".sym-chevron")) {
+                return;
+            }
+            if (e.target instanceof Element && e.target.closest(".sym-pick-btn")) {
+                return;
+            }
+            e.preventDefault();
+            firePick();
+        });
+    }
+
+    if (expandable) {
+        const membersUl = document.createElement("ul");
+        membersUl.className = "symbol-search-members";
+        membersUl.hidden = true;
+        li.appendChild(membersUl);
+
+        const toggleMembers = e => {
+            if (e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            if (membersUl.dataset.loaded === "1") {
+                membersUl.hidden = !membersUl.hidden;
+                if (chev) {
+                    chev.textContent = membersUl.hidden ? "▸" : "▾";
+                }
+                return;
+            }
+            membersUl.hidden = false;
+            if (chev) {
+                chev.textContent = "▾";
+            }
+            membersUl.innerHTML = "<li>Loading members…</li>";
+            void fetchFirmwareSymbolMembers({
+                name: node.name,
+                filePath: node.filePath,
+                line: node.line
+            })
+                .then(res => {
+                    membersUl.innerHTML = "";
+                    if (res.status !== "ready" || !res.members.length) {
+                        const empty = document.createElement("li");
+                        empty.textContent =
+                            res.message || res.summary || "No members found";
+                        membersUl.appendChild(empty);
+                    } else {
+                        for (const m of res.members) {
+                            appendSymbolResultRow(
+                                membersUl,
+                                m,
+                                depth + 1,
+                                pickMode
+                                    ? {
+                                          onPick: opts.onPick,
+                                          rootSymbol,
+                                          pathParts: [...pathParts, m.name]
+                                      }
+                                    : {}
+                            );
+                        }
+                    }
+                    membersUl.dataset.loaded = "1";
+                })
+                .catch(err => {
+                    membersUl.innerHTML = "";
+                    const errLi = document.createElement("li");
+                    errLi.textContent = err?.message ?? String(err);
+                    membersUl.appendChild(errLi);
+                });
+        };
+        if (chev) {
+            chev.addEventListener("click", toggleMembers);
+        }
+        if (!pickMode) {
+            li.addEventListener("click", e => {
+                e.preventDefault();
+                toggleMembers();
+            });
+            li.addEventListener("keydown", e => {
+                if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    toggleMembers();
+                }
+            });
+        }
+    }
+}
+
+function renderSymbolSearchResults(nodes, status, message, resultCount) {
+    const list = document.getElementById("symbol-search-results");
+    const footer = document.getElementById("symbol-search-footer");
+    if (!list) {
+        return;
+    }
+    list.innerHTML = "";
+    if (footer) {
+        footer.textContent = "";
+    }
+    if (status !== "ready") {
+        const li = document.createElement("li");
+        li.textContent = message || status || "clangd not ready";
+        list.appendChild(li);
+        return;
+    }
+    if (!nodes.length) {
+        const li = document.createElement("li");
+        li.textContent = message || "No matching symbols";
+        list.appendChild(li);
+    }
+    for (const node of nodes) {
+        appendSymbolResultRow(list, node);
+    }
+    if (footer && typeof resultCount === "number" && resultCount > 0) {
+        footer.textContent = `${resultCount} result${resultCount === 1 ? "" : "s"}`;
+    }
+}
+
+function wireSymbolSearchInspector() {
+    const input = /** @type {HTMLInputElement | null} */ (document.getElementById("symbol-search-query"));
+    const kindSel = /** @type {HTMLSelectElement | null} */ (document.getElementById("symbol-kind-filter"));
+    if (!input || input.dataset.wired) {
+        return;
+    }
+    input.dataset.wired = "1";
+    if (kindSel) {
+        kindSel.dataset.wired = "1";
+    }
+    input.disabled = symbolIndexStatus !== "ready";
+    if (kindSel) {
+        kindSel.disabled = symbolIndexStatus !== "ready";
+    }
+    const runSearch = () => {
+        const q = input.value.trim();
+        const kinds = kindSel?.value ? [kindSel.value] : undefined;
+        const list = document.getElementById("symbol-search-results");
+        if (!q) {
+            if (list) {
+                list.innerHTML = "<li>Type a name to search firmware symbols (IntelliSense-style).</li>";
+            }
+            const footer = document.getElementById("symbol-search-footer");
+            if (footer) {
+                footer.textContent = "";
+            }
+            return;
+        }
+        if (list) {
+            list.innerHTML = "<li>Searching…</li>";
+        }
+        void searchFirmwareSymbols(q, { limit: 80, kinds })
+            .then(res => {
+                renderSymbolSearchResults(
+                    res.nodes,
+                    res.status,
+                    res.message || res.summary,
+                    res.nodes.length
+                );
+            })
+            .catch(err => {
+                renderSymbolSearchResults([], "error", err?.message ?? String(err));
+            });
+    };
+    input.addEventListener("input", () => {
+        if (symbolSearchDebounceTimer) {
+            clearTimeout(symbolSearchDebounceTimer);
+        }
+        symbolSearchDebounceTimer = setTimeout(runSearch, 280);
+    });
+    if (kindSel) {
+        kindSel.addEventListener("change", runSearch);
+    }
+    runSearch();
 }
 
 /** Toggle literal vs resource inputs in widget text inspector fields. */
@@ -6056,6 +6412,346 @@ function wireImageInspectorActions() {
 }
 
 /**
+ * Contextual hint under firmware / symbol index status (avoids error-like text when ready).
+ * @returns {string}
+ */
+function renderSymbolIndexHintHtml() {
+    switch (symbolIndexStatus) {
+        case "ready":
+            return (
+                `Search works like IDE IntelliSense — type a name and results come from clangd. ` +
+                `Click a struct or variable to expand members.`
+            );
+        case "missing_clangd":
+            return `Run <strong>EmbeddedFlow: Install requirements</strong> to download clangd, or set <code>embeddedflow.clangdPath</code>.`;
+        case "missing_firmware":
+            return `Set <strong>Firmware project path</strong> above (relative to .embf or absolute), or use <strong>Browse…</strong>.`;
+        case "error":
+            return symbolIndexSummary
+                ? esc(symbolIndexSummary)
+                : "clangd error — check Output → embeddedflow.";
+        case "idle":
+        default:
+            if (!compileCommandsPath) {
+                return `Build the firmware project first so <code>build/compile_commands.json</code> exists.`;
+            }
+            return `Set firmware path above, then type in the search box. Use <strong>Reconnect clangd</strong> after a rebuild.`;
+    }
+}
+
+function symbolKindLabel(kind) {
+    switch (kind) {
+        case "function":
+            return "Function";
+        case "variable":
+            return "Global";
+        case "field":
+            return "Field";
+        case "struct":
+            return "Struct";
+        case "enum":
+            return "Enum";
+        case "typedef":
+            return "Typedef";
+        default:
+            return "Symbol";
+    }
+}
+
+/** Widget properties bindable to firmware C symbols (BU1). */
+const WIDGET_C_BIND_PROPS = {
+    label: ["text"],
+    slider: ["value"],
+    bar: ["value"],
+    arc: ["value"],
+    knob: ["value"]
+};
+
+const C_BIND_PROP_LABELS = {
+    text: "Text",
+    value: "Value"
+};
+
+/** @type {{ compId: string; property: string } | null} */
+let symbolBindPickerTarget = null;
+let symbolBindPickerDebounce = null;
+
+function sourceIdFromSymbol(symbol) {
+    const base = String(symbol || "sym")
+        .replace(/[^a-zA-Z0-9_]/g, "_")
+        .replace(/^([0-9])/, "_$1");
+    return `src_${base}`;
+}
+
+function getProjectDataSources() {
+    return currentProject?.dataModel?.sources ?? [];
+}
+
+function getProjectDataBindings() {
+    return currentProject?.dataModel?.bindings ?? [];
+}
+
+function findDataBindingForTarget(compId, property) {
+    const target = `${compId}.${property}`;
+    return getProjectDataBindings().find(b => b.target === target);
+}
+
+function formatDataBindingPath(binding) {
+    if (!binding) {
+        return "";
+    }
+    const src = getProjectDataSources().find(s => s.id === binding.sourceId);
+    const root = src?.symbol ?? binding.sourceId;
+    return binding.path ? `${root}.${binding.path}` : root;
+}
+
+function upsertDataSource(sources, pick) {
+    const next = sources.slice();
+    const existing = next.find(s => s.symbol === pick.rootSymbol);
+    if (existing) {
+        return { sources: next, sourceId: existing.id };
+    }
+    const id = sourceIdFromSymbol(pick.rootSymbol);
+    const uniqueId = next.some(s => s.id === id)
+        ? `${id}_${next.length + 1}`
+        : id;
+    next.push({
+        id: uniqueId,
+        kind: pick.kind === "function" ? "function" : "global",
+        symbol: pick.rootSymbol,
+        ...(pick.typeHint ? { type: pick.typeHint } : {})
+    });
+    return { sources: next, sourceId: uniqueId };
+}
+
+function applyDataBindingPick(compId, property, pick) {
+    if (!currentProject || !pick?.rootSymbol) {
+        return;
+    }
+    const { sources, sourceId } = upsertDataSource(getProjectDataSources(), pick);
+    const target = `${compId}.${property}`;
+    const bindings = getProjectDataBindings().slice();
+    const idx = bindings.findIndex(b => b.target === target);
+    const entry = {
+        id: idx >= 0 ? bindings[idx].id : `bind_${compId}_${property}`,
+        target,
+        sourceId,
+        path: pick.memberPath || ""
+    };
+    if (idx >= 0) {
+        bindings[idx] = { ...bindings[idx], ...entry };
+    } else {
+        bindings.push(entry);
+    }
+    vscode.postMessage({
+        type: "updatePage",
+        pageIndex: currentPageIndex,
+        patch: { projDataSources: sources, projDataBindings: bindings }
+    });
+    closeSymbolBindPicker();
+}
+
+function clearDataBinding(compId, property) {
+    const target = `${compId}.${property}`;
+    const bindings = getProjectDataBindings().filter(b => b.target !== target);
+    vscode.postMessage({
+        type: "updatePage",
+        pageIndex: currentPageIndex,
+        patch: { projDataBindings: bindings.length ? bindings : null }
+    });
+}
+
+function closeSymbolBindPicker() {
+    symbolBindPickerTarget = null;
+    const el = document.getElementById("symbol-bind-picker");
+    if (el) {
+        el.hidden = true;
+    }
+}
+
+function openSymbolBindPicker(compId, property) {
+    if (symbolIndexStatus !== "ready") {
+        return;
+    }
+    symbolBindPickerTarget = { compId, property };
+    const el = document.getElementById("symbol-bind-picker");
+    if (!el) {
+        return;
+    }
+    el.hidden = false;
+    const title = document.getElementById("symbol-bind-picker-title");
+    if (title) {
+        title.textContent = `Bind ${C_BIND_PROP_LABELS[property] || property} → C symbol`;
+    }
+    const input = /** @type {HTMLInputElement | null} */ (
+        document.getElementById("symbol-bind-picker-query")
+    );
+    if (input) {
+        input.value = "";
+        input.focus();
+    }
+    renderSymbolBindPickerResults([], "ready", "Type to search firmware symbols.");
+    wireSymbolBindPickerOnce();
+}
+
+function renderSymbolBindPickerResults(nodes, status, message) {
+    const list = document.getElementById("symbol-bind-picker-results");
+    if (!list) {
+        return;
+    }
+    list.innerHTML = "";
+    if (status !== "ready") {
+        const li = document.createElement("li");
+        li.textContent = message || status || "clangd not ready";
+        list.appendChild(li);
+        return;
+    }
+    if (!nodes.length) {
+        const li = document.createElement("li");
+        li.textContent = message || "No matching symbols";
+        list.appendChild(li);
+        return;
+    }
+    for (const node of nodes) {
+        appendSymbolResultRow(list, node, 0, {
+            onPick: pick => {
+                if (symbolBindPickerTarget) {
+                    applyDataBindingPick(
+                        symbolBindPickerTarget.compId,
+                        symbolBindPickerTarget.property,
+                        pick
+                    );
+                }
+            }
+        });
+    }
+}
+
+function wireSymbolBindPickerOnce() {
+    const root = document.getElementById("symbol-bind-picker");
+    if (!root || root.dataset.wired) {
+        return;
+    }
+    root.dataset.wired = "1";
+    const backdrop = root.querySelector(".symbol-bind-picker-backdrop");
+    const closeBtn = document.getElementById("symbol-bind-picker-close");
+    const input = /** @type {HTMLInputElement | null} */ (
+        document.getElementById("symbol-bind-picker-query")
+    );
+    const kindSel = /** @type {HTMLSelectElement | null} */ (
+        document.getElementById("symbol-bind-picker-kind")
+    );
+    const runSearch = () => {
+        if (!input) {
+            return;
+        }
+        const q = input.value.trim();
+        if (!q) {
+            renderSymbolBindPickerResults([], "ready", "Type to search firmware symbols.");
+            return;
+        }
+        const kinds = kindSel?.value ? [kindSel.value] : undefined;
+        renderSymbolBindPickerResults([], "ready", "Searching…");
+        void searchFirmwareSymbols(q, { limit: 60, kinds })
+            .then(res => {
+                renderSymbolBindPickerResults(
+                    res.nodes,
+                    res.status,
+                    res.message || res.summary
+                );
+            })
+            .catch(err => {
+                renderSymbolBindPickerResults([], "error", err?.message ?? String(err));
+            });
+    };
+    if (backdrop) {
+        backdrop.addEventListener("click", closeSymbolBindPicker);
+    }
+    if (closeBtn) {
+        closeBtn.addEventListener("click", e => {
+            e.preventDefault();
+            closeSymbolBindPicker();
+        });
+    }
+    if (input) {
+        input.addEventListener("input", () => {
+            if (symbolBindPickerDebounce) {
+                clearTimeout(symbolBindPickerDebounce);
+            }
+            symbolBindPickerDebounce = setTimeout(runSearch, 280);
+        });
+    }
+    if (kindSel) {
+        kindSel.addEventListener("change", runSearch);
+    }
+    window.addEventListener("keydown", e => {
+        if (e.key === "Escape" && root && !root.hidden) {
+            closeSymbolBindPicker();
+        }
+    });
+}
+
+function inspectorCBindingsSection(comp) {
+    const props = WIDGET_C_BIND_PROPS[comp.type];
+    if (!props?.length) {
+        return "";
+    }
+    const canPick = symbolIndexStatus === "ready";
+    let rows = "";
+    for (const prop of props) {
+        const binding = findDataBindingForTarget(comp.id, prop);
+        const path = formatDataBindingPath(binding);
+        rows +=
+            `<div class="c-bind-row" data-c-bind-row="${esc(prop)}">` +
+            `<label>${esc(C_BIND_PROP_LABELS[prop] || prop)}</label>` +
+            `<div class="c-bind-current">` +
+            (path
+                ? `<code class="c-bind-path">${esc(path)}</code>`
+                : `<span class="c-bind-none">(not bound)</span>`) +
+            `</div>` +
+            `<div class="c-bind-actions">` +
+            `<button type="button" class="tb-btn-small" data-c-bind-pick="${esc(prop)}" ${
+                canPick ? "" : "disabled"
+            }>Bind Data…</button>` +
+            (path
+                ? `<button type="button" class="tb-btn-small" data-c-bind-clear="${esc(prop)}">Clear</button>`
+                : "") +
+            `</div></div>`;
+    }
+    const hint =
+        symbolIndexStatus === "ready"
+            ? "Pick a firmware symbol; expand structs to bind members."
+            : symbolIndexStatus === "missing_firmware"
+              ? "Set firmware project path on the page inspector first."
+              : symbolIndexStatus === "missing_clangd"
+                ? "Install clangd via EmbeddedFlow: Install requirements."
+                : "Link firmware and clangd to bind C symbols.";
+    return (
+        `<div class="inspector-group-title">Bind Data</div>` +
+        `<p class="c-bind-intro">${esc(hint)}</p>` +
+        rows
+    );
+}
+
+/** Short path for display (prefer main/… under firmware root). */
+function formatSymbolFilePath(filePath) {
+    if (!filePath || typeof filePath !== "string") {
+        return "";
+    }
+    const norm = filePath.replace(/\\/g, "/");
+    const root = (firmwarePathResolved || "").replace(/\\/g, "/");
+    if (root && norm.toLowerCase().startsWith(root.toLowerCase() + "/")) {
+        return norm.slice(root.length + 1);
+    }
+    const mainIdx = norm.toLowerCase().indexOf("/main/");
+    if (mainIdx >= 0) {
+        return norm.slice(mainIdx + 1);
+    }
+    const parts = norm.split("/");
+    return parts.length > 2 ? parts.slice(-3).join("/") : norm;
+}
+
+/**
  * Full HTML block for inspecting the active page (.embf pages[] entry + project.theme.dark).
  * @param {object} page
  * @param {object} project
@@ -6094,16 +6790,32 @@ function renderPageInspectorHtml(page, project) {
             (project.project && project.project.firmwarePath) || ""
         ) +
         `<button type="button" class="tb-btn-small" id="btn-browse-firmware">Browse…</button>` +
-        `<button type="button" class="tb-btn-small" id="btn-refresh-symbol-index">Refresh symbol index</button>` +
+        `<button type="button" class="tb-btn-small" id="btn-refresh-symbol-index">Reconnect clangd</button>` +
         `<div class="field"><p style="font-size:11px;color:#888;margin:0 0 8px;line-height:1.35;">` +
         `Resolved: <code>${esc(firmwarePathResolved || "(not set)")}</code><br/>` +
         (compileCommandsPath
             ? `compile_commands: <code>${esc(compileCommandsPath)}</code><br/>`
             : "") +
-        `Symbol index: <code>${esc(symbolIndexStatus)}</code>` +
+        `clangd: <code class="sym-status sym-status-${esc(symbolIndexStatus)}">${esc(symbolIndexStatus)}</code>` +
         (symbolIndexSummary ? ` — ${esc(symbolIndexSummary)}` : "") +
-        `<br/>Relative to the .embf file, or absolute. Requires <code>clangd</code> on PATH and a built firmware tree.` +
+        `<br/>${renderSymbolIndexHintHtml()}` +
         `</p></div>` +
+        `<div class="field"><label for="symbol-search-query">Search firmware symbols</label>` +
+        `<p class="symbol-search-intro">Type to search — like IntelliSense. Click structs and globals to see members.</p>` +
+        `<div class="row2 symbol-search-filters">` +
+        `<input type="search" id="symbol-search-query" autocomplete="off" spellcheck="false" placeholder="e.g. app_data, lv_label_set_text…" ` +
+        `${symbolIndexStatus === "ready" ? "" : "disabled"} />` +
+        `<select id="symbol-kind-filter" title="Filter by symbol kind" ${symbolIndexStatus === "ready" ? "" : "disabled"}>` +
+        `<option value="">All kinds</option>` +
+        `<option value="function">Functions</option>` +
+        `<option value="variable">Globals</option>` +
+        `<option value="field">Fields</option>` +
+        `<option value="struct">Structs</option>` +
+        `<option value="enum">Enums</option>` +
+        `</select></div>` +
+        `<ul id="symbol-search-results" class="symbol-search-results" aria-live="polite"></ul>` +
+        `<p id="symbol-search-footer" class="symbol-search-footer"></p>` +
+        `</div>` +
         `<div class="inspector-group-title">Code generation</div>` +
         fieldSelect(
             "proj_lvglInclude",
@@ -7150,7 +7862,7 @@ function inspectorBindingsAndStylesSection(comp) {
         if (fields.length > 0) {
             const current = comp.bindings?.value ?? "";
             html +=
-                `<div class="inspector-group-title">Binding</div>` +
+                `<div class="inspector-group-title">Binding (preview fields)</div>` +
                 `<div class="field"><label>Value bound to</label>` +
                 `<select name="binding_value" data-binding-prop="value">` +
                 `<option value="">(none)</option>` +
@@ -7165,6 +7877,8 @@ function inspectorBindingsAndStylesSection(comp) {
                 `</select></div>`;
         }
     }
+
+    html += inspectorCBindingsSection(comp);
 
     const anims = Array.isArray(comp.animations) ? comp.animations : [];
     html +=
@@ -7188,6 +7902,29 @@ const ANIM_EASINGS = ["linear", "ease_in", "ease_out", "ease_in_out", "overshoot
  */
 function wireBindingsInspectorActions(comp) {
     if (!inspectorForm) return;
+
+    inspectorForm.querySelectorAll("[data-c-bind-pick]").forEach(btn => {
+        if (btn.dataset.wired) return;
+        btn.dataset.wired = "1";
+        btn.addEventListener("click", e => {
+            e.preventDefault();
+            const prop = /** @type {HTMLElement} */ (btn).dataset.cBindPick;
+            if (prop && selectedComponentOrder.length === 1) {
+                openSymbolBindPicker(selectedComponentOrder[0], prop);
+            }
+        });
+    });
+    inspectorForm.querySelectorAll("[data-c-bind-clear]").forEach(btn => {
+        if (btn.dataset.wired) return;
+        btn.dataset.wired = "1";
+        btn.addEventListener("click", e => {
+            e.preventDefault();
+            const prop = /** @type {HTMLElement} */ (btn).dataset.cBindClear;
+            if (prop && selectedComponentOrder.length === 1) {
+                clearDataBinding(selectedComponentOrder[0], prop);
+            }
+        });
+    });
 
     const animHost = inspectorForm.querySelector(`[data-anim-host="1"]`);
     const animAddBtn = inspectorForm.querySelector(`[data-anim-add="1"]`);

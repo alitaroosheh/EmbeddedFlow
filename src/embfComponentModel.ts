@@ -785,10 +785,38 @@ export function applyPageInspectorPatch(
     if (Object.prototype.hasOwnProperty.call(patch, "projDataFields")) {
         const v = patch.projDataFields;
         if (v === null || (Array.isArray(v) && v.length === 0)) {
-            delete project.dataModel;
+            if (project.dataModel?.sources?.length || project.dataModel?.bindings?.length) {
+                project.dataModel ??= { fields: [] };
+                project.dataModel.fields = [];
+            } else {
+                delete project.dataModel;
+            }
         } else if (Array.isArray(v)) {
-            project.dataModel = { fields: v as NonNullable<typeof project.dataModel>["fields"] };
+            project.dataModel ??= { fields: [] };
+            project.dataModel.fields = v as NonNullable<typeof project.dataModel>["fields"];
         }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(patch, "projDataSources")) {
+        const v = patch.projDataSources;
+        project.dataModel ??= { fields: [] };
+        if (v === null || (Array.isArray(v) && v.length === 0)) {
+            delete project.dataModel.sources;
+        } else if (Array.isArray(v)) {
+            project.dataModel.sources = v as NonNullable<typeof project.dataModel>["sources"];
+        }
+        pruneEmptyDataModel(project);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(patch, "projDataBindings")) {
+        const v = patch.projDataBindings;
+        project.dataModel ??= { fields: [] };
+        if (v === null || (Array.isArray(v) && v.length === 0)) {
+            delete project.dataModel.bindings;
+        } else if (Array.isArray(v)) {
+            project.dataModel.bindings = v as NonNullable<typeof project.dataModel>["bindings"];
+        }
+        pruneEmptyDataModel(project);
     }
 
     if (Object.prototype.hasOwnProperty.call(patch, "projModelProperties")) {
@@ -801,14 +829,28 @@ export function applyPageInspectorPatch(
             }
         } else if (Array.isArray(v)) {
             project.model.properties = v as NonNullable<typeof project.model>["properties"];
-            // Phase 1: model.properties replaces legacy dataModel for preview (avoid duplicate ids).
+            // Phase 1: model.properties replaces legacy dataModel fields for preview (avoid duplicate ids).
             if (project.dataModel?.fields?.length) {
-                delete project.dataModel;
+                project.dataModel.fields = [];
+                pruneEmptyDataModel(project);
             }
         }
     }
 
     return true;
+}
+
+function pruneEmptyDataModel(project: EmbfProject): void {
+    const dm = project.dataModel;
+    if (!dm) {
+        return;
+    }
+    const hasFields = (dm.fields?.length ?? 0) > 0;
+    const hasSources = (dm.sources?.length ?? 0) > 0;
+    const hasBindings = (dm.bindings?.length ?? 0) > 0;
+    if (!hasFields && !hasSources && !hasBindings && dm.version === undefined) {
+        delete project.dataModel;
+    }
 }
 
 export function patchComponentOnPage(

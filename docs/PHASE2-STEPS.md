@@ -36,9 +36,9 @@ Spec: [DECISIONS-clangd-setup.md](./DECISIONS-clangd-setup.md)
 
 | Step | Requirement | Status |
 |------|-------------|--------|
-| 3.1 | Wire symbol graph to preview (search API) | ⬜ |
-| 3.2 | Schema: `dataModel.sources[]` + binding IR (FR-SCH-01/02) | ⬜ |
-| 3.3 | **BU1** — “Bind Data” symbol tree picker | ⬜ |
+| 3.1 | Wire symbol graph to preview (search API) | ✅ |
+| 3.2 | Schema: `dataModel.sources[]` + binding IR (FR-SCH-01/02) | ✅ |
+| 3.3 | **BU1** — “Bind Data” symbol tree picker | ✅ |
 | 3.4 | **BU2** — autocomplete for manual symbol path | ⬜ |
 | 3.5 | **BU3** — tree + manual → same IR object | ⬜ |
 | 3.6 | **BU4** — type validation at bind time | ⬜ |
@@ -63,8 +63,9 @@ Spec: [DECISIONS-clangd-setup.md](./DECISIONS-clangd-setup.md)
 ## What to do next
 
 1. ~~Finish **Step 2**: requirements wizard.~~ ✅
-2. **Step 3.1**: expose symbols to webview.
-3. **Step 3.3**: Bind Data picker (BU1).
+2. ~~**Step 3.1**: expose symbols to webview.~~ ✅
+3. ~~**Step 3.3**: Bind Data picker (BU1).~~ ✅
+4. **Step 3.4**: manual symbol path autocomplete (BU2).
 
 ---
 

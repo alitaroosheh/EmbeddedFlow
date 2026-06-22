@@ -84,7 +84,6 @@ export class ClangdSession {
     ): Promise<ClangdSession> {
         const args = [
             `--compile-commands-dir=${compileCommandsDir}`,
-            "--background-index=0",
             "--clang-tidy=0",
             "--header-insertion=never",
             "--log=error"

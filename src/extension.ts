@@ -512,17 +512,17 @@ async function runRefreshSymbolIndex(uri?: vscode.Uri): Promise<void> {
     await vscode.window.withProgress(
         {
             location: vscode.ProgressLocation.Notification,
-            title: "EmbeddedFlow: indexing firmware symbols…",
+            title: "EmbeddedFlow: reconnecting clangd…",
             cancellable: false
         },
-        async () => symbolDiscovery.indexProject(project, filePath, wsFolders, { force: true })
+        async () => symbolDiscovery.restartClangd(project, filePath, wsFolders)
     ).then(state => {
         if (state.status === "ready") {
             void vscode.window.showInformationMessage(`EmbeddedFlow: ${symbolIndexSummary(state)}`);
             EmbfPreviewPanel.refreshEmbfIfOpen(filePath);
         } else {
             void vscode.window.showErrorMessage(
-                `EmbeddedFlow: symbol index failed — ${state.message ?? state.status}`
+                `EmbeddedFlow: clangd reconnect failed — ${state.message ?? state.status}`
             );
         }
     });

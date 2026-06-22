@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { describe, expect, it } from "vitest";
-import { listIndexSourceFiles } from "../src/symbolDiscovery/compileCommandsIndex";
+import { listIndexSourceFiles, countIndexableSourceFiles } from "../src/symbolDiscovery/compileCommandsIndex";
 import {
     findFirmwareRootFromWorkspace,
     formatFirmwarePathForStorage,
@@ -12,8 +12,10 @@ import {
 } from "../src/symbolDiscovery/firmwarePath";
 import {
     documentSymbolsToNodes,
-    searchSymbolGraph
+    searchSymbolGraph,
+    countSymbolGraphMatches
 } from "../src/symbolDiscovery/symbolGraph";
+import { toWebviewSymbolNode, toWebviewSymbolNodes } from "../src/symbolDiscovery/symbolWebview";
 import type { SymbolGraph } from "../src/symbolDiscovery/types";
 import { minimalProject } from "./fixtures";
 
@@ -124,6 +126,45 @@ describe("compileCommandsIndex", () => {
         expect(files[0].toLowerCase()).toBe(path.normalize(mainC).toLowerCase());
         fs.rmSync(dir, { recursive: true, force: true });
     });
+
+    it("listIndexSourceFiles with maxFiles 0 returns all collected files", () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "embf-cc-all-"));
+        const mainDir = path.join(dir, "main");
+        fs.mkdirSync(mainDir);
+        for (let i = 0; i < 5; i++) {
+            fs.writeFileSync(path.join(mainDir, `f${i}.c`), "int x;\n");
+        }
+        const ccPath = path.join(dir, "build", "compile_commands.json");
+        fs.mkdirSync(path.dirname(ccPath), { recursive: true });
+        fs.writeFileSync(
+            ccPath,
+            JSON.stringify(
+                Array.from({ length: 5 }, (_, i) => ({ file: path.join(mainDir, `f${i}.c`) }))
+            )
+        );
+        expect(listIndexSourceFiles(ccPath, dir, { maxFiles: 0 })).toHaveLength(5);
+        expect(countIndexableSourceFiles(ccPath, dir).total).toBe(5);
+        fs.rmSync(dir, { recursive: true, force: true });
+    });
+
+    it("listIndexSourceFiles mainOnly skips components outside main/", () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "embf-cc-main-"));
+        const mainDir = path.join(dir, "main");
+        const compDir = path.join(dir, "components", "foo");
+        fs.mkdirSync(mainDir, { recursive: true });
+        fs.mkdirSync(compDir, { recursive: true });
+        const mainC = path.join(mainDir, "app.c");
+        const compC = path.join(compDir, "foo.c");
+        fs.writeFileSync(mainC, "int x;\n");
+        fs.writeFileSync(compC, "int y;\n");
+        const ccPath = path.join(dir, "build", "compile_commands.json");
+        fs.mkdirSync(path.dirname(ccPath), { recursive: true });
+        fs.writeFileSync(ccPath, JSON.stringify([{ file: compC }, { file: mainC }]));
+        expect(listIndexSourceFiles(ccPath, dir, { mainOnly: true, maxFiles: 0 })).toEqual([
+            path.normalize(mainC)
+        ]);
+        fs.rmSync(dir, { recursive: true, force: true });
+    });
 });
 
 describe("symbolGraph", () => {
@@ -166,5 +207,35 @@ describe("symbolGraph", () => {
         const hits = searchSymbolGraph(graph, "ui_");
         expect(hits).toHaveLength(1);
         expect(hits[0].name).toBe("ui_init");
+    });
+
+    it("countSymbolGraphMatches counts without limit", () => {
+        const graph: SymbolGraph = {
+            firmwareRoot: "/fw",
+            compileCommandsPath: "/fw/build/compile_commands.json",
+            indexedAt: 0,
+            sourceFileCount: 1,
+            symbols: [
+                { name: "a", kind: "variable" },
+                { name: "b", kind: "function" },
+                { name: "c", kind: "variable" }
+            ]
+        };
+        expect(countSymbolGraphMatches(graph, "")).toBe(3);
+        expect(countSymbolGraphMatches(graph, "", ["variable"])).toBe(2);
+    });
+});
+
+describe("symbolWebview", () => {
+    it("toWebviewSymbolNode omits children unless requested", () => {
+        const node = {
+            name: "app_data",
+            kind: "struct" as const,
+            children: [{ name: "app_data.temp_c", kind: "field" as const, typeHint: "float" }]
+        };
+        const flat = toWebviewSymbolNode(node, false);
+        expect(flat.children).toBeUndefined();
+        const tree = toWebviewSymbolNodes([node], true);
+        expect(tree[0].children?.[0].name).toBe("app_data.temp_c");
     });
 });

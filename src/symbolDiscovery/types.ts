@@ -26,7 +26,10 @@ export interface SymbolGraph {
     firmwareRoot: string;
     compileCommandsPath: string;
     indexedAt: number;
+    /** Files actually queried via LSP this index run. */
     sourceFileCount: number;
+    /** `.c/.cpp` files under firmware root in compile_commands (before maxFiles cap). */
+    totalSourceFileCount?: number;
     symbols: SymbolNode[];
 }
 

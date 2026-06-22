@@ -254,7 +254,7 @@ If `localeMeta` is omitted, infer `rtl` for known RTL locale ids (`ar`, `fa`, `h
 
 ### Binding UX
 
-- [ ] **BU1** Tree picker: widget → "Bind Data" → browse symbol tree
+- [x] **BU1** Tree picker: widget → "Bind Data" → browse symbol tree
 - [ ] **BU2** IntelliSense autocomplete for manual symbol path entry
 - [ ] **BU3** Both UIs resolve to the same IR binding object
 - [ ] **BU4** Type validation at bind time (e.g. float symbol → float property)

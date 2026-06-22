@@ -37,7 +37,10 @@ import {
     resolveFirmwareRootDisplay,
     symbolDiscovery,
     symbolIndexSummary,
-    type SymbolIndexStatus
+    toWebviewSymbolNodes,
+    type EmbfSymbolKind,
+    type SymbolIndexStatus,
+    type WebviewSymbolNode
 } from "./symbolDiscovery";
 import { undoEmbfEdit, redoEmbfEdit, getEmbfHistoryState } from "./embfUndoRedo";
 import { appendWidgetToEmbfFile } from "./embfWidgetInsert";
@@ -59,7 +62,22 @@ export type HostToWebviewMessage =
           type: "symbolIndexUpdate";
           status: SymbolIndexStatus;
           summary: string;
-          symbolCount?: number;
+      }
+    | {
+          type: "symbolSearchResult";
+          requestId: string;
+          status: SymbolIndexStatus;
+          summary: string;
+          message?: string;
+          nodes: WebviewSymbolNode[];
+      }
+    | {
+          type: "symbolMembersResult";
+          requestId: string;
+          status: SymbolIndexStatus;
+          summary: string;
+          message?: string;
+          members: WebviewSymbolNode[];
       };
 
 // Messages sent from webview → extension host
@@ -95,6 +113,14 @@ export type WebviewToHostMessage =
     | { type: "pickCodegenOutputFolder"; pageIndex: number }
     | { type: "pickFirmwareFolder"; pageIndex: number }
     | { type: "refreshSymbolIndex" }
+    | { type: "searchSymbols"; requestId: string; query?: string; limit?: number; kinds?: string[] }
+    | {
+          type: "getSymbolMembers";
+          requestId: string;
+          name: string;
+          filePath?: string;
+          line?: number;
+      }
     | { type: "pickImageSource"; pageIndex: number; componentId: string }
     | { type: "deleteWidget"; pageIndex: number; componentId: string }
     | { type: "bulkDeleteWidgets"; pageIndex: number; componentIds: string[] }
@@ -220,8 +246,6 @@ export class EmbfPreviewPanel {
     private _webviewReady = false;
     /** Messages queued until the webview is ready (avoids lost `postMessage`). */
     private _pendingMessages: HostToWebviewMessage[] = [];
-    /** Defer symbol indexing until after the first preview paint. */
-    private _symbolIndexTimer: ReturnType<typeof setTimeout> | undefined;
     /** Coalesce inspector property writes → one preview refresh instead of hammering WASM rebuild per patch. */
     private _inspectorReloadTimer: ReturnType<typeof setTimeout> | undefined;
     private _inspectorReloadPageIndex = 0;
@@ -446,16 +470,6 @@ export class EmbfPreviewPanel {
             type: "load",
             payload
         });
-
-        if (project.project.firmwarePath?.trim() || link.ok) {
-            if (this._symbolIndexTimer) {
-                clearTimeout(this._symbolIndexTimer);
-            }
-            this._symbolIndexTimer = setTimeout(() => {
-                this._symbolIndexTimer = undefined;
-                this.scheduleSymbolIndex(project, { force: symPeek.status === "idle" });
-            }, 300);
-        }
     }
 
     sendProject(project: EmbfProject, options?: SendProjectOptions): void {
@@ -468,19 +482,100 @@ export class EmbfPreviewPanel {
         }
     }
 
-    private scheduleSymbolIndex(project: EmbfProject, opts?: { force?: boolean }): void {
-        const wsFolders = workspaceFolderPaths();
-        void symbolDiscovery.indexProject(project, this._filePath, wsFolders, opts).then(state => {
+    private pushSymbolConnectionState(): void {
+        try {
+            const project = readEmbfProject(this._filePath);
+            const wsFolders = workspaceFolderPaths();
+            const state = symbolDiscovery.peekState(project, this._filePath, wsFolders);
             this.postToWebview({
                 type: "symbolIndexUpdate",
                 status: state.status,
-                summary: symbolIndexSummary(state),
-                symbolCount:
-                    state.graph !== undefined
-                        ? state.graph.symbols.length
-                        : undefined
+                summary: symbolIndexSummary(state)
             });
-        });
+        } catch {
+            /* ignore parse errors */
+        }
+    }
+
+    private async handleSearchSymbols(
+        requestId: string,
+        query: string,
+        limit: number,
+        kinds?: EmbfSymbolKind[]
+    ): Promise<void> {
+        if (!requestId) {
+            return;
+        }
+        try {
+            const project = readEmbfProject(this._filePath);
+            const wsFolders = workspaceFolderPaths();
+            const { nodes, state } = await symbolDiscovery.searchSymbols(
+                project,
+                this._filePath,
+                query,
+                wsFolders,
+                { limit, kinds }
+            );
+            this.postToWebview({
+                type: "symbolSearchResult",
+                requestId,
+                status: state.status,
+                summary: symbolIndexSummary(state),
+                message: state.message,
+                nodes: toWebviewSymbolNodes(nodes, false)
+            });
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            embeddedFlowLog("symbols", "error", `searchSymbols: ${msg}`);
+            this.postToWebview({
+                type: "symbolSearchResult",
+                requestId,
+                status: "error",
+                summary: msg,
+                message: msg,
+                nodes: []
+            });
+        }
+    }
+
+    private async handleGetSymbolMembers(
+        requestId: string,
+        name: string,
+        filePath: string | undefined,
+        line: number | undefined
+    ): Promise<void> {
+        if (!requestId || !name.trim()) {
+            return;
+        }
+        try {
+            const project = readEmbfProject(this._filePath);
+            const wsFolders = workspaceFolderPaths();
+            const { members, state } = await symbolDiscovery.getSymbolMembers(
+                project,
+                this._filePath,
+                { name: name.trim(), filePath, line },
+                wsFolders
+            );
+            this.postToWebview({
+                type: "symbolMembersResult",
+                requestId,
+                status: state.status,
+                summary: symbolIndexSummary(state),
+                message: state.message,
+                members: toWebviewSymbolNodes(members, false)
+            });
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            embeddedFlowLog("symbols", "error", `getSymbolMembers: ${msg}`);
+            this.postToWebview({
+                type: "symbolMembersResult",
+                requestId,
+                status: "error",
+                summary: msg,
+                message: msg,
+                members: []
+            });
+        }
     }
 
     sendError(message: string): void {
@@ -742,11 +837,32 @@ export class EmbfPreviewPanel {
         } else if (msg.type === "refreshSymbolIndex") {
             try {
                 const project = readEmbfProject(this._filePath);
-                void this.scheduleSymbolIndex(project, { force: true });
+                const wsFolders = workspaceFolderPaths();
+                void symbolDiscovery.restartClangd(project, this._filePath, wsFolders).then(() => {
+                    this.pushSymbolConnectionState();
+                });
             } catch (e) {
                 const m = e instanceof EmbfParseError ? e.message : String(e);
                 vscode.window.showErrorMessage(`EmbeddedFlow: ${m}`);
             }
+        } else if (msg.type === "searchSymbols") {
+            const requestId = String(msg.requestId ?? "").trim();
+            const query = String(msg.query ?? "");
+            const limit = Number(msg.limit);
+            void this.handleSearchSymbols(
+                requestId,
+                query,
+                Number.isFinite(limit) && limit > 0 ? Math.min(limit, 200) : 50,
+                parseSymbolKindFilter(msg.kinds)
+            );
+        } else if (msg.type === "getSymbolMembers") {
+            const requestId = String(msg.requestId ?? "").trim();
+            void this.handleGetSymbolMembers(
+                requestId,
+                String(msg.name ?? ""),
+                typeof msg.filePath === "string" ? msg.filePath : undefined,
+                typeof msg.line === "number" ? msg.line : undefined
+            );
         } else if (msg.type === "pickImageSource") {
             const pageIndex = Number(msg.pageIndex);
             const componentId = String(msg.componentId ?? "").trim();
@@ -2487,6 +2603,188 @@ export class EmbfPreviewPanel {
             opacity: 0.35;
             cursor: default;
         }
+        #inspector-form .symbol-search-results {
+            list-style: none;
+            margin: 0 0 8px;
+            padding: 0;
+            max-height: 160px;
+            overflow-y: auto;
+            border: 1px solid #2f2f2f;
+            border-radius: 3px;
+            background: #1a1a1a;
+        }
+        #inspector-form .symbol-search-results li {
+            padding: 4px 8px;
+            font-size: 11px;
+            border-bottom: 1px solid #2a2a2a;
+            cursor: default;
+            line-height: 1.35;
+        }
+        #inspector-form .symbol-search-results li:last-child {
+            border-bottom: none;
+        }
+        #inspector-form .symbol-search-results li .sym-kind {
+            color: #888;
+            font-size: 10px;
+            margin-right: 6px;
+        }
+        #inspector-form .symbol-search-results li .sym-detail {
+            color: #6a9fb5;
+            font-size: 10px;
+        }
+        #inspector-form code.sym-status-ready {
+            color: #7ec699;
+        }
+        #inspector-form code.sym-status-error,
+        #inspector-form code.sym-status-missing_clangd,
+        #inspector-form code.sym-status-missing_firmware {
+            color: #f48771;
+        }
+        #inspector-form code.sym-status-indexing {
+            color: #dcdcaa;
+        }
+        #inspector-form .symbol-search-intro {
+            font-size: 11px;
+            color: #888;
+            margin: 0 0 8px;
+            line-height: 1.4;
+        }
+        #inspector-form .symbol-search-filters {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 6px;
+        }
+        #inspector-form .symbol-search-filters input[type="search"] {
+            flex: 1;
+            min-width: 0;
+        }
+        #inspector-form .symbol-search-filters select {
+            flex: 0 0 auto;
+            max-width: 42%;
+        }
+        #inspector-form .symbol-search-footer {
+            font-size: 10px;
+            color: #888;
+            margin: 4px 0 8px;
+            line-height: 1.35;
+        }
+        #inspector-form .symbol-search-results li .sym-name {
+            font-family: var(--vscode-editor-font-family, Consolas, monospace);
+            font-size: 11px;
+        }
+        #inspector-form .symbol-search-results li .sym-file {
+            color: #666;
+            font-size: 10px;
+            margin-top: 2px;
+        }
+        #inspector-form .symbol-search-results li.sym-pickable {
+            cursor: pointer;
+        }
+        #inspector-form .symbol-search-results li.sym-pickable:hover {
+            background: rgba(255, 255, 255, 0.06);
+        }
+        #inspector-form .symbol-search-results .sym-pick-btn {
+            margin-left: 6px;
+            font-size: 10px;
+            padding: 1px 6px;
+        }
+        #inspector-form .c-bind-intro {
+            font-size: 11px;
+            color: #888;
+            margin: 0 0 8px;
+            line-height: 1.35;
+        }
+        #inspector-form .c-bind-row {
+            margin-bottom: 10px;
+        }
+        #inspector-form .c-bind-row label {
+            display: block;
+            margin-bottom: 4px;
+        }
+        #inspector-form .c-bind-current {
+            margin-bottom: 4px;
+        }
+        #inspector-form .c-bind-path {
+            font-size: 11px;
+            word-break: break-all;
+        }
+        #inspector-form .c-bind-none {
+            font-size: 11px;
+            color: #888;
+        }
+        #inspector-form .c-bind-actions {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+        .symbol-bind-picker {
+            position: fixed;
+            inset: 0;
+            z-index: 10000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .symbol-bind-picker[hidden] {
+            display: none !important;
+        }
+        .symbol-bind-picker-backdrop {
+            position: absolute;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.55);
+        }
+        .symbol-bind-picker-dialog {
+            position: relative;
+            width: min(520px, 92vw);
+            max-height: 80vh;
+            display: flex;
+            flex-direction: column;
+            background: var(--vscode-editor-background, #1e1e1e);
+            border: 1px solid var(--vscode-panel-border, #444);
+            border-radius: 6px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+        }
+        .symbol-bind-picker-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--vscode-panel-border, #444);
+        }
+        .symbol-bind-picker-header h3 {
+            margin: 0;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .symbol-bind-picker-body {
+            padding: 10px 12px 12px;
+            overflow: auto;
+        }
+        .symbol-bind-picker-filters {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .symbol-bind-picker-filters input,
+        .symbol-bind-picker-filters select {
+            width: 100%;
+            box-sizing: border-box;
+        }
+        #symbol-bind-picker-results {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            max-height: 50vh;
+            overflow: auto;
+            border: 1px solid var(--vscode-panel-border, #444);
+            border-radius: 4px;
+        }
+        #symbol-bind-picker-results li {
+            padding: 6px 8px;
+            border-bottom: 1px solid rgba(128, 128, 128, 0.2);
+            font-size: 11px;
+        }
         #inspector-form .check-row {
             display: flex;
             align-items: center;
@@ -3026,6 +3324,29 @@ export class EmbfPreviewPanel {
             </div>
         </aside>
     </div>
+    <div id="symbol-bind-picker" class="symbol-bind-picker" hidden>
+        <div class="symbol-bind-picker-backdrop"></div>
+        <div class="symbol-bind-picker-dialog" role="dialog" aria-modal="true" aria-labelledby="symbol-bind-picker-title">
+            <div class="symbol-bind-picker-header">
+                <h3 id="symbol-bind-picker-title">Bind Data</h3>
+                <button type="button" class="tb-btn-small" id="symbol-bind-picker-close" title="Close">✕</button>
+            </div>
+            <div class="symbol-bind-picker-body">
+                <div class="symbol-bind-picker-filters">
+                    <input type="search" id="symbol-bind-picker-query" autocomplete="off" spellcheck="false" placeholder="Search C symbols…" />
+                    <select id="symbol-bind-picker-kind" title="Filter by kind">
+                        <option value="">All kinds</option>
+                        <option value="function">Functions</option>
+                        <option value="variable">Globals</option>
+                        <option value="field">Fields</option>
+                        <option value="struct">Structs</option>
+                        <option value="enum">Enums</option>
+                    </select>
+                </div>
+                <ul id="symbol-bind-picker-results" class="symbol-search-results" aria-live="polite"></ul>
+            </div>
+        </div>
+    </div>
     <script nonce="${nonce}" src="${webviewJsUri}"></script>
 </body>
 </html>`;
@@ -3033,10 +3354,6 @@ export class EmbfPreviewPanel {
 
     dispose(): void {
         this.clearInspectorReloadDebounce();
-        if (this._symbolIndexTimer) {
-            clearTimeout(this._symbolIndexTimer);
-            this._symbolIndexTimer = undefined;
-        }
         EmbfPreviewPanel._panels.delete(this._filePath);
         if (EmbfPreviewPanel._lastActiveEmbfPath === this._filePath) {
             const remaining = EmbfPreviewPanel.getOpenEmbfPaths();
@@ -3056,6 +3373,26 @@ function workspaceCodegenOutputSetting(): string {
 
 function workspaceFolderPaths(): string[] {
     return (vscode.workspace.workspaceFolders ?? []).map(f => f.uri.fsPath);
+}
+
+const VALID_SYMBOL_KINDS = new Set<EmbfSymbolKind>([
+    "function",
+    "variable",
+    "struct",
+    "field",
+    "enum",
+    "typedef",
+    "other"
+]);
+
+function parseSymbolKindFilter(raw: unknown): EmbfSymbolKind[] | undefined {
+    if (!Array.isArray(raw) || raw.length === 0) {
+        return undefined;
+    }
+    const kinds = raw
+        .map(k => String(k).trim())
+        .filter((k): k is EmbfSymbolKind => VALID_SYMBOL_KINDS.has(k as EmbfSymbolKind));
+    return kinds.length ? kinds : undefined;
 }
 
 function getNonce(): string {

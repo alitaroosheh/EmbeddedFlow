@@ -100,7 +100,7 @@
       },
       {
         "command": "embeddedflow.refreshSymbolIndex",
-        "title": "embeddedflow: Refresh Symbol Index",
+        "title": "embeddedflow: Reconnect Clangd",
         "icon": "$(symbol-class)"
       },
       {

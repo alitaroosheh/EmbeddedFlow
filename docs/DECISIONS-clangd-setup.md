@@ -1,6 +1,6 @@
 # Decision — Optional requirements wizard (clangd)
 
-**Status:** Decided  
+**Status:** Decided — **M1.5 wizard implemented** (command `embeddedflow.installRequirements`)  
 **Date:** 2026-06-04  
 **Context:** Phase 2 symbol discovery needs a C language engine. Requiring users to install `clangd` manually is poor UX.
 
@@ -93,8 +93,8 @@ After setup, do **not** silently prefer a random system clangd over the managed 
 
 | Command | Purpose |
 |---------|---------|
-| `embeddedflow.installRequirements` | Run optional setup wizard |
-| `embeddedflow.refreshSymbolIndex` | Uses managed or configured clangd (implemented in M1) |
+| `embeddedflow.installRequirements` | Run optional setup wizard ✅ |
+| `embeddedflow.refreshSymbolIndex` | Uses managed or configured clangd (M1) |
 
 ---
 

@@ -41,7 +41,7 @@ When a developer adds a property without specifying direction:
 
 ✔ **Decision (2026-06-04):** Do **not** require users to install clangd manually. Provide an **optional setup wizard** (ESP-IDF–style) that downloads and caches official clangd when the user chooses. Preview and codegen work without it; symbol/binding features use managed clangd after setup. User must be **informed and consent** before download. Full spec: **[DECISIONS-clangd-setup.md](./DECISIONS-clangd-setup.md)**.
 
-**Status:** Decided — implementation planned (post–M1).
+**Status:** Decided — implemented (`embeddedflow.installRequirements`, M1.5).
 
 ### Q4 — Binding transforms design
 

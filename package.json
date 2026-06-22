@@ -39,6 +39,7 @@
     "onCommand:embeddedflow.addFont",
     "onCommand:embeddedflow.openStringResources",
     "onCommand:embeddedflow.refreshSymbolIndex",
+    "onCommand:embeddedflow.installRequirements",
     "onCustomEditor:embeddedflow.stringsRes"
   ],
   "main": "./out/extension.js",
@@ -101,6 +102,11 @@
         "command": "embeddedflow.refreshSymbolIndex",
         "title": "embeddedflow: Refresh Symbol Index",
         "icon": "$(symbol-class)"
+      },
+      {
+        "command": "embeddedflow.installRequirements",
+        "title": "embeddedflow: Install Requirements",
+        "icon": "$(cloud-download)"
       }
     ],
     "customEditors": [
@@ -137,6 +143,9 @@
         },
         {
           "command": "embeddedflow.refreshSymbolIndex"
+        },
+        {
+          "command": "embeddedflow.installRequirements"
         }
       ],
       "editor/title": [
@@ -231,7 +240,17 @@
         "embeddedflow.clangdPath": {
           "type": "string",
           "default": "clangd",
-          "description": "Path to the clangd executable used for firmware symbol discovery (Phase 2). Must be on PATH or an absolute path."
+          "description": "Path to clangd for firmware symbol discovery. Set explicitly to override EmbeddedFlow-managed clangd."
+        },
+        "embeddedflow.clangd.preferManaged": {
+          "type": "boolean",
+          "default": true,
+          "description": "When true, use clangd installed by EmbeddedFlow: Install requirements before system PATH."
+        },
+        "embeddedflow.clangd.useSystem": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, fall back to clangd on PATH if managed clangd is not installed."
         }
       }
     }

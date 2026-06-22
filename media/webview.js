@@ -572,6 +572,10 @@ async function handleLoad(payload, generation = loadGeneration) {
     if (generation !== loadGeneration) {
         return;
     }
+    if (!payload?.project) {
+        showError("Preview load payload is missing project data.");
+        return;
+    }
     currentProject = payload.project;
     if (payload.stringsRes && typeof payload.stringsRes === "object") {
         currentStringsRes = payload.stringsRes;
@@ -630,7 +634,11 @@ async function handleLoad(payload, generation = loadGeneration) {
     applyPreviewLayout();
 
     // Populate page selector and stay on the current page when possible
-    const pages = payload.project.pages;
+    const pages = Array.isArray(payload.project.pages) ? payload.project.pages : [];
+    if (!pages.length) {
+        showError("Project has no pages — check the .embf file parses correctly.");
+        return;
+    }
     const wasFlowTabActive = isWorkspaceFlowActive();
     const preservedFlowPageIndex = _fgSelectedPageIndex;
     const requestedPage =

@@ -106,11 +106,15 @@ export function buildImagePreviewAssets(
             continue;
         }
         seen.add(entry.id);
-        out.push({
-            id: entry.id,
-            path: entry.path,
-            uri: options.toWebviewUri(abs)
-        });
+        try {
+            out.push({
+                id: entry.id,
+                path: entry.path,
+                uri: options.toWebviewUri(abs)
+            });
+        } catch {
+            /* Path may be outside webview localResourceRoots — skip overlay. */
+        }
     }
 
     return out;

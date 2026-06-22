@@ -34,6 +34,7 @@ import {
     symbolIndexSummary
 } from "./symbolDiscovery";
 import { updatePageInEmbfFile } from "./embfComponentEdit";
+import { offerRequirementsWizardIfNeeded, runInstallRequirementsWizard } from "./installRequirements";
 
 // Map from .embf file path → file watcher
 const watchers = new Map<string, fs.FSWatcher>();
@@ -46,6 +47,9 @@ const liveGenDebounceMs = 600;
 const liveGenTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const previewRefreshDebounceMs = 400;
 const previewRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+/** Set in activate(); used for install wizard + symbol refresh. */
+let extensionContext: vscode.ExtensionContext | undefined;
 
 /** Set in activate(); refreshed before each codegen run (font bundle path). */
 let extensionInstallPath: string | undefined;
@@ -119,18 +123,25 @@ export function activate(context: vscode.ExtensionContext): void {
         }),
         vscode.commands.registerCommand("embeddedflow.refreshSymbolIndex", async (uri?: vscode.Uri) => {
             await runRefreshSymbolIndex(uri);
+        }),
+        vscode.commands.registerCommand("embeddedflow.installRequirements", async () => {
+            if (extensionContext) {
+                await runInstallRequirementsWizard(extensionContext);
+            }
         })
     );
 
-    symbolDiscovery.setClangdPath(
-        vscode.workspace.getConfiguration("embeddedflow").get<string>("clangdPath")
-    );
+    extensionContext = context;
+    symbolDiscovery.setGlobalStoragePath(context.globalStorageUri.fsPath);
+    symbolDiscovery.refreshClangdResolution();
     context.subscriptions.push(
         vscode.workspace.onDidChangeConfiguration(ev => {
-            if (ev.affectsConfiguration("embeddedflow.clangdPath")) {
-                symbolDiscovery.setClangdPath(
-                    vscode.workspace.getConfiguration("embeddedflow").get<string>("clangdPath")
-                );
+            if (
+                ev.affectsConfiguration("embeddedflow.clangdPath") ||
+                ev.affectsConfiguration("embeddedflow.clangd.useSystem") ||
+                ev.affectsConfiguration("embeddedflow.clangd.preferManaged")
+            ) {
+                symbolDiscovery.refreshClangdResolution();
             }
         })
     );
@@ -461,6 +472,15 @@ async function runRefreshSymbolIndex(uri?: vscode.Uri): Promise<void> {
     }
 
     const wsFolders = (vscode.workspace.workspaceFolders ?? []).map(f => f.uri.fsPath);
+
+    symbolDiscovery.refreshClangdResolution();
+    if (extensionContext) {
+        const peek = symbolDiscovery.peekState(project, filePath, wsFolders);
+        if (peek.status === "missing_clangd") {
+            await offerRequirementsWizardIfNeeded(extensionContext);
+            symbolDiscovery.refreshClangdResolution();
+        }
+    }
 
     if (!project.project.firmwarePath?.trim()) {
         const fromWs = findFirmwareRootFromWorkspace(wsFolders);

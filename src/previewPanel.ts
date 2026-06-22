@@ -218,8 +218,10 @@ export class EmbfPreviewPanel {
     private _disposables: vscode.Disposable[] = [];
     /** False until the webview script posts `{ type: "ready" }`. */
     private _webviewReady = false;
-    /** Last load/error held until the webview is ready (avoids lost `postMessage`). */
-    private _pendingMessage: HostToWebviewMessage | null = null;
+    /** Messages queued until the webview is ready (avoids lost `postMessage`). */
+    private _pendingMessages: HostToWebviewMessage[] = [];
+    /** Defer symbol indexing until after the first preview paint. */
+    private _symbolIndexTimer: ReturnType<typeof setTimeout> | undefined;
     /** Coalesce inspector property writes → one preview refresh instead of hammering WASM rebuild per patch. */
     private _inspectorReloadTimer: ReturnType<typeof setTimeout> | undefined;
     private _inspectorReloadPageIndex = 0;
@@ -340,20 +342,29 @@ export class EmbfPreviewPanel {
     private postToWebview(msg: HostToWebviewMessage): void {
         if (this._webviewReady) {
             void this._panel.webview.postMessage(msg);
-        } else {
-            this._pendingMessage = msg;
+            return;
         }
+        if (msg.type === "load") {
+            this._pendingMessages = this._pendingMessages.filter(m => m.type !== "load");
+        }
+        this._pendingMessages.push(msg);
     }
 
-    sendProject(project: EmbfProject, options?: SendProjectOptions): void {
-        /** Any externally pushed project supersedes a pending inspector debounced refresh. */
+    private flushPendingWebviewMessages(): boolean {
+        const pending = this._pendingMessages;
+        this._pendingMessages = [];
+        for (const msg of pending) {
+            void this._panel.webview.postMessage(msg);
+        }
+        return pending.some(m => m.type === "load");
+    }
+
+    private pushProjectToWebview(project: EmbfProject, options?: SendProjectOptions): void {
         this.clearInspectorReloadDebounce();
 
         const { width, height } = getEffectiveDisplaySize(project);
 
-        // Always use the custom embf_runtime (supports LVGL 9.5.0).
-        // When multi-version WASM builds are available, switch here.
-        const wasmJsUri  = this._webviewUri("wasm", "embf_runtime.js").toString();
+        const wasmJsUri = this._webviewUri("wasm", "embf_runtime.js").toString();
         const wasmBinUri = this._webviewUri("wasm", "embf_runtime.wasm").toString();
 
         const pageIndex = options?.pageIndex;
@@ -379,6 +390,7 @@ export class EmbfPreviewPanel {
         if (suppressLoadingSpinner) {
             payload.suppressLoadingSpinner = true;
         }
+
         payload.codegenOutputResolved = resolveCodegenOutputDir(
             project,
             this._filePath,
@@ -394,13 +406,21 @@ export class EmbfPreviewPanel {
         payload.symbolIndexStatus = symPeek.status;
         payload.symbolIndexSummary = symbolIndexSummary(symPeek);
 
-        const imageAssets = buildImagePreviewAssets(project, this._filePath, {
-            workspaceOutputDirectory: workspaceCodegenOutputSetting(),
-            extraSearchRoots: (vscode.workspace.workspaceFolders ?? []).map(f => f.uri.fsPath),
-            toWebviewUri: abs =>
-                this._panel.webview.asWebviewUri(vscode.Uri.file(abs)).toString()
-        });
-        payload.imageAssets = imageAssets;
+        try {
+            payload.imageAssets = buildImagePreviewAssets(project, this._filePath, {
+                workspaceOutputDirectory: workspaceCodegenOutputSetting(),
+                extraSearchRoots: (vscode.workspace.workspaceFolders ?? []).map(f => f.uri.fsPath),
+                toWebviewUri: abs =>
+                    this._panel.webview.asWebviewUri(vscode.Uri.file(abs)).toString()
+            });
+        } catch (e) {
+            embeddedFlowLog(
+                "preview",
+                "warn",
+                `image preview assets skipped: ${e instanceof Error ? e.message : String(e)}`
+            );
+            payload.imageAssets = [];
+        }
 
         payload.stringsResRelPath = getStringsResRelPath(project);
         try {
@@ -428,7 +448,23 @@ export class EmbfPreviewPanel {
         });
 
         if (project.project.firmwarePath?.trim() || link.ok) {
-            void this.scheduleSymbolIndex(project, { force: symPeek.status === "idle" });
+            if (this._symbolIndexTimer) {
+                clearTimeout(this._symbolIndexTimer);
+            }
+            this._symbolIndexTimer = setTimeout(() => {
+                this._symbolIndexTimer = undefined;
+                this.scheduleSymbolIndex(project, { force: symPeek.status === "idle" });
+            }, 300);
+        }
+    }
+
+    sendProject(project: EmbfProject, options?: SendProjectOptions): void {
+        try {
+            this.pushProjectToWebview(project, options);
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            embeddedFlowLog("preview", "error", `sendProject failed: ${msg}`);
+            this.sendError(msg);
         }
     }
 
@@ -507,10 +543,15 @@ export class EmbfPreviewPanel {
         } else if (msg.type === "ready") {
             embeddedFlowLog("webview", "info", "preview webview ready");
             this._webviewReady = true;
-            if (this._pendingMessage) {
-                const pending = this._pendingMessage;
-                this._pendingMessage = null;
-                void this._panel.webview.postMessage(pending);
+            const hadLoad = this.flushPendingWebviewMessages();
+            if (!hadLoad) {
+                try {
+                    this.pushProjectToWebview(readEmbfProject(this._filePath));
+                } catch (e) {
+                    const m = e instanceof EmbfParseError ? e.message : String(e);
+                    this.sendError(m);
+                    embeddedFlowLog("preview", "warn", `ready resend: ${m}`);
+                }
             }
             this.sendHistoryState();
         } else if (msg.type === "undo") {
@@ -2992,13 +3033,17 @@ export class EmbfPreviewPanel {
 
     dispose(): void {
         this.clearInspectorReloadDebounce();
+        if (this._symbolIndexTimer) {
+            clearTimeout(this._symbolIndexTimer);
+            this._symbolIndexTimer = undefined;
+        }
         EmbfPreviewPanel._panels.delete(this._filePath);
         if (EmbfPreviewPanel._lastActiveEmbfPath === this._filePath) {
             const remaining = EmbfPreviewPanel.getOpenEmbfPaths();
             EmbfPreviewPanel._lastActiveEmbfPath = remaining[0];
         }
         this._webviewReady = false;
-        this._pendingMessage = null;
+        this._pendingMessages = [];
         this._panel.dispose();
         this._disposables.forEach(d => d.dispose());
         this._disposables = [];

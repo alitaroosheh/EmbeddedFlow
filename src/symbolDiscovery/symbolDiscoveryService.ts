@@ -3,7 +3,8 @@ import * as path from "path";
 import type { EmbfProject } from "../types/embf";
 import { embeddedFlowLog } from "../outputLog";
 import { listIndexSourceFiles } from "./compileCommandsIndex";
-import { ClangdSession, resolveClangdExecutable } from "./clangdSession";
+import { ClangdSession } from "./clangdSession";
+import { resolveClangdPath } from "./clangdBootstrap";
 import {
     compileCommandsMtime,
     linkFirmwareProject,
@@ -32,9 +33,24 @@ export class SymbolDiscoveryService {
     private readonly watchers = new Map<string, fs.FSWatcher>();
     private readonly inflight = new Map<string, Promise<SymbolIndexState>>();
     private clangdPath: string | undefined;
+    private globalStoragePath: string | undefined;
+    private configuredClangdOverride: string | undefined;
+
+    setGlobalStoragePath(globalStoragePath: string): void {
+        this.globalStoragePath = globalStoragePath;
+        this.refreshClangdResolution();
+    }
 
     setClangdPath(configuredPath?: string): void {
-        this.clangdPath = resolveClangdExecutable(configuredPath);
+        this.configuredClangdOverride = configuredPath;
+        this.refreshClangdResolution();
+    }
+
+    refreshClangdResolution(): void {
+        this.clangdPath = resolveClangdPath({
+            globalStoragePath: this.globalStoragePath,
+            configuredPath: this.configuredClangdOverride
+        });
     }
 
     dispose(): void {
@@ -103,14 +119,14 @@ export class SymbolDiscoveryService {
         }
 
         if (!this.clangdPath) {
-            this.clangdPath = resolveClangdExecutable();
+            this.refreshClangdResolution();
         }
         if (!this.clangdPath) {
             return {
                 status: "missing_clangd",
                 message:
-                    "clangd was not found on PATH. Install LLVM/clangd and ensure `clangd --version` works, " +
-                    "or set embeddedflow.clangdPath in VS Code settings."
+                    "clangd is not available. Run **EmbeddedFlow: Install requirements** to download it, " +
+                    "or set embeddedflow.clangdPath / embeddedflow.clangd.useSystem in settings."
             };
         }
 

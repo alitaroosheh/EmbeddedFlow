@@ -7,6 +7,23 @@ interface CompileCommandEntry {
     file?: string;
 }
 
+/** True when `filePath` is under `root` (case-insensitive on Windows — ESP-IDF paths often differ in drive letter casing). */
+function isPathWithinRoot(filePath: string, root: string): boolean {
+    const f = path.normalize(filePath);
+    const r = path.normalize(root);
+    if (!r) {
+        return false;
+    }
+    const rootPrefix = r.endsWith(path.sep) ? r : r + path.sep;
+    const winLike = process.platform === "win32" || /^[A-Za-z]:[\\/]/.test(f);
+    if (winLike) {
+        const fl = f.toLowerCase();
+        const rl = r.toLowerCase();
+        return fl === rl || fl.startsWith(rootPrefix.toLowerCase());
+    }
+    return f === r || f.startsWith(rootPrefix);
+}
+
 /**
  * List source files from compile_commands.json for symbol indexing.
  * Prefers files under `<firmwareRoot>/main/` then other project sources; skips IDF tree paths when possible.
@@ -28,7 +45,7 @@ export function listIndexSourceFiles(
         return [];
     }
 
-    const mainDir = path.join(root, "main") + path.sep;
+    const mainDir = path.join(root, "main");
     const mainFiles: string[] = [];
     const projectFiles: string[] = [];
     const seen = new Set<string>();
@@ -42,18 +59,15 @@ export function listIndexSourceFiles(
         if (seen.has(filePath)) {
             continue;
         }
-        if (!fs.existsSync(filePath)) {
-            continue;
-        }
         const ext = path.extname(filePath).toLowerCase();
         if (!SOURCE_EXT.has(ext)) {
             continue;
         }
-        if (!filePath.startsWith(root)) {
+        if (!isPathWithinRoot(filePath, root)) {
             continue;
         }
         seen.add(filePath);
-        if (filePath.startsWith(mainDir)) {
+        if (isPathWithinRoot(filePath, mainDir)) {
             mainFiles.push(filePath);
         } else {
             projectFiles.push(filePath);

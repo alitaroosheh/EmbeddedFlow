@@ -106,6 +106,24 @@ describe("compileCommandsIndex", () => {
         expect(files).toContain(path.normalize(otherC));
         fs.rmSync(dir, { recursive: true, force: true });
     });
+
+    it("listIndexSourceFiles matches when firmware root drive letter casing differs", () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), "embf-cc-case-"));
+        const mainDir = path.join(dir, "main");
+        fs.mkdirSync(mainDir);
+        const mainC = path.join(mainDir, "app.c");
+        fs.writeFileSync(mainC, "int x;\n");
+        const ccPath = path.join(dir, "build", "compile_commands.json");
+        fs.mkdirSync(path.dirname(ccPath), { recursive: true });
+        // Simulate compile_commands using uppercase drive vs lowercase firmwarePath in .embf
+        const fileInCc = mainC.replace(/^([a-z]):/i, (_m, d) => `${String(d).toUpperCase()}:`);
+        const rootInEmbf = dir.replace(/^([A-Z]):/, (_m, d) => `${String(d).toLowerCase()}:`);
+        fs.writeFileSync(ccPath, JSON.stringify([{ file: fileInCc }]));
+        const files = listIndexSourceFiles(ccPath, rootInEmbf);
+        expect(files.length).toBeGreaterThan(0);
+        expect(files[0].toLowerCase()).toBe(path.normalize(mainC).toLowerCase());
+        fs.rmSync(dir, { recursive: true, force: true });
+    });
 });
 
 describe("symbolGraph", () => {
